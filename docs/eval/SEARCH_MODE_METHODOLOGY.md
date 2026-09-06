@@ -28,7 +28,7 @@ No private brain content is used in any reported result. The NDJSON run records 
 - **Random seed:** `42` throughout. Set via `--seed N` on `gbrain eval run-all`; recorded in every per-run record.
 - **No per-question curation.** Splits are taken whole; no question is filtered for reporting.
 - **No mode-specific tuning.** The same dataset + same seed feeds every mode. The mode bundle is the only independent variable. A mode Δ therefore measures the joint effect of every knob the bundles differ on — today that's `tokenBudget`, `expansion`, `relationalRetrieval` (the typed-edge fourth recall arm, ON for balanced/tokenmax, OFF for conservative), and `searchLimit`; the canonical diff is `MODE_BUNDLES` in `src/core/search/mode.ts`.
-- **Cache comparability across upgrades.** The query cache keys on a versioned knobs hash (`KNOBS_HASH_VERSION` in `mode.ts`) that folds in the active knob set + embedding column/provider, so one mode's cached results can't be served to another mode's queries — and a version bump makes prior rows unreachable (one-time miss spike). Cross-run comparisons that straddle a knobs-hash bump see a cold cache on the first re-run.
+- **Cache comparability across upgrades.** Semantic result-cache reads and writes are temporarily disabled in every mode, regardless of configuration. Every query uses fresh retrieval. The retained storage machinery still keys rows on `KNOBS_HASH_VERSION` and the active knobs + embedding column/provider; historical runs with result caching enabled are not directly comparable to current runs for latency or provider spend.
 - **Stability across re-runs:** with `--seed 42` and the same dataset SHA, two runs of the same (mode, suite) produce identical retrieval orderings (modulo the optional Haiku expansion call, which is non-deterministic). Persisted in `eval_results` so anyone can re-score from a run's `--output` dumps.
 
 ## 4. Run procedure
@@ -65,7 +65,7 @@ Honest list. We name what would let a critic dismiss the numbers.
 - **char/4 token heuristic.** Token-budget enforcement and cost estimates use a character-count / 4 heuristic. Accurate within ~5-10% for English with the OpenAI tiktoken family; off worse for Voyage (we don't use Voyage in chat retrieval, so it doesn't bias the reported numbers, but if you do, your budget caps will be approximate).
 - **Expansion's quality lift varies by query distribution.** On LongMemEval-S (cleaned September 2025 revision, 470 scored, k=5, measured 2026-09-02 at gbrain v0.48.2.0 via the gbrain-evals runner) LLM multi-query expansion measures 54.89% `recall_all@5` against 93.19% without it, so expansion is off in `conservative`/`balanced`; the lift on rarer-entity / longer-tail queries is unmeasured here. We report the corpus we measured; YMMV.
 - **Paired bootstrap assumes question-level independence.** Multi-hop questions within the same conversation thread aren't independent; the bootstrap CI is slightly tighter than reality.
-- **Single brain instance per benchmark.** The benchmark spins up an in-memory PGLite per question. Cache hit rate measured here doesn't reflect a long-running production brain's cache state.
+- **Single brain instance per benchmark.** The benchmark spins up an in-memory PGLite per question. This does not reproduce a long-running production brain's state; current semantic result-cache hit rates are zero because result reuse is disabled.
 
 ## 6. Per-question raw outputs
 
@@ -152,10 +152,10 @@ The mode-picker prompt at `gbrain init` and the CLAUDE.md `## Search Mode` table
 
 **gbrain's own cost** on top:
 - Query embedding (text-embedding-3-large @ \$0.13/M tokens): ~\$0.00001 per query. Negligible at every scale.
-- Tokenmax Haiku expansion call (\$1/M input, \$5/M output, ~500 input + 200 output per call): ~\$0.0015 per query, or \$150/mo at 100K queries. Cache hits cut this in half.
+- Tokenmax Haiku expansion call (\$1/M input, \$5/M output, ~500 input + 200 output per call): ~\$0.0015 per query, or \$150/mo at 100K queries. Repeated queries still run expansion while semantic result caching is disabled.
 - Per-page indexing (one-time): bounded by your import volume, not query volume. Not modeled here.
 
-**Cache hit adjustment.** A warmed brain typically sees 30-50% cache hits on repeat-query traffic. Cache hits skip the downstream input cost entirely (the cached result was already in the agent's context once). So real-world costs run ~50-70% of the table above on a busy brain.
+**Cache hit adjustment.** Apply no semantic result-cache discount to these estimates while result caching is disabled. Downstream prompt caching can independently reduce cached-input charges, but it does not skip GBrain retrieval. The prompt-cache assumptions in the agent-loop example below describe that separate mechanism.
 
 **Why these numbers DRIFT from your actual bill:**
 - Your agent's system prompt + reasoning tokens add input that gbrain doesn't see.

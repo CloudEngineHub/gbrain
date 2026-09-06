@@ -232,15 +232,16 @@ Mismatches (tokenmax+Haiku, conservative+Opus) waste capacity differently
 expensive one.
 
 tokenmax adds ~\$1.50 per 1K queries in Haiku expansion calls on top of
-the matrix (\$15/mo @ 10K). Cache hits cut all numbers ~50%. **The matrix
+the matrix (\$15/mo @ 10K). Semantic result caching is temporarily disabled; budget for fresh retrieval on every query. **The matrix
 has three verbatim homes: this section, the `gbrain init` picker copy
 (`src/commands/init-mode-picker.ts`), and `INSTALL_FOR_AGENTS.md` Step
 3.5** — update all three when refreshing.
 
 **Per-query math vs real-world spend.** The matrix above is what an
 isolated benchmark would measure. Real agent loops with disciplined
-Anthropic prompt caching see 50-80% discount on top (cache hits skip
-downstream entirely). The realistic-scale anchor in
+Anthropic prompt caching see 50-80% discount on top through lower
+cached-input charges. This is separate from GBrain's disabled semantic result
+cache. The realistic-scale anchor in
 `docs/eval/SEARCH_MODE_METHODOLOGY.md` walks the natural pairings at
 single-power-user volume (~860 turns/mo): tokenmax+Opus ~\$700/mo,
 balanced+Sonnet ~\$430/mo, conservative+Haiku ~\$170/mo. Setups WITHOUT
@@ -257,6 +258,8 @@ Mode resolution lives in **bare `hybridSearch`** (NOT just the cached wrapper)
 per `[CDX-5+6]` in `~/.claude/plans/lets-take-a-look-validated-parrot.md` — so
 `gbrain eval replay` and `gbrain eval longmemeval` test the same mode-affected
 behavior as the production `query` op.
+
+**Effective cache availability:** semantic result lookup and writes are temporarily disabled in the shared wrapper, regardless of mode, config, or `use_cache`. Stored rows and maintenance commands remain. `cache.status`, cache statistics and the mode dashboard report disabled. The following cache-key notes describe retained storage machinery, not active response reuse.
 
 **Cache-key contamination hotfix `[CDX-4]`:** migration v56 added a
 `knobs_hash` column to `query_cache`. The lookup filter is now

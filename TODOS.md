@@ -1495,11 +1495,10 @@ deferred M-effort issues above are NOT repeated here.
 
 - [ ] **P1 — Graduate the diff-coverage gate to blocking (time-boxed 2 weeks from merge).**
   **What:** flip `COVERAGE_GATE_ENFORCE` to `'1'` in test.yml's coverage-report job, add
-  coverage-report to test-status's required-success set and cache-write's needs, and replace
+  coverage-report to test-status's required-success set, and replace
   the provisional `scripts/coverage-baseline.json` corpus sections with CI-derived values via
   `scripts/update-coverage-baseline.ts --promote`. **Criteria:** 10 consecutive green
-  coverage-report runs on PRs (master runs are structurally cache-skipped — a squash-merged
-  tree equals its green PR tree, so the ci-pass marker hits; never count master runs) plus 3
+  coverage-report runs on PRs (count PR receipts, not master runs) plus 3
   green nightly fullCorpus merges and zero merge-infrastructure failures. **Why:** the 80%
   diff gate is built and reporting on every PR; blocking is a one-line flip once the
   measurement machinery has receipts. Review `scripts/coverage-gate-exemptions.txt` against
@@ -8526,33 +8525,27 @@ covers DEAD logs; go-forward capture beyond Claude Code is deliberately absent.
   read leaks on its first runs; the write side has had zero equivalent
   sweep pressure. Effort: M. Depends on: nothing (read-side sweep already
   landed as the pattern to copy).
-- [ ] **P2 — source-scope + row-grain hardening for the salience/anomaly/expert
-  arms.** Four classes surfaced by the read-side sweep's review and deferred
-  from the leak PR because each is a family-wide semantics change: (a)
-  `get_recent_salience`/`find_anomalies` never thread `sourceScopeOpts(ctx)`
-  into the engine reads (pre-existing v0.34.1 source-isolation class — a
-  source-bound remote client sees every source's world rows); (b) the whole
-  `findPrivateOnlySlugs` family is slug-grain, so a slug world-in-source-A /
-  private-in-source-B serves the PRIVATE row's own title through row-grain
-  arms (rows carry source_id — a composite-key filter fixes it, but must land
-  family-wide or semantics diverge across ops); (c) the private post-filters
-  run AFTER the engine's LIMIT, so remote callers can get fewer than `limit`
-  rows while world rows exist below the cutoff (push the
-  `privatePagesFilterFragment` predicate into the engine reads, or over-fetch);
-  (d) the two unscoped private-visibility probes are slug-only queries
-  with no slug-leading index (`pages_source_slug_key` leads on source_id) —
-  add a `pages(slug)` btree index when (a)-(c) land; (e) `find_anomalies`
-  baselines (`baseline_mean`/`baseline_stddev`) are computed private-inclusive
-  in both engines, so a mixed cohort's baseline discloses aggregate private
-  activity volume AND a genuinely-anomalous world spike can be suppressed when
-  concurrent private activity inflated the baseline — world-only cohort
-  aggregation belongs in the same engine pass as (a). Effort: M-L. Depends on:
-  nothing, but coordinate with the P3 chokepoint below rather than duplicating.
+- [x] **P2 — source-scope + row-grain hardening for salience/anomaly/experts** — completed v0.48.3.0.
+  Corrective-release implementation uses the shared concrete-page SQL policy
+  before ranking, limits and baseline aggregation, with final expert admission.
+  Slug-only authorization is removed from these data-bearing reads; existing
+  source/ID indexes support batched queries, so no migration is needed.
+- [ ] **P1 — restore semantic results and remote contradiction reports only with
+  complete provenance.** Response dependencies must include metadata, holder
+  policy, query context and judgment-cache inputs/keys. Current containment
+  bypasses semantic result lookup/write and restricts stored reports to trusted
+  unscoped local reads. Pair-only validation is insufficient. Own reviewed plan.
+- [ ] **P1 — restore remote code inspection and structural expansion with full
+  read-policy enforcement.** Authorize concrete source/page/chunk rows and every
+  recursive contributor, including traversal-cache dependencies, before
+  restoring remote definition/reference/caller/callee/flow/blast operations and
+  optional search expansion. The v0.48.3.0 restriction preserves trusted local
+  commands. Own reviewed plan; no source-grant or chunk-rebuild override.
 - [ ] **P3 — runtime chokepoint for world-only filtering.** Privacy is
-  enforced per-arm/per-column at N call sites (get_page/fetch strip, delta
-  page arm, find_orphans/get_recent_salience/find_anomalies post-filters,
-  context_pack/delta include_private gating); each new remote surface leaks
-  until someone notices — the class has now recurred five times. Move the
+  enforced through shared body sanitizers and SQL read policy, but each read
+  path must still thread its caller policy (including analytics and
+  context_pack/delta include_private gating). New surfaces can omit that
+  policy. Move the
   world-only filter to a single dispatch-layer interceptor (or an
   engine-level read-scope wrapper) so new ops are world-only BY DEFAULT.
   High blast radius: touches every read op; do NOT attempt until both
