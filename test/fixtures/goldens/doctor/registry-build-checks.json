@@ -699,6 +699,10 @@
       },
       {
         "category": "brain",
+        "name": "trust_scan"
+      },
+      {
+        "category": "brain",
         "name": "core_memory"
       },
       {

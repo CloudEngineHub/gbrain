@@ -21,6 +21,8 @@ import { quarantineFilterFragment } from '../quarantine.ts';
 import { unverifiedExtractionFragment } from '../extraction-review.ts';
 import { privatePagesFilterFragment } from './private-visibility.ts';
 import { currentTextProjectionFilter, requiresSafeChunks, safeChunksFilter } from './safe-chunks.ts';
+import { pageEligibleSql } from '../eligibility/sql.ts';
+import type { TrustTier } from '../trust/tier.ts';
 
 /**
  * Escape `%`, `_`, and `\` so a string can be used as a LIKE prefix literal.
@@ -186,6 +188,9 @@ export function buildVisibilityClause(
      */
     excludePrivate?: boolean;
     requireSafeChunks?: boolean;
+    /** #5575: the read floor and proactive activation control (eligibility/sql.ts), applied before LIMIT. */
+    minTrust?: TrustTier;
+    suppressFlagged?: boolean;
   },
 ): string {
   // Single source of truth for the quarantine SQL lives in quarantine.ts so
@@ -197,7 +202,9 @@ export function buildVisibilityClause(
     ? ` AND ${privatePagesFilterFragment(pageAlias)}`
     : '';
   const chunksClause = requiresSafeChunks(opts) ? ` AND ${safeChunksFilter(pageAlias)}` : '';
-  return `AND ${pageAlias}.deleted_at IS NULL AND ${currentTextProjectionFilter(pageAlias)} AND NOT ${sourceAlias}.archived AND ${quarantine}${privateClause}${chunksClause}`;
+  const trustClause = opts?.minTrust || opts?.suppressFlagged
+    ? ` AND ${pageEligibleSql(pageAlias, { floor: opts.minTrust, suppressFlagged: opts.suppressFlagged })}` : '';
+  return `AND ${pageAlias}.deleted_at IS NULL AND ${currentTextProjectionFilter(pageAlias)} AND NOT ${sourceAlias}.archived AND ${quarantine}${privateClause}${chunksClause}${trustClause}`;
 }
 
 // ============================================================

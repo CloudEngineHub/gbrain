@@ -1837,6 +1837,23 @@
         {
           "category": "brain",
           "details": {
+            "completed_at": null,
+            "detector_version": 1,
+            "total_unscanned": 0,
+            "unscanned": {
+              "facts": 0,
+              "pages": 0,
+              "takes": 0,
+              "timeline_entries": 0
+            }
+          },
+          "message": "Every agent-written or lower row has been scanned by the current write-gate detector; proactive suppression covers them.",
+          "name": "trust_scan",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
             "bad_config": [],
             "chars_limit": 4000,
             "chars_used": 0,
@@ -1943,7 +1960,7 @@
         },
         {
           "category": "brain",
-          "message": "1 retrieval-affecting file(s) changed since HEAD: src/core/operations.ts. Re-run `gbrain eval run-all` after committing these changes.",
+          "message": "No retrieval-affecting files changed in working tree.",
           "name": "eval_drift",
           "status": "ok"
         },

@@ -62,6 +62,12 @@ Every non-localOnly operation on the MCP surface: 144 tools across 24 areas. **S
 | `extract_entities` | Extract entity names (people, companies) from text and create/update their brain stub pages. | write |  |  |
 | `extraction_pending` | List unverified auto-extracted entity stubs awaiting owner review (the quarantine lane from extract_entities). | read |  |  |
 
+## facts
+
+| Tool | Description | Scope | Starter | Gate |
+|---|---|---|---|---|
+| `purge_fact` | Owner-only, trusted local CLI on the brain host (`gbrain forget <id> --purge`). | admin |  |  |
+
 ## identity
 
 | Tool | Description | Scope | Starter | Gate |
@@ -157,14 +163,6 @@ Every non-localOnly operation on the MCP surface: 144 tools across 24 areas. **S
 | `ontology_get` | Life Chronicle: the current resolved per-entity ontology (dimension → value) at `asof` (default now), with provenance + confidence + validity. | read |  |  |
 | `ontology_propose` | Life Chronicle: record one ontology observation (entity has dimension=value), sourced + confidence-weighted + bi-temporal. | write |  |  |
 
-## other
-
-| Tool | Description | Scope | Starter | Gate |
-|---|---|---|---|---|
-| `list_page_purges` | Owner-only (`gbrain pages purges list`). | admin |  |  |
-| `purge_fact` | Owner-only, trusted local CLI on the brain host (`gbrain forget <id> --purge`). | admin |  |  |
-| `unpurge_page` | Owner-only (`gbrain pages unpurge <slug>`). | admin |  |  |
-
 ## pages
 
 | Tool | Description | Scope | Starter | Gate |
@@ -179,6 +177,7 @@ Every non-localOnly operation on the MCP surface: 144 tools across 24 areas. **S
 | `get_raw_data` | Retrieve raw data for a page. | read |  |  |
 | `get_versions` | Page version history, newest snapshot first. | read |  |  |
 | `get_write_request` | Read your write's receipt by request_id (after write_pending or a lost reply). | write | yes |  |
+| `list_page_purges` | Owner-only (`gbrain pages purges list`). | admin |  |  |
 | `list_pages` | List pages with filters. | read | yes |  |
 | `list_write_requests` | List your write receipts in one source, newest first. | write | yes |  |
 | `put_page` | Complete content REPLACES the whole page: read get_page include_content:true; send its revision as expected_revision. | write | yes |  |
@@ -187,6 +186,7 @@ Every non-localOnly operation on the MCP surface: 144 tools across 24 areas. **S
 | `resolve_slugs` | Fuzzy-match a partial slug or title to page slugs. | read | yes |  |
 | `restore_page` | Restore a soft-deleted page (clear deleted_at) and re-create its markdown file on disk (the counterpart to delete_page removing it; the result write_through field reports the outcome). | write |  |  |
 | `revert_version` | Restore a page to an earlier version from its history (a new revision; history is kept). | write |  |  |
+| `unpurge_page` | Owner-only (`gbrain pages unpurge <slug>`). | admin |  |  |
 
 ## schema
 

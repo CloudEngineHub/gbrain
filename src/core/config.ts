@@ -1583,6 +1583,9 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   // #5575 write gate (local-only): quarantine|flag|reject|off and flag|off; read by import-screen.ts.
   'write_gate.external_mode',
   'write_gate.agent_mode',
+  // #5575 read side (local-only): label|filter and suppress|allow; read by eligibility/policy.ts.
+  'trust.read_policy',
+  'trust.agent_activation',
   // MCP skill-catalog publishing (PR1)
   'mcp.publish_skills',
   'mcp.publish_skills_prompted',

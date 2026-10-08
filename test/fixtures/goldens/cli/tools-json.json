@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 216250,
-    "stdoutSha256": "59c04247ff3ebbfa7b2c78a7c2e4ab82203b71b3564f0dd6cbeac268275f05b7",
+    "stdoutBytes": 219437,
+    "stdoutSha256": "d51f1094ade15139c8afd64979b53cbc2f9e410136aa62c9f073637c74db6c40",
     "toolNames": [
       "remember",
       "entity",
@@ -51,7 +51,6 @@
       "get_brain_identity",
       "quarantine_list",
       "get_write_attribution",
-      "confirm_memory",
       "list_skills",
       "get_skill",
       "list_brain_skillpack",
@@ -179,7 +178,6 @@
         "mutating": true,
         "name": "remember",
         "parameters": {
-          "content_origin": "string?",
           "entity": "string?",
           "expected_revision": "string?",
           "fact": "string?",
@@ -197,15 +195,6 @@
         "required_scopes": [],
         "schema": {
           "properties": {
-            "content_origin": {
-              "description": "Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
-              "enum": [
-                "user_said",
-                "tool_output",
-                "inferred"
-              ],
-              "type": "string"
-            },
             "entity": {
               "description": "Subject (name or slug).",
               "type": "string"
@@ -388,6 +377,7 @@
           "include_deleted": "boolean?",
           "include_quarantined": "boolean?",
           "include_timeline_entries": "boolean?",
+          "min_trust": "string?",
           "slug": "string",
           "source_id": "string?"
         },
@@ -418,6 +408,18 @@
               "description": "Also return timeline rows.",
               "type": "boolean"
             },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
+            },
             "slug": {
               "description": "Page slug.",
               "type": "string"
@@ -443,7 +445,6 @@
         "parameters": {
           "allow_empty": "boolean?",
           "content": "string",
-          "content_origin": "string?",
           "drop_timeline": "boolean?",
           "expected_revision": "string?",
           "force": "boolean?",
@@ -464,15 +465,6 @@
             },
             "content": {
               "description": "Complete markdown (get_page include_content:true).",
-              "type": "string"
-            },
-            "content_origin": {
-              "description": "Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
-              "enum": [
-                "user_said",
-                "tool_output",
-                "inferred"
-              ],
               "type": "string"
             },
             "drop_timeline": {
@@ -720,7 +712,6 @@
         "name": "capture",
         "parameters": {
           "content": "string",
-          "content_origin": "string?",
           "depth": "string?",
           "expected_revision": "string?",
           "force": "boolean?",
@@ -739,15 +730,6 @@
           "properties": {
             "content": {
               "description": "Markdown or text (not a file path).",
-              "type": "string"
-            },
-            "content_origin": {
-              "description": "Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
-              "enum": [
-                "user_said",
-                "tool_output",
-                "inferred"
-              ],
               "type": "string"
             },
             "depth": {
@@ -814,7 +796,8 @@
         "name": "fetch",
         "parameters": {
           "id": "string",
-          "include_quarantined": "boolean?"
+          "include_quarantined": "boolean?",
+          "min_trust": "string?"
         },
         "required_scopes": [],
         "schema": {
@@ -826,6 +809,18 @@
             "include_quarantined": {
               "description": "Admin: quarantined body.",
               "type": "boolean"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             }
           },
           "required": [
@@ -1058,6 +1053,7 @@
         "parameters": {
           "fields": "string?",
           "limit": "number?",
+          "min_trust": "string?",
           "mode": "string?",
           "offset": "number?",
           "query": "string",
@@ -1084,6 +1080,18 @@
             "limit": {
               "description": "Max results (default 20).",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "mode": {
               "description": "Local callers only.",
@@ -1177,6 +1185,7 @@
           "image_mime": "string?",
           "lang": "string?",
           "limit": "number?",
+          "min_trust": "string?",
           "mode": "string?",
           "near_symbol": "string?",
           "offset": "number?",
@@ -1259,6 +1268,18 @@
             "limit": {
               "description": "Default 10/25/50 by search mode.",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "mode": {
               "description": "Local callers only.",
@@ -1363,6 +1384,7 @@
         "parameters": {
           "detail": "string?",
           "hits": "array",
+          "min_trust": "string?",
           "return_unit": "string?",
           "return_window": "number?",
           "token_budget": "number?"
@@ -1385,6 +1407,18 @@
                 "type": "object"
               },
               "type": "array"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "return_unit": {
               "description": "Evidence unit: 'chunk' | 'window' | 'section' | 'page' | 'auto' (default 'page').",
@@ -2078,6 +2112,7 @@
           "after": "string?",
           "before": "string?",
           "limit": "number?",
+          "min_trust": "string?",
           "since": "string?",
           "slug": "string",
           "until": "string?"
@@ -2096,6 +2131,18 @@
             "limit": {
               "description": "Maximum number of timeline entries to return",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "since": {
               "description": "Alias for after; accepted for agent callers",
@@ -2336,30 +2383,6 @@
           "type": "object"
         },
         "scope": "admin"
-      },
-      {
-        "description": "Owner only: mark a fact, take or page as confirmed by the user (trust tier user_confirmed). Needs a connection the user granted memory_confirm on the brain host; agent connections are refused with a command for the user to run. Never call this on your own judgment: confirm only what the user explicitly confirmed.",
-        "idempotent": true,
-        "local_only": false,
-        "mutating": true,
-        "name": "confirm_memory",
-        "parameters": {
-          "ref": "string"
-        },
-        "required_scopes": [],
-        "schema": {
-          "properties": {
-            "ref": {
-              "description": "What to confirm: f<id> (fact), t<id> (take) or p:<source>/<slug> (page).",
-              "type": "string"
-            }
-          },
-          "required": [
-            "ref"
-          ],
-          "type": "object"
-        },
-        "scope": "write"
       },
       {
         "description": "Skills: prose instruction sets (NOT executable code) for tasks with this server's tools, with triggers, usable_tools and unavailable_tools. Use one via get_skill.",
@@ -3206,11 +3229,24 @@
         "mutating": false,
         "name": "get_chunks",
         "parameters": {
+          "min_trust": "string?",
           "slug": "string"
         },
         "required_scopes": [],
         "schema": {
           "properties": {
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
+            },
             "slug": {
               "description": "Slug of the page whose content chunks to return.",
               "type": "string"
@@ -3884,6 +3920,7 @@
           "holder": "string?",
           "kind": "string?",
           "limit": "number?",
+          "min_trust": "string?",
           "offset": "number?",
           "page_slug": "string?",
           "resolved": "boolean?",
@@ -3907,6 +3944,18 @@
             "limit": {
               "description": "Max rows (default 100, cap 500)",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "offset": {
               "description": "Skip first N rows",
@@ -3938,6 +3987,7 @@
         "name": "takes_search",
         "parameters": {
           "limit": "number?",
+          "min_trust": "string?",
           "query": "string"
         },
         "required_scopes": [],
@@ -3946,6 +3996,18 @@
             "limit": {
               "description": "Max results (default 30, cap 100)",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "query": {
               "description": "Search text matched against take claim text via trigram similarity, e.g. 'valuation cap'. This is the search text param — there is no `text` param.",
@@ -5193,6 +5255,7 @@
           "days": "number?",
           "max_pages": "number?",
           "min_confidence": "number?",
+          "min_trust": "string?",
           "prior_context": "string?",
           "session_id": "string?",
           "stats": "boolean?",
@@ -5213,6 +5276,18 @@
             "min_confidence": {
               "description": "Confidence gate 0..1 (default 0.7 — slug-suffix matches need an explicit lower gate).",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "prior_context": {
               "description": "Already-surfaced context (pointer blocks / opened page bodies). Pages whose slug appears here are not re-volunteered.",
@@ -5518,6 +5593,7 @@
           "include_expired": "boolean?",
           "include_pending": "boolean?",
           "limit": "number?",
+          "min_trust": "string?",
           "query": "string?",
           "return_unit": "string?",
           "return_window": "number?",
@@ -5560,6 +5636,18 @@
             "limit": {
               "description": "Per-arm max (default 50, cap 100).",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "query": {
               "description": "Also search pages (results[] arm).",
@@ -5612,6 +5700,7 @@
           "budget_tokens": "number?",
           "entities": "string?",
           "include_private": "boolean?",
+          "min_trust": "string?",
           "session_id": "string?",
           "since": "string?"
         },
@@ -5629,6 +5718,18 @@
             "include_private": {
               "description": "Local trusted callers only.",
               "type": "boolean"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "session_id": {
               "description": "Opaque session id.",
@@ -5655,6 +5756,7 @@
           "cursor": "string?",
           "entities": "string?",
           "include_private": "boolean?",
+          "min_trust": "string?",
           "session_id": "string?",
           "since": "string?",
           "since_slug": "string?"
@@ -5677,6 +5779,18 @@
             "include_private": {
               "description": "Local trusted callers only.",
               "type": "boolean"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "session_id": {
               "description": "Session id; keeps a cursor.",

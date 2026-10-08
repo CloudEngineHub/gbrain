@@ -183,6 +183,7 @@ export const GRADUATION_INVENTORY: Inventory = {
 
     entry('page_links', 'schema_owned', 'operational', 'View over links; each engine\'s schema defines it.', { kind: 'view' }),
     entry('file_migration_ledger', 'schema_owned', 'operational', 'Postgres-only file storage migration ledger written by the target initSchema.', { engines: { pglite: false, postgres: true } }),
+    entry('trust_policy_state', 'schema_owned', 'operational', 'Each engine\'s own trust policy generation counter (#5575 ENG-11), seeded by its migration; caches compare it per engine, so it is never copied or compared.'),
     entry('persistence_graduation', 'schema_owned', 'operational', 'Each engine\'s own graduation custody row (source: quiesced/cutover; target: copying..authoritative); never copied, digested or compared.'),
   ],
 };
