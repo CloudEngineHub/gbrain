@@ -1672,6 +1672,8 @@ export interface TimelineInput {
 
 export interface TimelineOpts extends PageReadScope {
   limit?: number;
+  /** #5575 read eligibility (eligibility/sql.ts) for read ops. */
+  eligibility?: import('./eligibility/policy.ts').ReadEligibility;
   after?: string;
   before?: string;
   /**

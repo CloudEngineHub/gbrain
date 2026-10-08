@@ -59,3 +59,24 @@ export async function stampPageTrust<T extends PageRef>(engine: Exec, rows: T[],
   }
   return floor ? rows.filter(row => admitsTrust(row.trust_tier as TrustTier, floor)) : rows;
 }
+
+const ROW_TABLES = { facts: 'facts', takes: 'takes', timeline_entries: 'timeline_entries' } as const;
+
+/**
+ * Sets `trust_tier` + `origin` on fact, take or timeline rows by id (one
+ * batched read). Rows whose tier cannot be read are labeled `unknown` /
+ * `unrecorded`, never left looking confirmed.
+ */
+export async function stampRowTrust<T extends object>(
+  engine: Exec, table: keyof typeof ROW_TABLES, rows: T[], idOf: (row: T) => number | string,
+): Promise<Array<T & TrustFields>> {
+  if (rows.length === 0) return [];
+  const ids = [...new Set(rows.map(r => Number(idOf(r))).filter(Number.isFinite))];
+  const byId = new Map<number, TrustFields>();
+  try {
+    const found = await engine.executeRaw<{ id: number | string; trust_tier: string; write_origin: unknown }>(
+      `SELECT id, trust_tier, write_origin FROM ${ROW_TABLES[table]} WHERE id = ANY($1::bigint[])`, [ids]);
+    for (const row of found) byId.set(Number(row.id), trustFields(row.trust_tier, row.write_origin));
+  } catch { /* labeled unknown below */ }
+  return rows.map(row => ({ ...row, ...(byId.get(Number(idOf(row))) ?? { trust_tier: 'unknown' as const, origin: 'unrecorded' }) }));
+}

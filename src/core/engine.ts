@@ -317,6 +317,8 @@ export interface TakesListOpts extends PageReadPolicy {
    *  scalar, matching sourceScopeOpts. Omitted (local CLI) = no source filter. */
   sourceId?: string;
   sourceIds?: string[];
+  /** #5575 read eligibility (eligibility/sql.ts) for read ops; unset for internal writers and fence re-renders. */
+  eligibility?: import('./eligibility/policy.ts').ReadEligibility;
 }
 
 /** Search result row from searchTakes / searchTakesVector. */
@@ -1879,7 +1881,7 @@ export interface BrainEngine {
    * Honors `takesHoldersAllowList` via WHERE filter so MCP-bound calls cannot
    * retrieve holders outside the token's allow-list.
    */
-  searchTakes(query: string, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[] }): Promise<TakeHit[]>;
+  searchTakes(query: string, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; eligibility?: import('./eligibility/policy.ts').ReadEligibility }): Promise<TakeHit[]>;
 
   /**
    * Vector search across active takes. Cosine distance against `embedding`.
@@ -1887,7 +1889,7 @@ export interface BrainEngine {
    */
   searchTakesVector(
     embedding: Float32Array,
-    opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[] },
+    opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; eligibility?: import('./eligibility/policy.ts').ReadEligibility },
   ): Promise<TakeHit[]>;
 
   /** Look up embeddings by take id (mirrors getEmbeddingsByChunkIds). */
