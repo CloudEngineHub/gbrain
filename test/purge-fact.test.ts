@@ -126,6 +126,23 @@ describe('purge_fact', () => {
     }
   }), 60_000);
 
+  test('trust proposals targeting or relating to the purged fact are swept with it', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+    for (const engine of engines) {
+      const slug = 'people/trustprop-example';
+      const id = await seedPage(engine, slug);
+      const [other] = await engine.executeRaw<{ id: number }>('SELECT id FROM facts WHERE entity_slug=$1 AND id<>$2 ORDER BY id LIMIT 1', [slug, id]);
+      const insert = (target: number, related: number | null) => engine.executeRaw(`INSERT INTO trust_proposals (action, source_id, target_table, target_id, related_table, related_id, before_state, proposer)
+        VALUES ('supersede_fact', 'default', 'facts', $1, $2, $3, $4::text::jsonb, 'test') RETURNING id`,
+      [target, related === null ? null : 'facts', related, JSON.stringify({ fact: CLAIM })]);
+      await insert(id, Number(other.id));
+      await insert(Number(other.id), id);
+      const done = await confirmedPurge(engine, id);
+      expect(done.state).toBe('committed');
+      expect(await engine.executeRaw('SELECT 1 FROM trust_proposals WHERE target_id=$1 OR related_id=$1', [id])).toHaveLength(0);
+      expect(await engine.executeRaw('SELECT 1 FROM trust_proposals WHERE strpos(before_state::text,$1)>0', [CLAIM])).toHaveLength(0);
+    }
+  }), 60_000);
+
   test('no resurrection: stale re-import, re-extraction and direct inserts are refused or dropped', async () => withEnv({ GBRAIN_HOME: home }, async () => {
     for (const engine of engines) {
       const slug = 'people/bob-example';

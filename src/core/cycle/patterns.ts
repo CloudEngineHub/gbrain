@@ -757,7 +757,7 @@ export async function groundPatternPages(engine: BrainEngine, maintenance: Maint
       else if (await publishOrHold(publish)) heldSlugs.add(slug);
     } else {
       const [{ importFromContent }, { isAvailable }] = await Promise.all([import('../import-file.ts'), import('../ai/gateway.ts')]);
-      const write = (tx: BrainEngine) => importFromContent(tx, slug, content, { noEmbed: !isAvailable('embedding'), sourceId });
+      const write = (tx: BrainEngine) => importFromContent(tx, slug, content, { noEmbed: !isAvailable('embedding'), sourceId, preserveGateMarkers: true });
       if (!derived) await write(engine);
       else await derivedMaintenanceTransaction(engine, derived, async tx => ({ result: await write(tx), rows: [{ table: 'pages' as const, id: snapshot.page.id, sourceId }] }));
     }

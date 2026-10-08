@@ -3,4 +3,6 @@
  * keeps the agent edit at its lowered tier; revert restores the prior owner
  * version's content and tier through the CEO-9 rule.
  */
-export {};
+import type { TrustProposalAction } from './proposals.ts';
+
+export const PAGE_HANDLER_ACTIONS: readonly TrustProposalAction[] = [];

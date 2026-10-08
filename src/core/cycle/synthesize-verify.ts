@@ -1432,7 +1432,7 @@ export async function verifyAndRepairDreamPages(
         // the tier of the transcripts it was synthesized from, with its edges.
         const derivation = await transcriptsDerivation(engine, ref.paths.map(path => ({ filePath: path, content: transcriptsByPath.get(path)!.content })), opts.meetingTranscriptsDir);
         await derivedMaintenanceTransaction(engine, derivation, async tx => ({ result: await importFromContent(tx, ref.slug, md, {
-          noEmbed: true, remote: false, sourceId: ref.source_id,
+          noEmbed: true, remote: false, preserveGateMarkers: true, sourceId: ref.source_id,
           beforeCommit: async inner => { await project(inner); await links?.apply(inner); },
         }), rows: [{ table: 'pages' as const, id: page.id, sourceId: ref.source_id }] }));
         stats.pages_repaired++;

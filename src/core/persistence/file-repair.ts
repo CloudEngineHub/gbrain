@@ -38,6 +38,7 @@ import type { BrainEngine } from '../engine.ts';
 import type { GBrainConfig } from '../config.ts';
 import type { ParsedPage } from '../import-file.ts';
 import { importFromContent } from '../import-file.ts';
+import { ownerImportTrust } from '../trust/channel.ts';
 import { ContentSanityBlockError } from '../content-sanity.ts';
 import { loadImportSanityConfig, type ContentRefusal, type ImportSanityConfig } from '../import-screen.ts';
 import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
@@ -182,7 +183,7 @@ export async function prepareRepairPublication(engine: BrainEngine, input: Repai
   let prepared: PreparedContentImport | undefined;
   let result;
   try {
-    result = await importFromContent(engine, renamed ? input.base!.page.slug : input.slug, content, { sourceId: input.sourceId, noEmbed: true, remote: false,
+    result = await importFromContent(engine, renamed ? input.base!.page.slug : input.slug, content, { sourceId: input.sourceId, noEmbed: true, remote: false, preserveGateMarkers: true,
       activePack: input.activePack, filename: basename(input.sourcePath).replace(/\.mdx?$/i, ''), sourcePath: input.sourcePath, allowEmptyOverwrite: true,
       prepare: async value => { prepared = value; return value.result; } });
   } catch (error) {
@@ -299,9 +300,9 @@ export async function prepareManagedFileRepairMutation(engine: BrainEngine, row:
   const ready = publication.ready;
   const project = await prepareCanonicalProjections(engine, ready.parsedPage, row.slug, row.source_id, base, 'file');
   const importContent = p.content.replace(/^\uFEFF/, '');
-  const importOptions = { ...source, noEmbed: true, remote: false, activePack: screenConfig.activePack, filename: basename(p.sourcePath).replace(/\.mdx?$/i, ''), sourcePath: p.sourcePath, allowEmptyOverwrite: true };
+  const importOptions = { ...source, noEmbed: true, remote: false, preserveGateMarkers: true, activePack: screenConfig.activePack, filename: basename(p.sourcePath).replace(/\.mdx?$/i, ''), sourcePath: p.sourcePath, allowEmptyOverwrite: true };
   return { observedRevision: snapshot?.revision ?? null, noop: ready.noop && !fileChanges && !moved, contentUnchanged: ready.noop && !fileChanges && !moved,
-    deferEmbedding: p.noEmbed, ...(moved ? { additionalPageKeys: [{ sourceId: row.source_id, slug: moved.slug }] } : {}),
+    trust: await ownerImportTrust(engine, row, ready.parsedPage.frontmatter, p.sourcePath), deferEmbedding: p.noEmbed, ...(moved ? { additionalPageKeys: [{ sourceId: row.source_id, slug: moved.slug }] } : {}),
     ...(fileChanges ? { file: { root, path: target, content: bytes, expectedBeforeHash: p.beforeHash, ...(fenceRepair ? { commit: fenceRepairCommit(p.path, fenceRepair.classes) } : {}) } } : {}),
     validate: async tx => {
       const current = await getWorktreeBinding(tx, row.source_id);

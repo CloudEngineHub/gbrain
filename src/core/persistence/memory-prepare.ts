@@ -16,6 +16,9 @@ import type { WriteRequest } from './model.ts';
 import { appendContextNote, type InferredVia } from '../facts/subject-infer.ts';
 import { inferenceNote } from '../facts/subject-infer-write.ts';
 import { normalizeTargetFences } from '../fence-repair/import-step.ts';
+import { requestChannelTrust } from '../trust/channel.ts';
+import { recordContestedFact, supersessionGuarded } from '../trust/supersede-handlers.ts';
+import { storedTrustTier } from '../trust/tier.ts';
 import { pageFencesNormalized } from '../fence-repair/report.ts';
 
 function receiptFix(row: WriteRequest): Action {
@@ -31,7 +34,7 @@ function conflict(row: WriteRequest): never {
 function candidateState(value: Awaited<ReturnType<typeof decideSingleFact>>): string {
   const c = value.candidate;
   return JSON.stringify([value.status, c?.id, c?.fact, c?.kind, c?.visibility,
-    c?.valid_until ? new Date(c.valid_until).toISOString() : null, c?.source_markdown_slug, c?.row_num]);
+    c?.valid_until ? new Date(c.valid_until).toISOString() : null, c?.source_markdown_slug, c?.row_num, c?.trust_tier ?? null]);
 }
 export const NO_ENTITY_HINT = 'Saved without an entity, so entity-scoped recall will not find it. Pass `entity` (the person, company or project this fact is about) to link it.';
 function outcome(id: number, status: 'inserted' | 'duplicate' | 'superseded', entitySlug: string | null, validUntil: Date | string | null, degraded: boolean, p: Record<string, unknown>, supersededId?: number) {
@@ -76,6 +79,10 @@ export async function prepareMemoryMutation(engine: BrainEngine, row: WriteReque
     ? decideReplacement(e, row.source_id, input, replaces, { pageSlug: row.slug, remote: row.authority.remote === true, lock })
     : decideSingleFact(e, row.source_id, input, dedupEmbedding, embedding_model);
   const decision = await decide(engine);
+  // #5575 I3: a lower-tier write never supersedes; it is inserted contested and the owner decides (re-checked under lock by validate).
+  const writerTier = requestChannelTrust(row)?.tier ?? 'unknown';
+  const contested = decision.status === 'superseded' && supersessionGuarded(writerTier, decision.candidate!.trust_tier);
+  const status = contested ? 'inserted' : decision.status;
   const validate = async (tx: BrainEngine) => {
     await assertFactNotWithdrawn(tx, row.source_id, input);
     if (embedding && JSON.stringify(await tx.executeRaw(`${embeddingConfigSql} FOR SHARE`)) !== observedEmbeddingConfig) conflict(row);
@@ -106,7 +113,7 @@ export async function prepareMemoryMutation(engine: BrainEngine, row: WriteReque
     rowNum = appended.rowNum;
     let body = appended.body;
     const old = decision.candidate;
-    if (decision.status === 'superseded' && old?.source_markdown_slug === row.slug && old.row_num != null) {
+    if (status === 'superseded' && old?.source_markdown_slug === row.slug && old.row_num != null) {
       const rows = parseFactsFence(body).facts.map(f => f.rowNum === old.row_num
         ? { ...f, active: false, supersededBy: rowNum, context: `superseded by #${rowNum}` } : f);
       body = replaceOrInsertFactsFence(body, renderFactsTable(rows));
@@ -132,8 +139,11 @@ export async function prepareMemoryMutation(engine: BrainEngine, row: WriteReque
       const inserted = await tx.insertFact(fact, { source_id: row.source_id }); // gbrain-allow-direct-insert: journaled source-scoped semantic publication for subjectless or unresolved entity memory
       id = inserted.id;
     }
-    if (decision.status === 'superseded') await tx.executeRaw(`UPDATE facts SET expired_at=now(),superseded_by=$3
+    if (status === 'superseded') await tx.executeRaw(`UPDATE facts SET expired_at=now(),superseded_by=$3
       WHERE id=$1 AND source_id=$2 AND expired_at IS NULL`, [decision.candidate!.id, row.source_id, id]);
-    return { ...outcome(id, decision.status, input.entity_slug, validUntil, degraded, p, decision.status === 'superseded' ? decision.candidate!.id : undefined), ...fencesNormalized };
+    const contestedBy = contested ? await recordContestedFact(tx, { sourceId: row.source_id, oldId: decision.candidate!.id,
+      oldTier: storedTrustTier(decision.candidate!.trust_tier), newId: id, newTier: writerTier, guard: replaces !== null ? 'remember.replaces' : 'conflict_slot' }) : null;
+    return { ...outcome(id, status, input.entity_slug, validUntil, degraded, p, status === 'superseded' ? decision.candidate!.id : undefined), ...fencesNormalized,
+      ...(contestedBy ? { contested: contestedBy } : {}) };
   } };
 }
