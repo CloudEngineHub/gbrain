@@ -31,7 +31,11 @@ import type { BrainEngine, TakeBatchInput } from '../engine.ts';
 import { parseTakesFence, TAKES_FENCE_BEGIN, type ParsedTake } from '../takes-fence.ts';
 import { walkMarkdownFiles } from '../../commands/extract.ts';
 import { takesPreparation } from '../takes-write.ts';
-import { withCoordinatedWrite } from '../persistence/context.ts';
+import { withCoordinatedWrite, withWriteTrust } from '../persistence/context.ts';
+import { derivedWriteTrust, recordTaintEdges } from '../trust/taint.ts';
+import { storedTrustTier } from '../trust/tier.ts';
+import { applyGateDecision, derivedGateConfig, derivedGateInput, emptyGateTally, type GateTally } from '../trust/derived-gate.ts';
+import { decideTakeWrite, recordFlaggedRow } from '../write-gate-store.ts';
 import { maintenanceAttribution, maintenanceTransaction } from '../persistence/attribution.ts';
 import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 
@@ -75,6 +79,8 @@ export interface ExtractTakesResult {
    * there's no on-disk file to point at).
    */
   failedFiles: Array<{ path: string; error: string }>;
+  /** #5575 B3: new rows the write gate flagged, held or rejected; present only when it did any. */
+  writeGate?: GateTally;
 }
 
 /**
@@ -134,6 +140,48 @@ function parsedTakeToBatchInput(pageId: number, t: ParsedTake): TakeBatchInput {
 
 const BATCH_SIZE = 100;
 
+/**
+ * #5575 I2/B3: takes rows restate their page's fence (no model), so each row
+ * takes its page's tier capped at operator_curated (a projection) and passes
+ * the write gate at that tier (an owner page never runs it). Rows of pages
+ * with different tiers commit in separate transactions; `inTx` writes one
+ * page's rows inside the caller's coordinated transaction instead.
+ */
+async function upsertProjectedTakes(engine: BrainEngine, rows: TakeBatchInput[], result: ExtractTakesResult, inTx?: BrainEngine): Promise<number> {
+  if (!rows.length) return 0;
+  const db = inTx ?? engine;
+  const pages = new Map((await db.executeRaw<{ id: number; source_id: string; slug: string; trust_tier: string | null }>(
+    'SELECT id,source_id,slug,trust_tier FROM pages WHERE id=ANY($1::int[])', [[...new Set(rows.map(r => r.page_id))]]))
+    .map(page => [Number(page.id), { ...page, input: { table: 'pages' as const, id: Number(page.id), tier: storedTrustTier(page.trust_tier) } }]));
+  const cfg = await derivedGateConfig(db);
+  const tally = result.writeGate ?? emptyGateTally();
+  let upserted = 0;
+  for (const tier of new Set(rows.map(r => pages.get(r.page_id)?.input.tier ?? 'unknown'))) {
+    const group = rows.filter(r => (pages.get(r.page_id)?.input.tier ?? 'unknown') === tier);
+    const inputs = [...new Set(group.map(r => pages.get(r.page_id)).filter(p => !!p))].map(p => p!.input);
+    const trust = derivedWriteTrust({ channel: 'derive:takes_fence', inputs, projection: true });
+    const write = async (tx: BrainEngine) => {
+      const decisions = group.map(r => decideTakeWrite({ claim: r.claim, source: r.source }, { sourceId: pages.get(r.page_id)?.source_id ?? 'default',
+        slug: pages.get(r.page_id)?.slug ?? null, payload: { ...r }, input: derivedGateInput(trust), cfg }));
+      for (const [i, d] of decisions.entries()) if (d.action !== 'insert') await applyGateDecision(tx, d, { table: 'takes', sourceId: pages.get(group[i].page_id)?.source_id ?? 'default' }, async () => null, tally);
+      const allowed = group.filter((_, i) => decisions[i].action === 'insert');
+      const flags = decisions.filter(d => d.action === 'insert');
+      const count = allowed.length ? await tx.addTakesBatch(allowed) : 0;
+      for (const [i, r] of allowed.entries()) {
+        const page = pages.get(r.page_id);
+        const [take] = await tx.executeRaw<{ id: number }>('SELECT id FROM takes WHERE page_id=$1 AND row_num=$2', [r.page_id, r.row_num]);
+        if (!take || !page) continue;
+        await recordTaintEdges(tx, { table: 'takes', id: Number(take.id), sourceId: page.source_id }, [page.input]);
+        if (await recordFlaggedRow(tx, flags[i], { table: 'takes', id: Number(take.id), sourceId: page.source_id }) !== null) tally.flagged++;
+      }
+      return count;
+    };
+    upserted += inTx ? await withWriteTrust(inTx, trust, () => write(inTx)) : await maintenanceTransaction(engine, write, trust);
+  }
+  if (tally.flagged || tally.held || tally.rejected) result.writeGate = tally;
+  return upserted;
+}
+
 async function flushBatch(
   engine: BrainEngine,
   buffer: TakeBatchInput[],
@@ -144,8 +192,7 @@ async function flushBatch(
   if (dryRun) {
     result.takesUpserted += buffer.length;
   } else {
-    const inserted = await maintenanceTransaction(engine, tx => tx.addTakesBatch(buffer));
-    result.takesUpserted += inserted;
+    result.takesUpserted += await upsertProjectedTakes(engine, buffer, result);
   }
   buffer.length = 0;
 }
@@ -320,7 +367,7 @@ async function reextractCoordinated(
     if (!page) return;
     const takes = await reconcilePageTakes(tx, page, slug, rebuild, false, result);
     if (takes.length === 0) return;
-    result.takesUpserted += await tx.addTakesBatch(takes.map(t => takesPreparation.toCanonicalBatchInput(page.id, t)));
+    result.takesUpserted += await upsertProjectedTakes(tx, takes.map(t => takesPreparation.toCanonicalBatchInput(page.id, t)), result, tx);
   }, attribution));
 }
 

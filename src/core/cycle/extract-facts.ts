@@ -49,6 +49,8 @@ import type { BrainEngine } from '../engine.ts';
 import { managedDerivedFactsPreflight, withDerivedFactsWrite } from '../persistence/derived-facts.ts';
 import { withWriteTrust } from '../persistence/context.ts';
 import { deriveTrust, recordTaintEdges } from '../trust/taint.ts';
+import { applyGateDecision, derivedGateConfig, derivedGateInput, emptyGateTally, type GateTally } from '../trust/derived-gate.ts';
+import { decideFactWrite, recordFlaggedRow } from '../write-gate-store.ts';
 import type { WriteTrust } from '../trust/tier.ts';
 import { maintenanceTransaction } from '../persistence/attribution.ts';
 import {
@@ -365,6 +367,8 @@ export interface ExtractFactsResult {
   /** Pages whose reconcile threw and rolled back; later pages still ran. */
   pagesFailed: number;
   warnings: string[];
+  /** #5575 B3: new fence rows the write gate flagged, held or rejected; present only when it did any. */
+  writeGate?: GateTally;
   /** v0.35.5: phantom-redirect pre-pass counts. */
   phantomsScanned: number;
   phantomsRedirected: number;
@@ -456,6 +460,8 @@ export async function runExtractFacts(
   // Managed brains reconcile the same way, but each database write commits
   // inside the coordinator's source capability under the page key.
   const managed = await managedDerivedFactsPreflight(engine, sourceId);
+  const gateCfg = await derivedGateConfig(engine);
+  const gateTally = emptyGateTally();
   const transact = <T>(slugs: string[], fn: (tx: BrainEngine) => Promise<T>, trust?: WriteTrust): Promise<T> =>
     managed ? withDerivedFactsWrite(engine, sourceId, slugs, tx => trust ? withWriteTrust(tx, trust, () => fn(tx)) : fn(tx)) : maintenanceTransaction(engine, fn, trust);
   const result: ExtractFactsResult = {
@@ -850,14 +856,22 @@ export async function runExtractFacts(
                 f.claim_metric ?? null, f.claim_value ?? null, f.claim_unit ?? null, f.claim_period ?? null],
             );
           }
-          const inserted = inserts.length === 0
-            ? { inserted: 0 }
+          // #5575 B3: each new fence row passes the write gate at the page's tier (an owner page never runs it).
+          const decisions = inserts.map(f => decideFactWrite(f, { sourceId, slug, payload: { ...f, embedding: null }, input: derivedGateInput(derivation.trust), cfg: gateCfg }));
+          for (const d of decisions) if (d.action !== 'insert') await applyGateDecision(tx, d, { table: 'facts', sourceId }, async () => null, gateTally);
+          const allowed = inserts.filter((_, i) => decisions[i].action === 'insert');
+          const flags = decisions.filter(d => d.action === 'insert');
+          const inserted = allowed.length === 0
+            ? { inserted: 0, ids: [] as number[] }
             : await tx.insertFacts( // gbrain-allow-direct-insert: extract_facts cycle phase reconciles fence → DB
-              inserts.map(f => ({ ...f, superseded_by_row: undefined })),
+              allowed.map(f => ({ ...f, superseded_by_row: undefined })),
               { source_id: sourceId },
             );
-          for (const id of (inserted as { ids?: number[] }).ids ?? []) await recordTaintEdges(tx, { table: 'facts', id, sourceId }, derivation.inputs);
-          const insertedRows = new Set(inserts.map(f => f.row_num));
+          for (const [i, id] of inserted.ids.entries()) {
+            await recordTaintEdges(tx, { table: 'facts', id, sourceId }, derivation.inputs);
+            if (inserted.ids.length === allowed.length && await recordFlaggedRow(tx, flags[i], { table: 'facts', id, sourceId }) !== null) gateTally.flagged++;
+          }
+          const insertedRows = new Set(allowed.map(f => f.row_num));
           const linked = await syncSupersession(tx, sourceId, slug, extracted, chain, insertedRows);
           opts.signal?.throwIfAborted();
           const updated = new Set([...updates.map(f => f.row_num), ...linked.changed.filter(row => !insertedRows.has(row))]);
@@ -953,6 +967,7 @@ export async function runExtractFacts(
     });
   }
 
+  if (gateTally.flagged || gateTally.held || gateTally.rejected) result.writeGate = gateTally;
   return result;
 }
 
