@@ -164,8 +164,8 @@ function fromPairResult(proposal: TrustProposalRow, decision: TrustDecision, res
   return decisionResult(proposal, decision, status as never, result.reason ? { reason: result.reason } : {});
 }
 
-/** The actions this module registers handlers for (supersede_take joins when the takes guard lands). */
-export const SUPERSEDE_HANDLER_ACTIONS: readonly TrustProposalAction[] = ['supersede_fact', 'forget'];
+/** The actions this module registers handlers for. */
+export const SUPERSEDE_HANDLER_ACTIONS: readonly TrustProposalAction[] = ['supersede_fact', 'supersede_take', 'forget'];
 
 registerTrustProposalHandler('supersede_fact', {
   async accept(engine, proposal, ctx: TrustDecisionContext) {
@@ -173,6 +173,51 @@ registerTrustProposalHandler('supersede_fact', {
   },
   async undo(engine, proposal, ctx: TrustDecisionContext) {
     return fromPairResult(proposal, 'undo', await applyProposalAction(engine, proposal.id, 'undo', ctx.config, TRUST_PAIR_STORE));
+  },
+});
+
+/**
+ * supersede_take accept: the owner's confirmed decision rides a journaled local
+ * `takes_supersede` whose intent carries the proposal id and a one-time nonce
+ * the handler stored on the proposal; takes-prepare applies it only when both
+ * match a pending proposal for that exact pair (ownerAcceptedTake), striking
+ * the old row toward the contested row instead of adding a new one.
+ */
+export async function ownerAcceptedTake(engine: BrainEngine, row: { authority: { remote: boolean }; intent: Record<string, unknown> | null },
+  oldTakeId: number, pageId: number): Promise<{ id: number; newId: number; newRow: number } | null> {
+  const id = Number(row.intent?.trust_accept);
+  const nonce = row.intent?.trust_accept_nonce;
+  if (row.authority.remote !== false || !Number.isSafeInteger(id) || typeof nonce !== 'string') return null;
+  const proposal = await getTrustProposal(engine, id);
+  if (!proposal || proposal.status !== 'pending' || proposal.action !== 'supersede_take' || proposal.target_id !== oldTakeId
+    || proposal.related_id === null || proposal.after_state.accept_nonce !== nonce) return null;
+  const [contested] = await engine.executeRaw<{ row_num: number }>('SELECT row_num FROM takes WHERE id = $1 AND page_id = $2 AND active', [proposal.related_id, pageId]);
+  return contested ? { id, newId: proposal.related_id, newRow: Number(contested.row_num) } : null;
+}
+
+/** Inside the publication: the proposal closes and the contested take becomes the owner's confirmed take. */
+export async function finishOwnerAcceptedTake(tx: BrainEngine, accepted: { id: number; newId: number }): Promise<void> {
+  if (!await transitionTrustProposal(tx, accepted.id, 'pending', 'accepted')) throw new Error(`trust proposal tp${accepted.id} is no longer pending`);
+  await withTrustPromotion(tx, 'user_confirmed', () => tx.executeRaw(`UPDATE takes SET trust_tier = 'user_confirmed' WHERE id = $1`, [accepted.newId]));
+  await queueTierProjection(tx, 'takes', accepted.newId);
+}
+
+registerTrustProposalHandler('supersede_take', {
+  async accept(engine, proposal, ctx: TrustDecisionContext) {
+    const [old] = await engine.executeRaw<{ row_num: number; slug: string; source_id: string }>(
+      'SELECT t.row_num, p.slug, p.source_id FROM takes t JOIN pages p ON p.id = t.page_id WHERE t.id = $1', [proposal.target_id]);
+    const [fresh] = await engine.executeRaw<{ claim: string }>('SELECT claim FROM takes WHERE id = $1', [proposal.related_id]);
+    if (!old || !fresh) return decisionResult(proposal, 'accept', 'superseded', { reason: 'take_missing' });
+    const nonce = crypto.randomUUID();
+    await engine.executeRaw(`UPDATE trust_proposals SET after_state = after_state || jsonb_build_object('accept_nonce', $2::text) WHERE id = $1 AND status = 'pending'`, [proposal.id, nonce]);
+    const { submitPageMutation } = await import('../persistence/page-mutations.ts');
+    const local = { engine, sourceId: old.source_id, remote: false as const, dryRun: false,
+      config: ctx.config ?? ({ engine: engine.kind } as never), logger: { info() {}, warn() {}, error() {} } };
+    await submitPageMutation(local as never, { operation: 'takes_supersede', params: { slug: old.slug, source_id: old.source_id, row_num: Number(old.row_num),
+      claim: fresh.claim, trust_accept: proposal.id, trust_accept_nonce: nonce, request_id: crypto.randomUUID() } });
+    const after = await getTrustProposal(engine, proposal.id);
+    return after?.status === 'accepted' ? decisionResult(proposal, 'accept', 'accepted')
+      : decisionResult(proposal, 'accept', 'refused', { reason: after?.status ?? 'not_found' });
   },
 });
 
