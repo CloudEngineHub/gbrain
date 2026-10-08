@@ -216,13 +216,34 @@ describe('guarded fence re-projection (A5, ENG-1)', () => {
       expect(by('Erin speaks Norwegian')).toMatchObject({ id: before['Erin speaks Norwegian'], row_num: 2, expired_at: null, trust_tier: 'user_confirmed' });
       expect(by('Erin lives in Bergen')).toMatchObject({ row_num: 1, expired_at: null, trust_tier: 'agent_written' });
       const proposals = await listTrustProposals(engine, { sourceId: b.sourceId });
-      expect(proposals.map(p => [p.action, p.target_id, p.related_id]).sort()).toEqual([
+      expect(proposals.map(p => [p.action as string, p.target_id, p.related_id] as unknown[]).sort()).toEqual([
         ['forget', before['Erin owns a boat'], null],
         ['supersede_fact', before['Erin lives in Oslo'], Number(by('Erin lives in Bergen').id)],
       ].sort());
       const supersede = proposals.find(p => p.action === 'supersede_fact')!;
       expect((await decideTrustProposal(engine, supersede.id, 'accept', owner)).status).toBe('accepted');
       expect((await factRow(b, before['Erin lives in Oslo'])).expired_at).not.toBeNull();
+    }
+  }), 90_000);
+});
+
+describe('guarded takes supersession and the takes gate', () => {
+  test('a lower-tier takes_supersede of a confirmed take adds the claim contested; the old take stays active', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+    for (const engine of engines) {
+      const b = await brain(engine);
+      const slug = 'people/frank-example';
+      await run(b.local, 'put_page', { slug, content: page('Frank', 'Frank.') });
+      const added = await run(b.local, 'takes_add', { slug, claim: 'Frank will join acme-example', kind: 'bet', holder: 'world', weight: 0.7 });
+      const [take] = await engine.executeRaw<{ id: number; page_id: number }>('SELECT id, page_id FROM takes WHERE row_num=$1 AND page_id=(SELECT id FROM pages WHERE source_id=$2 AND slug=$3)', [added.row_num, b.sourceId, slug]);
+      await engine.transaction(tx => withCoordinatedWrite(tx, [b.sourceId], () => withTrustPromotion(tx, 'user_confirmed', () =>
+        tx.executeRaw(`UPDATE takes SET trust_tier='user_confirmed' WHERE id=$1`, [take!.id])), TEST_WRITE_ATTRIBUTION));
+      const superseded = await run(b.remote, 'takes_supersede', { slug, row_num: added.row_num, claim: 'Frank will not join acme-example' });
+      expect(superseded.contested?.proposal_ref).toMatch(/^tp\d+$/);
+      const rows = await engine.executeRaw<{ id: number; claim: string; active: boolean; trust_tier: string }>('SELECT id, claim, active, trust_tier FROM takes WHERE page_id=$1 ORDER BY row_num', [take!.page_id]);
+      expect(rows.find(r => Number(r.id) === Number(take!.id))).toMatchObject({ active: true, trust_tier: 'user_confirmed' });
+      expect(rows.find(r => r.claim === 'Frank will not join acme-example')).toMatchObject({ active: true, trust_tier: 'agent_written' });
+      const [proposal] = await listTrustProposals(engine, { sourceId: b.sourceId, action: 'supersede_take' });
+      expect(proposal).toMatchObject({ target_table: 'takes', target_id: Number(take!.id) });
     }
   }), 90_000);
 });

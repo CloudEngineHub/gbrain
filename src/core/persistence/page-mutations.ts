@@ -19,6 +19,7 @@ import { assertPersistenceAccepting, estimatedRetryAfterMs, waitForWrite, writeR
 import { parseWireWriteWaitMs } from './write-wait.ts';
 import { assertTimelineNotOmitted, isTimelineSection, timelineSectionOf, type TimelineSection } from './timeline-omission.ts';
 import { contentOriginTier } from '../trust/tier.ts';
+import { throwIfHeld } from '../trust/gate-outcomes.ts';
 import { admitWrite, assertPageRequestIdentity, assertReplayIntent, getWriteRequest, intentDigest, type WriteAdmission } from './journal.ts';
 import { submissionAuthority, authorizeStoredRequest } from './authority.ts';
 import { currentVerifiedLocalWriter, localHostId, readLocalWriter, registerLocalWriter, withVerifiedLocalRegistration } from './identity.ts';
@@ -184,9 +185,9 @@ export async function submitPageMutation(ctx: OperationContext,
   const wireWaitMs = parseWireWriteWaitMs(wireWait);
   const waitMs = () => wireWaitMs !== undefined ? Math.max(0, wireWaitMs - (performance.now() - arrived)) : input.waitMs ?? ctx.writeWaitMs;
   const prepared = await preparePageAdmission(ctx, { ...input, params });
-  if (prepared.prior) return pendingAwareResponse(ctx, await waitForWrite(ctx.engine, prepared.prior, ctx.config, waitMs()));
+  if (prepared.prior) return throwIfHeld(pendingAwareResponse(ctx, await waitForWrite(ctx.engine, prepared.prior, ctx.config, waitMs())), false);
   const row = await admitWrite(ctx.engine, prepared.admission);
-  const response = pendingAwareResponse(ctx, await waitForWrite(ctx.engine, row, ctx.config, waitMs()));
+  const response = throwIfHeld(pendingAwareResponse(ctx, await waitForWrite(ctx.engine, row, ctx.config, waitMs())), false);
   emitFenceNotice(ctx, response, row.slug);
   return { ...response, ...(prepared.typeWarning ? { type_warning: prepared.typeWarning } : {}), ...(prepared.slugAdvisory ? { slug_advisory: prepared.slugAdvisory } : {}) };
 }
