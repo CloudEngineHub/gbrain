@@ -85,12 +85,16 @@ describe('importFromContent with opts.writeGate', () => {
     expect((await receipts()).map(x => x.verdict)).toEqual(['flag']);
   });
 
-  test('owner tiers are untouched even with a writeGate input', async () => {
-    for (const tier of ['operator_curated', 'user_confirmed', 'tool_observed'] as const) {
+  test('owner tiers are untouched even with a writeGate input; user_confirmed is never a declared write tier', async () => {
+    for (const tier of ['operator_curated', 'tool_observed'] as const) {
       const r = await importFromContent(engine, `notes/${tier}`, page(ATTACK), { sourceId: 'default', noEmbed: true, writeGate: { tier } });
       expect(r.quarantined).toBeUndefined();
       expect(r.flagged).toBeUndefined();
     }
+    // The gate input is the write's declared tier (L1a); only the owner's confirmation raises a row to user_confirmed (I1, ENG-13).
+    await expect(importFromContent(engine, 'notes/user_confirmed', page(ATTACK), { sourceId: 'default', noEmbed: true, writeGate: { tier: 'user_confirmed' } }))
+      .rejects.toThrow(/trust_raise_refused/);
+    expect(await engine.executeRaw('SELECT 1 FROM pages WHERE slug = $1', ['notes/user_confirmed'])).toEqual([]);
     expect(await receipts()).toEqual([]);
   });
 
