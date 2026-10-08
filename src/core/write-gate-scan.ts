@@ -115,16 +115,22 @@ function emptyTable(): WriteGateScanTableReport {
   return { scanned: 0, truncated: false, by_tier: Object.fromEntries(WRITE_GATE_TIERS.map(t => [t, emptyTier()])) as Record<WriteGateTier, WriteGateScanTierStats>, patterns: {} };
 }
 
+/** Which request-attribution joins the scanned schema supports (pre-v193 brains have none). */
+interface ScanCaps { requests: boolean; pageRequest: boolean; factRequest: boolean; takeRequest: boolean; timelineRequest: boolean }
+
+const requestSql = (enabled: boolean) => enabled ? REQUEST_SIGNAL('pr') : 'NULL';
+const requestJoin = (enabled: boolean, row: string, column: string) => enabled ? `LEFT JOIN persistence_requests pr ON pr.id = ${row}.${column}` : '';
+
 interface TableSpec<R extends ScanRow> {
-  sql: (scoped: boolean) => string;
+  sql: (scoped: boolean, caps: ScanCaps) => string;
   assess: (row: R, tier: WriteGateTier, cfg: WriteGateConfig) => WriteGateAssessment;
 }
 
 const SPECS: { [T in WriteGateScanTable]: TableSpec<ScanRow & Record<string, unknown>> } = {
   pages: {
-    sql: scoped => `SELECT p.id::text AS id, p.source_id, p.title, p.compiled_truth, p.timeline, p.frontmatter,
-        ${PAGE_SIGNAL('p', 's')} AS page_signal, ${REQUEST_SIGNAL('pr')} AS request_signal
-      FROM pages p LEFT JOIN sources s ON s.id = p.source_id LEFT JOIN persistence_requests pr ON pr.id = p.revision_write_request_id
+    sql: (scoped, caps) => `SELECT p.id::text AS id, p.source_id, p.title, p.compiled_truth, p.timeline, p.frontmatter,
+        ${PAGE_SIGNAL('p', 's')} AS page_signal, ${requestSql(caps.pageRequest)} AS request_signal
+      FROM pages p LEFT JOIN sources s ON s.id = p.source_id ${requestJoin(caps.pageRequest, 'p', 'revision_write_request_id')}
       WHERE p.deleted_at IS NULL AND p.id > $1::bigint ${scoped ? 'AND p.source_id = $3' : ''} ORDER BY p.id LIMIT $2`,
     assess: (r, tier, cfg) => assessPageForGate({
       title: r.title as string | null, compiled_truth: String(r.compiled_truth ?? ''), timeline: r.timeline as string | null,
@@ -132,27 +138,27 @@ const SPECS: { [T in WriteGateScanTable]: TableSpec<ScanRow & Record<string, unk
     }, { tier }, cfg),
   },
   facts: {
-    sql: scoped => `SELECT f.id::text AS id, f.source_id, f.fact, f.context, f.value, f.source,
-        ${PAGE_SIGNAL('sp', 's')} AS page_signal, ${REQUEST_SIGNAL('pr')} AS request_signal, ${FACT_SOURCE_SIGNAL} AS row_signal
+    sql: (scoped, caps) => `SELECT f.id::text AS id, f.source_id, f.fact, f.context, f.value, f.source,
+        ${PAGE_SIGNAL('sp', 's')} AS page_signal, ${requestSql(caps.factRequest)} AS request_signal, ${FACT_SOURCE_SIGNAL} AS row_signal
       FROM facts f LEFT JOIN sources s ON s.id = f.source_id
         LEFT JOIN pages sp ON sp.source_id = f.source_id AND sp.slug = f.source_markdown_slug
-        LEFT JOIN persistence_requests pr ON pr.id = f.write_request_id
+        ${requestJoin(caps.factRequest, 'f', 'write_request_id')}
       WHERE f.expired_at IS NULL AND f.id > $1::bigint ${scoped ? 'AND f.source_id = $3' : ''} ORDER BY f.id LIMIT $2`,
     assess: (r, tier, cfg) => assessFactForGate({ fact: String(r.fact ?? ''), context: r.context as string | null, value: r.value as string | null, source: r.source as string | null }, { tier }, cfg),
   },
   takes: {
-    sql: scoped => `SELECT t.id::text AS id, p.source_id, t.claim, t.source,
-        ${PAGE_SIGNAL('p', 's')} AS page_signal, ${REQUEST_SIGNAL('pr')} AS request_signal, 'agent_written' AS row_signal
+    sql: (scoped, caps) => `SELECT t.id::text AS id, p.source_id, t.claim, t.source,
+        ${PAGE_SIGNAL('p', 's')} AS page_signal, ${requestSql(caps.takeRequest)} AS request_signal, 'agent_written' AS row_signal
       FROM takes t JOIN pages p ON p.id = t.page_id LEFT JOIN sources s ON s.id = p.source_id
-        LEFT JOIN persistence_requests pr ON pr.id = t.write_request_id
+        ${requestJoin(caps.takeRequest, 't', 'write_request_id')}
       WHERE t.active AND t.id > $1::bigint ${scoped ? 'AND p.source_id = $3' : ''} ORDER BY t.id LIMIT $2`,
     assess: (r, tier, cfg) => assessTakeForGate({ claim: String(r.claim ?? ''), source: r.source as string | null }, { tier }, cfg),
   },
   timeline_entries: {
-    sql: scoped => `SELECT te.id::text AS id, p.source_id, te.summary, te.detail, te.source,
-        ${PAGE_SIGNAL('p', 's')} AS page_signal, ${REQUEST_SIGNAL('pr')} AS request_signal
+    sql: (scoped, caps) => `SELECT te.id::text AS id, p.source_id, te.summary, te.detail, te.source,
+        ${PAGE_SIGNAL('p', 's')} AS page_signal, ${requestSql(caps.timelineRequest)} AS request_signal
       FROM timeline_entries te JOIN pages p ON p.id = te.page_id LEFT JOIN sources s ON s.id = p.source_id
-        LEFT JOIN persistence_requests pr ON pr.id = te.write_request_id
+        ${requestJoin(caps.timelineRequest, 'te', 'write_request_id')}
       WHERE te.id > $1::bigint ${scoped ? 'AND p.source_id = $3' : ''} ORDER BY te.id LIMIT $2`,
     assess: (r, tier, cfg) => assessTimelineForGate({ summary: String(r.summary ?? ''), detail: r.detail as string | null, source: r.source as string | null }, { tier }, cfg),
   },
@@ -166,6 +172,18 @@ export async function scanWriteGateExposure(exec: Exec, opts: WriteGateScanOptio
     schema_version: 1, detector_version: WRITE_GATE_DETECTOR_VERSION, config: cfg, read_only: true, source_id: opts.sourceId ?? null, tables: {},
     totals: { rows: 0, flagged: 0, quarantined: 0, rejected: 0, detector_hits: 0, hit_rate: 0 },
   };
+  const cols = new Set((await exec.executeRaw<{ t: string; c: string }>(
+    `SELECT table_name AS t, column_name AS c FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = ANY($1::text[])`,
+    [['pages', 'facts', 'takes', 'timeline_entries', 'persistence_requests']])).map(r => `${r.t}.${r.c}`));
+  const requests = ['operation', 'intent', 'authority'].every(c => cols.has(`persistence_requests.${c}`));
+  const caps: ScanCaps = {
+    requests,
+    pageRequest: requests && cols.has('pages.revision_write_request_id'),
+    factRequest: requests && cols.has('facts.write_request_id'),
+    takeRequest: requests && cols.has('takes.write_request_id'),
+    timelineRequest: requests && cols.has('timeline_entries.write_request_id'),
+  };
   for (const table of opts.tables ?? WRITE_GATE_SCAN_TABLES) {
     const spec = SPECS[table];
     const out = emptyTable();
@@ -174,7 +192,7 @@ export async function scanWriteGateExposure(exec: Exec, opts: WriteGateScanOptio
     for (;;) {
       const room = opts.limitPerTable === undefined ? batch : Math.min(batch, opts.limitPerTable - out.scanned);
       if (room <= 0) { out.truncated = true; break; }
-      const rows = await exec.executeRaw<ScanRow & Record<string, unknown>>(spec.sql(!!opts.sourceId),
+      const rows = await exec.executeRaw<ScanRow & Record<string, unknown>>(spec.sql(!!opts.sourceId, caps),
         [cursor, room, ...(opts.sourceId ? [opts.sourceId] : [])]);
       for (const row of rows) {
         const tier = projectTier([row.page_signal, row.request_signal, row.row_signal]);
