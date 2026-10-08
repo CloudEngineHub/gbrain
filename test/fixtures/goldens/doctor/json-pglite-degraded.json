@@ -1808,7 +1808,7 @@
               "timeline_entries": 0
             }
           },
-          "message": "Every agent-written or lower row has been scanned by the current write-gate detector; proactive suppression covers them.",
+          "message": "Every agent-written or lower row has been scanned by the current write-gate detector; flagged rows carry their flag, and proactive surfaces withhold them when trust.agent_activation is suppress.",
           "name": "trust_scan",
           "status": "ok"
         },

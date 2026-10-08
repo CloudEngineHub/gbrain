@@ -94,6 +94,9 @@ describeWhen('memory-trust route matrix (DX-19) over serve-http, a thin client a
     const owner = await host(['auth', 'create', 'trust-matrix-owner', '--scopes', 'read,write,memory_confirm']);
     ownerToken = tokenFrom(owner);
     if (!agentToken || !ownerToken) throw new Error(cliDiagnostic('auth create failed', owner.exitCode ? owner : agent));
+    // A held write needs external quarantine, the owner's opt-in since the paid eval set the default to flag.
+    const quarantine = await host(['config', 'set', 'write_gate.external_mode', 'quarantine']);
+    if (quarantine.exitCode !== 0) throw new Error(cliDiagnostic('config set failed', quarantine));
 
     server = await startServeHttp({
       cwd: process.cwd(),

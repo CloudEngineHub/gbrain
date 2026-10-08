@@ -196,7 +196,7 @@ describe('meta-hook cache hygiene (bounded, expired-entry eviction)', () => {
   const stubRaw = async (sql: string, params?: unknown[]) =>
     sql.includes('trust_policy_state') ? [{ generation: '0' }]
       : sql.includes('fact_withdrawals') ? [{ n: 0, at: null }]
-        : sql.includes('AS suppressed') ? ((params?.[0] as number[]) ?? []).map(id => ({ id, trust_tier: 'unknown', suppressed: false }))
+        : sql.includes('AS flagged') ? ((params?.[0] as number[]) ?? []).map(id => ({ id, trust_tier: 'unknown', flagged: false }))
           : [];
   /** Engine stub with no facts — every call takes the payload:undefined cache path. */
   function emptyEngine(): BrainEngine {
