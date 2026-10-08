@@ -37,6 +37,7 @@ import { checkpointRetryCommand, findIncompleteSyncReceipt } from './checkpoint-
 import { frontmatterSlugConflictMessage } from './verb-errors.ts';
 import { CHUNKER_VERSION } from '../chunkers/code.ts';
 import { clearGitHold, countGitHolds, recordSyncImportProvenance } from './sync-holds.ts';
+import { readPagePurgeTombstones } from './page-purge.ts';
 import { fenceWhere } from '../fence-repair/refusal.ts';
 import { fencesNormalizeEnabled } from '../fence-repair/config.ts';
 import { describeFixes } from '../fence-repair/report.ts';
@@ -136,6 +137,7 @@ function syncContentRefusal(refusal: ContentRefusal, row: WriteRequest, p: SyncI
     : refusal.code === 'frontmatter_slug_conflict' ? 'Correct the frontmatter `slug:` in the file and commit the change.'
     : refusal.code === 'file_too_large' ? `${p.sourcePath} is over the import size limit; split it into smaller files or add it to sync.exclude, then commit.`
     : refusal.code === 'content_rejected' ? `The content-sanity gate rejects ${p.sourcePath} under junk_disposition=reject; remove the matched junk and commit.`
+    : refusal.code === 'purged_content' ? `${p.sourcePath} still carries purged content; delete or edit the file and commit, or the owner clears the tombstone with gbrain pages unpurge.`
     : `Fix ${where} (one line per key, the whole value quoted) and commit the change; gbrain repair frontmatter --source ${row.source_id} previews the exact line fix and writes it only after the preview hash is approved.`;
   const error = syncPublicationRefusal(refusal.code, refusal.message, row, p, cause, false, {
     ...(refusal.code === 'content_rejected' ? {} : { legacy_error: 'invalid_params' }),
@@ -155,6 +157,8 @@ export interface SyncImportScreenInput {
   activePack?: ParseOpts['activePack']; companyApproval?: boolean; sanity?: ImportSanityConfig;
   /** #6188: `fences.normalize`; false holds a fixable fence like any other. Default true. */
   normalize?: boolean;
+  /** #5575: page purge tombstones of the source; a matching file is held as `purged_content`. */
+  purgedPages?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -182,6 +186,7 @@ export function screenSyncImport(input: SyncImportScreenInput): { screen: Import
     slugExempt: declared => snapshot?.page.source_path != null && syncOriginPath(snapshot.page.source_path) === syncOriginPath(sourcePath) && declared === snapshot.page.slug,
     slugConflictMessage: (found, expected) => frontmatterSlugConflictMessage(sourcePath, found, expected),
     ...(input.sanity ? { sanity: input.sanity } : {}),
+    ...(input.purgedPages ? { purgedPages: input.purgedPages } : {}),
     ...(newerWorkingTree ? { published: () => {
       const working = input.renamed ? null : readSyncFile(input.root, input.path);
       return !!working && sha256(working) === input.rawHash && sameCanonicalImport(base!, parseMarkdown(working.toString('utf8'), `${slug}.md`, { activePack }));
@@ -396,7 +401,8 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
       `Page ${renamed.slug}, which this file was renamed from, changed or was deleted after the sync was admitted.`);
   }
   const { screen, parsedInput, newerWorkingTree } = await settledSyncScreen(engine, { content: p.content, rawHash: p.rawHash, lineEndingOnly: p.lineEndingOnly === true,
-    slug: row.slug, sourcePath: p.sourcePath, path: p.path, root, snapshot, base, renamed: !!renamed, activePack, companyApproval: !!p.companyApproval });
+    slug: row.slug, sourcePath: p.sourcePath, path: p.path, root, snapshot, base, renamed: !!renamed, activePack, companyApproval: !!p.companyApproval,
+    purgedPages: await readPagePurgeTombstones(engine, row.source_id) });
   if (screen.status === 'published') return { observedRevision: snapshot?.revision ?? null, noop: true, contentUnchanged: true, validate,
     apply: async tx => { await releaseHold(tx); return { status: 'skipped', slug: row.slug, source_id: row.source_id, chunks: 0, noop: true, imported_file: true }; } };
   if (screen.status === 'refused') throw syncContentRefusal(screen.refusal, row, p);

@@ -486,6 +486,14 @@ already-expired fact returns `expired: false` (success); unknown id ⇒
 
 Response: `{ id, expired, reason, protocol_version }`.
 
+#### forget and purge (additive note)
+
+`forget` keeps this contract: it expires, never deletes. Removing a claim's
+text from live stores is a separate owner-only operation, `purge_fact` (CLI:
+`gbrain forget <id> --purge` on the brain host), which is not a memory verb and
+is never callable over MCP; a remote call gets `trusted_local_only` with the
+command for the user. See [expire versus purge](../guides/memory-boundaries.md#purge).
+
 #### forget similar_active and semantic_review (additive)
 
 `semantic_review` (boolean, default `true`): `false` keeps this claim out of
