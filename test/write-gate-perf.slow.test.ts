@@ -133,7 +133,7 @@ afterAll(async () => { await engine.disconnect(); });
 describe('write gate p95 (assessment + receipt insert)', () => {
   test(`300 KB typical page: p95 within ${BUDGET_MS} ms`, async () => {
     const text = typicalCorpus(300_000);
-    const rounds = [];
+    const rounds: Array<{ gate: Stats; reference: Stats }> = [];
     for (let i = 0; i < 3; i++) {
       const r = await measureInterleaved(text, 60, 10);
       rounds.push(r);
