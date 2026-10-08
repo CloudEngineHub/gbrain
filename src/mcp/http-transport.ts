@@ -510,7 +510,8 @@ export async function startHttpTransport(opts: HttpTransportOptions) {
         const toolName: string = params?.name ?? 'unknown';
         const args: Record<string, unknown> = params?.arguments ?? {};
         const op = operationsByName[toolName];
-        if (op && !op.localOnly && !operationScopesAllowed(auth.auth!.scopes, op)) {
+        // #5575: cliOnly ops reach the dispatcher's trusted_local_only refusal (the host command), never a grant-widening scope fix.
+        if (op && !op.localOnly && !op.cliOnly && !operationScopesAllowed(auth.auth!.scopes, op)) {
           logRequest(auth.tokenName!, `tools/call:${toolName}`, 'denied_after_list', Date.now() - startedMs);
           // Frozen v1 pair: `error: permission_denied` stays; `code: insufficient_scope`.
           const denial = scopeDeniedError({ op: toolName, required: [op.scope ?? 'read', ...(op.requiredScopes ?? [])], auth: auth.auth,
