@@ -67,6 +67,9 @@ const DELEGATED_MODULES: Record<string, string[]> = {
   // runPersistenceAdminCli (#5595), and `auth rescope-client|rescope-token` to
   // parseRescopeGrantArgs; both parse --dry-run themselves.
   auth: ['src/commands/persistence-admin.ts', 'src/core/grants/cli.ts'],
+  // `forget --purge` (and forget --help) hand the argv to runForgetPurge, which
+  // parses --dry-run itself; a plain forget refuses --dry-run (recall.ts).
+  forget: ['src/commands/forget-purge.ts'],
 };
 
 /**

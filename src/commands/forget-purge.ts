@@ -90,6 +90,11 @@ export function renderPurgeReceipt(r: Record<string, unknown>): string {
 /** Test seam: the terminal probe and the typed-token reader (defaults: isInteractive and a stderr prompt). */
 export interface PurgeCliIo { interactive?: () => boolean; readToken?: (prompt: string) => Promise<string | null> }
 
+/** `gbrain forget` argv this module handles: a purge, its help, and a --dry-run (which a plain forget refuses here, since it has none). */
+export function routesToForgetPurge(args: readonly string[]): boolean {
+  return args.includes('--purge') || args.includes('--dry-run') || args.includes('--help') || args.includes('-h');
+}
+
 export async function runForgetPurge(engine: BrainEngine | (() => Promise<BrainEngine>), args: string[], io: PurgeCliIo = {}): Promise<void> {
   const json = args.includes('--json');
   const { reportPersistenceCliError } = await import('./persistence-delegate.ts');
@@ -98,6 +103,10 @@ export async function runForgetPurge(engine: BrainEngine | (() => Promise<BrainE
   const out = (value: Record<string, unknown>, human: string) => process.stdout.write(json ? `${JSON.stringify(value, null, 2)}\n` : human);
   try {
     if (args.includes('--help') || args.includes('-h')) { process.stdout.write(USAGE); return; }
+    if (!args.includes('--purge')) {
+      throw opError('invalid_params', '--dry-run previews a purge only; a plain forget has no dry run, so nothing was forgotten.',
+        'Add --purge to preview a purge (gbrain forget <id> --purge --dry-run), or drop --dry-run to forget the fact.');
+    }
     const idArg = args.find(a => /^\d+$/.test(a));
     const cfg = loadConfig();
     if (isThinClient(cfg)) throw purgeHostOnly(idArg);

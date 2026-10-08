@@ -14,7 +14,7 @@ import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { importFromContent } from '../src/core/import-file.ts';
 import { runExtractFacts } from '../src/core/cycle/extract-facts.ts';
 import { registerLocalWriter } from '../src/core/persistence/identity.ts';
-import { runForgetPurge } from '../src/commands/forget-purge.ts';
+import { routesToForgetPurge, runForgetPurge } from '../src/commands/forget-purge.ts';
 import { _resetCliExitVerdictForTests, currentExitCode } from '../src/core/cli-force-exit.ts';
 import { withEnv } from './helpers/with-env.ts';
 
@@ -84,5 +84,13 @@ describe('gbrain forget --purge', () => {
     const dry = await capture(() => runForgetPurge(engine, [String(factId), '--purge', '--dry-run'], { interactive: () => false }));
     expect(dry.out).toContain('Purge dry run');
     expect(await engine.executeRaw('SELECT 1 FROM facts WHERE id=$1', [factId])).toHaveLength(1);
+  }, 60_000);
+
+  test('a plain forget with --dry-run is refused before anything changes (a dry run exists only for --purge)', async () => {
+    expect(routesToForgetPurge([String(factId), '--dry-run'])).toBe(true);
+    const refused = await capture(() => runForgetPurge(engine, [String(factId), '--dry-run', '--json'], { interactive: () => false }));
+    expect(refused.code).not.toBe(0);
+    const [row] = await engine.executeRaw<{ expired_at: unknown }>('SELECT expired_at FROM facts WHERE id=$1', [factId]);
+    expect(row?.expired_at).toBeNull();
   }, 60_000);
 });
