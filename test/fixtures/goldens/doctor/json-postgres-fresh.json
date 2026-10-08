@@ -1849,6 +1849,17 @@
         {
           "category": "brain",
           "details": {
+            "legacy_unknown": 0,
+            "pending": [],
+            "unclaimed": []
+          },
+          "message": "No unclaimed source holds rows from before trust tiers.",
+          "name": "trust_sources_unclaimed",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
             "bad_config": [],
             "chars_limit": 4000,
             "chars_used": 0,

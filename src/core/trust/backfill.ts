@@ -34,18 +34,23 @@
  * resumePageRevisionBackfill precedent) under the backfill setting, inside
  * withCoordinatedWrite for each batch's sources on a managed brain.
  */
+import { createHash } from 'node:crypto';
 import type { BrainEngine } from '../engine.ts';
 import { FACTS_BACKSTOP_SOURCES } from '../facts/capture-sources.ts';
 import { opError } from '../ops/contract.ts';
 import { CONNECTOR_SOURCE_KINDS } from '../persistence/connector-identity.ts';
 import { withCoordinatedWrite, withTrustBackfill } from '../persistence/context.ts';
 import { maintenanceAttribution } from '../persistence/attribution.ts';
+import { frontmatterTrustCapsSql } from './channel.ts';
+import { claimedSourceSql, legacyRowSql, notConnectorSourceSql, readLegacyCeilings, type LegacyCeilings } from './claim-state.ts';
 import { TRUST_BACKFILL_COMPLETED_KEY, type TrustTable } from './schema.ts';
 import { TRUST_TIER_RANK, TRUST_TIERS, isTrustTier, trustRankSql, trustTierFromRankSql, type TrustTier } from './tier.ts';
 
 export { TRUST_BACKFILL_COMPLETED_KEY };
 export const TRUST_BACKFILL_COMMAND = 'gbrain trust backfill --resume';
 const CHECKPOINT_OP = 'trust-backfill';
+/** The claim lift's own cursor, so it never resumes (or clears) a full backfill's. */
+const CLAIM_CHECKPOINT_OP = 'trust-claim';
 const CHECKPOINT_KEY = 'v1';
 const DEFAULT_BATCH = 2000;
 /** Pages first: facts, takes and timeline rows take their page's classified tier. */
@@ -56,6 +61,14 @@ export interface TrustBackfillOptions {
   resume?: boolean;
   batchSize?: number;
   log?: (line: string) => void;
+  /**
+   * Only rows of these sources (the claim lift, trust/claim.ts): its own
+   * resumable cursor, `write_origin.channel` `trust_claim`, and no global
+   * backfill completion stamp.
+   */
+  sources?: readonly string[];
+  /** Dry run only: project these sources as if claimed. */
+  assumeClaimed?: readonly string[];
 }
 export type TierCounts = Record<TrustTier, number>;
 export interface TrustBackfillTableReport {
@@ -102,8 +115,21 @@ async function readColumns(engine: BrainEngine): Promise<Columns> {
 }
 
 /** Builds the rank expressions for one schema shape. Every term yields a rank or NULL (no signal). */
-function classifier(cols: Columns) {
+function classifier(cols: Columns, assumeClaimed: readonly string[] = [], ceilings: LegacyCeilings = null) {
   const signals = new Set<string>();
+  /** The source aliased `s` is claimed (or projected as claimed): its rows with no lowering signal are operator_curated. */
+  const claimed = (s: string) => {
+    if (!cols.has('sources', 'config')) return null;
+    signals.add('claimed_source');
+    return assumeClaimed.length
+      ? `(${claimedSourceSql(s)} OR (${s}.id IN (${quoted(assumeClaimed)}) AND ${notConnectorSourceSql(s)}))`
+      : claimedSourceSql(s);
+  };
+  /** A claim lifts only legacy rows (claim-state.ts): `row` is the classified row's alias in `table`. */
+  const claimTerm = (s: string, table: TrustTable, row: string) => {
+    const c = claimed(s);
+    return c ? `CASE WHEN ${c} AND ${legacyRowSql(table, row, ceilings)} THEN ${rank('operator_curated')} END` : null;
+  };
   const connector = (sourceAlias: string) => {
     if (!cols.has('sources', 'config')) return null;
     signals.add('connector_source');
@@ -142,10 +168,22 @@ function classifier(cols: Columns) {
     return terms;
   };
   const least = (terms: string[]) => (terms.length ? `LEAST(${terms.join(', ')})` : 'NULL::int');
+  /**
+   * A page's rule: its signals, and on a claimed source operator_curated lowered by every frontmatter signal
+   * an owner sync would apply (`frontmatterTrustCaps`), so a claim never lifts a captured, clipped, imported
+   * or marked page above what it says it is.
+   */
+  const pageRule = (p: string, s: string, r: string) => {
+    const terms = pageTerms(p, s, r);
+    const c = claimed(s);
+    if (!c) return least(terms);
+    const caps = cols.has('pages', 'frontmatter') ? frontmatterTrustCapsSql(`${p}.frontmatter`) : [];
+    return `CASE WHEN ${c} AND ${legacyRowSql('pages', p, ceilings)} THEN ${least([String(rank('operator_curated')), ...caps, ...terms])} ELSE ${least(terms)} END`;
+  };
   const hasTrust = cols.has('pages', 'trust_tier');
   /** The tier a row's page contributes: its stored tier when classified, else the page's own signals. */
   const pageTaint = (p: string, s: string, r: string) => {
-    const rule = least(pageTerms(p, s, r));
+    const rule = pageRule(p, s, r);
     return hasTrust ? `CASE WHEN ${p}.id IS NULL THEN NULL WHEN ${p}.trust_tier <> 'unknown' THEN ${trustRankSql(`${p}.trust_tier`)} ELSE ${rule} END` : rule;
   };
   const pageJoins = (p: string, s: string, r: string, on: string) =>
@@ -155,11 +193,12 @@ function classifier(cols: Columns) {
   const forTable = (table: TrustTable): { from: string; rule: string; src: string } => {
     if (table === 'pages') {
       return { from: `pages x ${cols.has('sources', 'config') ? 'LEFT JOIN sources s ON s.id = x.source_id' : ''} ${requestJoin('pages', 'revision_write_request_id', 'r', 'x')}`,
-        rule: least(pageTerms('x', 's', 'r')), src: 'x.source_id' };
+        rule: pageRule('x', 's', 'r'), src: 'x.source_id' };
     }
     if (table === 'facts') {
       const terms: string[] = [];
       const c = connector('s'); if (c) terms.push(c);
+      const own = claimTerm('s', 'facts', 'x'); if (own) terms.push(own);
       if (cols.has('facts', 'source')) {
         signals.add('facts_source_lane');
         terms.push(`CASE WHEN x.source IN (${quoted(FACTS_BACKSTOP_SOURCES)}) OR x.source LIKE 'cli:extract-conversation-facts%' THEN ${rank('agent_written')} END`);
@@ -175,6 +214,7 @@ function classifier(cols: Columns) {
     }
     const terms: string[] = [pageTaint('pg', 'ps', 'pr')];
     if (cols.has('sources', 'config')) terms.push(`CASE WHEN ps.config->>'kind' IN (${quoted(CONNECTOR_SOURCE_KINDS)}) THEN ${rank('external_untrusted')} END`);
+    const own = claimTerm('ps', table, 'x'); if (own) terms.push(own);
     if (table === 'takes' && cols.has('takes', 'source')) {
       signals.add('takes_source');
       terms.push(`CASE WHEN x.source LIKE 'take\\_proposals#%' THEN ${rank('agent_written')} END`);
@@ -186,17 +226,20 @@ function classifier(cols: Columns) {
   return { forTable, signals, hasTrust };
 }
 
-async function readCursor(engine: BrainEngine): Promise<Partial<Record<TrustTable, number>>> {
+async function readCursor(engine: BrainEngine, op = CHECKPOINT_OP, key = CHECKPOINT_KEY): Promise<Partial<Record<TrustTable, number>>> {
   const [row] = await engine.executeRaw<{ keys: unknown }>(
-    'SELECT completed_keys AS keys FROM op_checkpoints WHERE op = $1 AND fingerprint = $2', [CHECKPOINT_OP, CHECKPOINT_KEY]);
+    'SELECT completed_keys AS keys FROM op_checkpoints WHERE op = $1 AND fingerprint = $2', [op, key]);
   const keys = typeof row?.keys === 'string' ? JSON.parse(row.keys) : row?.keys;
   return Array.isArray(keys) && keys[0] && typeof keys[0] === 'object' ? keys[0] as Partial<Record<TrustTable, number>> : {};
 }
-async function saveCursor(engine: BrainEngine, cursor: Partial<Record<TrustTable, number>>): Promise<void> {
+async function saveCursor(engine: BrainEngine, cursor: Partial<Record<TrustTable, number>>, op = CHECKPOINT_OP, key = CHECKPOINT_KEY): Promise<void> {
   await engine.executeRaw(`INSERT INTO op_checkpoints(op, fingerprint, completed_keys) VALUES ($1, $2, $3::text::jsonb)
     ON CONFLICT (op, fingerprint) DO UPDATE SET completed_keys = EXCLUDED.completed_keys, updated_at = now()`,
-  [CHECKPOINT_OP, CHECKPOINT_KEY, JSON.stringify([cursor])]);
+  [op, key, JSON.stringify([cursor])]);
 }
+
+/** A claim lift's cursor key: one per set of sources, so lifting another set never skips its rows. */
+const claimCursorKey = (sources: readonly string[]) => createHash('sha256').update([...sources].sort().join('\n')).digest('hex').slice(0, 16);
 
 function summarize(mode: TrustBackfillReport['mode'], schema: TrustBackfillReport['schema'], tables: TrustBackfillTableReport[],
   signals: Set<string>, status: TrustBackfillReport['status']): TrustBackfillReport {
@@ -213,15 +256,17 @@ function summarize(mode: TrustBackfillReport['mode'], schema: TrustBackfillRepor
 }
 
 /** The read-only projection: counts by table x tier, in keyset batches inside one READ ONLY transaction. */
-async function dryRun(engine: BrainEngine, batch: number): Promise<TrustBackfillReport> {
+async function dryRun(engine: BrainEngine, batch: number, opts: Pick<TrustBackfillOptions, 'sources' | 'assumeClaimed'> = {}): Promise<TrustBackfillReport> {
   return engine.transaction(async tx => {
     await tx.executeRaw('SET TRANSACTION READ ONLY');
     const cols = await readColumns(tx);
-    const { forTable, signals, hasTrust } = classifier(cols);
+    const ceilings = cols.has('sources', 'config') ? await readLegacyCeilings(tx).catch(() => null) : null;
+    const { forTable, signals, hasTrust } = classifier(cols, opts.assumeClaimed, ceilings);
     const tables: TrustBackfillTableReport[] = [];
     for (const table of BACKFILL_ORDER) {
       if (!cols.table(table)) continue;
-      const { from, rule } = forTable(table);
+      const { from, rule, src } = forTable(table);
+      const only = opts.sources ? ` AND ${src} IN (${quoted(opts.sources)})` : '';
       const ruleTier = trustTierFromRankSql(rule);
       const report: TrustBackfillTableReport = { table, rows: 0, ...(hasTrust ? { current: zero() } : {}), projected: zero() };
       for (let after = 0; ;) {
@@ -229,7 +274,7 @@ async function dryRun(engine: BrainEngine, batch: number): Promise<TrustBackfill
           `SELECT max(id) AS last, count(*) AS n, current, tier FROM (
              SELECT x.id, ${hasTrust ? 'x.trust_tier' : 'NULL::text'} AS current,
                     ${hasTrust ? `CASE WHEN x.trust_tier <> 'unknown' THEN x.trust_tier ELSE ${ruleTier} END` : ruleTier} AS tier
-               FROM ${from} WHERE x.id > $1 ORDER BY x.id LIMIT $2) b
+               FROM ${from} WHERE x.id > $1${only} ORDER BY x.id LIMIT $2) b
            GROUP BY current, tier`, [after, batch]);
         if (rows.length === 0) break;
         for (const row of rows) {
@@ -248,7 +293,8 @@ async function dryRun(engine: BrainEngine, batch: number): Promise<TrustBackfill
 
 export async function runTrustBackfill(engine: BrainEngine, opts: TrustBackfillOptions = {}): Promise<TrustBackfillReport> {
   const batch = opts.batchSize ?? DEFAULT_BATCH;
-  if (opts.dryRun) return dryRun(engine, batch);
+  if (opts.dryRun) return dryRun(engine, batch, opts);
+  if (opts.sources && opts.sources.length === 0) return summarize('apply', 'trust_columns', [], new Set(), 'complete');
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const cols = await readColumns(engine);
   if (!cols.has('pages', 'trust_tier')) {
@@ -258,35 +304,41 @@ export async function runTrustBackfill(engine: BrainEngine, opts: TrustBackfillO
           why: 'Applies the pending schema migrations, including the trust tier columns.', verify: { argv: ['gbrain', 'doctor', '--json'] } },
       });
   }
-  const { forTable, signals } = classifier(cols);
+  const { forTable, signals } = classifier(cols, [], await readLegacyCeilings(engine).catch(() => null));
   const [brain] = await engine.executeRaw<{ enabled: boolean }>('SELECT enabled FROM persistence_brain WHERE singleton = 1');
   const attribution = await maintenanceAttribution(engine);
-  const cursor = opts.resume ? await readCursor(engine) : {};
+  const scoped = opts.sources !== undefined;
+  const op = scoped ? CLAIM_CHECKPOINT_OP : CHECKPOINT_OP;
+  const key = scoped ? claimCursorKey(opts.sources!) : CHECKPOINT_KEY;
+  const origin = JSON.stringify({ channel: scoped ? 'trust_claim' : 'trust_backfill' });
+  const cursor = opts.resume || scoped ? await readCursor(engine, op, key) : {};
   const tables: TrustBackfillTableReport[] = [];
   for (const table of BACKFILL_ORDER) {
     const { from, rule, src } = forTable(table);
     let updated = 0;
     for (let after = cursor[table] ?? 0; ;) {
-      const ids = (await engine.executeRaw<{ id: number | string }>(
-        `SELECT id FROM ${table} WHERE id > $1 AND trust_tier = 'unknown' ORDER BY id LIMIT $2`, [after, batch])).map(r => Number(r.id));
+      const ids = (await engine.executeRaw<{ id: number | string }>(scoped
+        ? `SELECT x.id FROM ${from} WHERE x.id > $1 AND x.trust_tier = 'unknown' AND ${src} = ANY($3::text[]) ORDER BY x.id LIMIT $2`
+        : `SELECT id FROM ${table} WHERE id > $1 AND trust_tier = 'unknown' ORDER BY id LIMIT $2`, scoped ? [after, batch, [...opts.sources!]] : [after, batch])).map(r => Number(r.id));
       if (ids.length === 0) break;
       const sources = (await engine.executeRaw<{ source_id: string | null }>(
         `SELECT DISTINCT ${src} AS source_id FROM ${from} WHERE x.id = ANY($1::bigint[])`, [ids])).map(r => r.source_id).filter((s): s is string => !!s);
       const apply = (tx: BrainEngine) => withTrustBackfill(tx, async () => (await tx.executeRaw<{ id: number }>(
         `WITH b AS (SELECT x.id, ${trustTierFromRankSql(rule)} AS tier FROM ${from} WHERE x.id = ANY($1::bigint[]))
-         UPDATE ${table} t SET trust_tier = b.tier, write_origin = COALESCE(t.write_origin, '{"channel":"trust_backfill"}'::jsonb)
-           FROM b WHERE t.id = b.id AND t.trust_tier = 'unknown' AND b.tier <> 'unknown' RETURNING t.id`, [ids])).length);
+         UPDATE ${table} t SET trust_tier = b.tier, write_origin = COALESCE(t.write_origin, $2::text::jsonb)
+           FROM b WHERE t.id = b.id AND t.trust_tier = 'unknown' AND b.tier <> 'unknown' RETURNING t.id`, [ids, origin])).length);
       updated += await engine.transaction(tx => brain?.enabled && sources.length
         ? withCoordinatedWrite(tx, sources, () => apply(tx), attribution)
         : apply(tx));
       after = ids[ids.length - 1]!;
       cursor[table] = after;
-      await saveCursor(engine, cursor);
-      log(`[trust backfill] ${table}: ${updated} row(s) classified, through id ${after}`);
+      await saveCursor(engine, cursor, op, key);
+      log(`[trust ${scoped ? 'claim' : 'backfill'}] ${table}: ${updated} row(s) classified, through id ${after}`);
     }
     tables.push({ table, rows: 0, projected: zero(), updated });
   }
-  await engine.executeRaw('DELETE FROM op_checkpoints WHERE op = $1 AND fingerprint = $2', [CHECKPOINT_OP, CHECKPOINT_KEY]);
+  await engine.executeRaw('DELETE FROM op_checkpoints WHERE op = $1 AND fingerprint = $2', [op, key]);
+  if (scoped) return summarize('apply', 'trust_columns', tables, signals, 'complete');
   await engine.setConfig(TRUST_BACKFILL_COMPLETED_KEY, new Date().toISOString());
   const counts = await readTrustTierCounts(engine);
   for (const t of tables) {

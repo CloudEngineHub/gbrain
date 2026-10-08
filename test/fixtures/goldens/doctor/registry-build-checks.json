@@ -703,6 +703,10 @@
       },
       {
         "category": "brain",
+        "name": "trust_sources_unclaimed"
+      },
+      {
+        "category": "brain",
         "name": "core_memory"
       },
       {

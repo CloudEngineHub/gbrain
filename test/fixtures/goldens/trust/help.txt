@@ -36,3 +36,13 @@ Usage: gbrain trust scan [--batch-size N] [--json]
   Runs the write gate's deterministic detector over agent-written and lower rows written before the gate,
   recording a receipt for each instruction-like row so proactive surfaces stop injecting it until you confirm
   it (gbrain trust review). Changes no row; resumable (rerun to continue); a detector upgrade rescans.
+  Nothing runs it for you: an agent asks you first. Claim your own sources first (gbrain trust claim-sources)
+  so your older notes are not treated as unverified.
+
+Usage: gbrain trust claim-sources [--dry-run] [--source <id>]... [--resume] [--batch-size N] [--json]
+  Claim your own sources once, after upgrading: each source shows its local path or remote, page count and
+  the trust mix now and after claiming, and you type its id to claim it. A claimed source syncs as "your notes"
+  and its rows from before trust tiers move from "unverified origin" to "your notes", except rows that say
+  they were captured, clipped, imported, extracted or written by an agent (they keep their lower tier).
+  Nothing becomes "confirmed by you". Connector sources (Google, GitHub) cannot be claimed. --dry-run lists
+  without writing; --resume finishes an interrupted claim. Needs you at a terminal; --yes never claims.

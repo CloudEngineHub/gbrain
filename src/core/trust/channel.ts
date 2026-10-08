@@ -25,7 +25,7 @@ import type { BrainEngine } from '../engine.ts';
 import type { WriteRequest } from '../persistence/model.ts';
 import { CONNECTOR_SOURCE_KINDS } from '../persistence/connector-identity.ts';
 import {
-  OWNER_TIER_FLOOR, compareTrust, contentOriginTier, effectiveWriteTrust, isTrustTier, minTrust,
+  OWNER_TIER_FLOOR, TRUST_TIER_RANK, compareTrust, contentOriginTier, effectiveWriteTrust, isTrustTier, minTrust, trustRankSql,
   type TrustTier, type WriteTrust,
 } from './tier.ts';
 
@@ -135,6 +135,31 @@ export function frontmatterTrustCaps(frontmatter: Record<string, unknown> | null
   }
   if (str(fm.provenance) === 'auto-extracted' || fm.dream_generated === true || str(fm.dream_generated) === 'true') caps.push('agent_written');
   return caps;
+}
+
+/**
+ * `frontmatterTrustCaps` as SQL over a jsonb frontmatter expression: one rank
+ * term per signal (NULL when it does not apply), for `LEAST(...)` in the trust
+ * backfill of claimed sources (trust/claim.ts). `fm` is a trusted alias or
+ * column expression, never caller input; every literal comes from the lists
+ * above. Kept in step with `frontmatterTrustCaps` by test/trust-claim.test.ts.
+ */
+export function frontmatterTrustCapsSql(fm: string): string[] {
+  const list = (values: readonly string[]) => values.map(v => `'${v.replace(/'/g, "''")}'`).join(',');
+  const text = (key: string, base = fm) => `(CASE WHEN jsonb_typeof(${base}->'${key}') = 'string' THEN NULLIF(btrim(${base}->>'${key}', E' \\t\\n\\r'), '') END)`;
+  const stamp = (key: string) => `CASE WHEN ${text(key)} IN (${list(EXTERNAL_CAPTURE_KINDS)}) THEN ${TRUST_TIER_RANK.external_untrusted}
+    WHEN ${text(key)} LIKE 'mcp:%' OR ${text(key)} IN (${list(AGENT_CAPTURE_KINDS)}) THEN ${TRUST_TIER_RANK.agent_written}
+    WHEN ${text(key)} LIKE 'connector:%' OR ${text(key)} IN (${list(CONNECTOR_SOURCE_KINDS)}) THEN ${TRUST_TIER_RANK.external_untrusted} END`;
+  return [
+    `CASE WHEN jsonb_typeof(${fm}->'trust_tier') = 'string' THEN NULLIF(${trustRankSql(`(${fm}->>'trust_tier')`)}, 0) END`,
+    ...['source_kind', 'ingested_via', 'captured_via'].map(stamp),
+    `CASE WHEN jsonb_typeof(${fm}->'transcript_import') IN ('object', 'array') THEN
+      CASE WHEN lower(${text('harness', `(${fm}->'transcript_import')`)}) IN (${list(OWN_SESSION_HARNESSES)}) THEN ${TRUST_TIER_RANK.agent_written} ELSE ${TRUST_TIER_RANK.external_untrusted} END END`,
+    `CASE WHEN ${text('source_url')} IS NOT NULL AND (${text('clipped_at')} IS NOT NULL OR ${text('clipper')} IS NOT NULL
+      OR ${text('captured_via')} = 'clipper' OR ${text('type')} = 'clipping') THEN ${TRUST_TIER_RANK.external_untrusted} END`,
+    `CASE WHEN ${text('provenance')} = 'auto-extracted' OR ${fm}->'dream_generated' = 'true'::jsonb OR ${text('dream_generated')} = 'true'
+      THEN ${TRUST_TIER_RANK.agent_written} END`,
+  ];
 }
 
 /** A per-source default set by `gbrain sources set-trust` (sources.config.trust_tier), clamped to operator_curated. */

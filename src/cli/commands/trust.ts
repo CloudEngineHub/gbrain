@@ -1,8 +1,9 @@
 /**
  * `gbrain trust`: the memory-trust noun (#5575, DX-7). This module dispatches
- * `backfill` (A8, DX-5) and `scan` (DX-6), and hands the owner subcommands (review, confirm,
+ * `backfill` (A8, DX-5), `scan` (DX-6) and `claim-sources` (legacy content, trust/claim.ts),
+ * and hands the owner subcommands (review, confirm,
  * release, drop, revert, explain, allow, disable) to src/commands/trust.ts.
- * The record is startup: 'observational', so `backfill --dry-run` runs on a
+ * The record is startup: 'observational', so `backfill --dry-run` and `claim-sources --dry-run` run on a
  * probe-only engine with no migrations and no writes; every other subcommand
  * completes startup first. While a resident serve holds a PGLite brain,
  * src/cli.ts routes the owner subcommands to it before any engine opens.
@@ -13,6 +14,7 @@ import { TRUST_TIERS, trustLabel } from '../../core/trust/tier.ts';
 import type { TrustBackfillReport } from '../../core/trust/backfill.ts';
 import type { CliDispatchContext } from '../command-table.ts';
 import { TRUST_OWNER_USAGE, isTrustOwnerSubcommand, localTrustBackend, reportTrustCliError, runTrustOwnerCommand } from '../../commands/trust.ts';
+import { TRUST_CLAIM_USAGE } from '../../commands/trust-claim.ts';
 
 export const TRUST_BACKFILL_USAGE = [
   'Usage: gbrain trust backfill [--dry-run] [--resume] [--batch-size N] [--json]',
@@ -26,8 +28,10 @@ export const TRUST_BACKFILL_USAGE = [
   '  Runs the write gate\'s deterministic detector over agent-written and lower rows written before the gate,',
   '  recording a receipt for each instruction-like row so proactive surfaces stop injecting it until you confirm',
   '  it (gbrain trust review). Changes no row; resumable (rerun to continue); a detector upgrade rescans.',
+  '  Nothing runs it for you: an agent asks you first. Claim your own sources first (gbrain trust claim-sources)',
+  '  so your older notes are not treated as unverified.',
 ].join('\n');
-export const TRUST_USAGE = `${TRUST_OWNER_USAGE}\n\n${TRUST_BACKFILL_USAGE}`;
+export const TRUST_USAGE = `${TRUST_OWNER_USAGE}\n\n${TRUST_BACKFILL_USAGE}\n\n${TRUST_CLAIM_USAGE}`;
 
 function render(report: TrustBackfillReport): string {
   const lines = [`Trust backfill (${report.mode === 'dry_run' ? 'dry run, nothing written' : 'applied'}; schema: ${report.schema}):`];
@@ -48,15 +52,20 @@ async function refuse(args: string[], message: string, suggestion: string): Prom
 
 export async function run(engine: BrainEngine, args: string[], ctx: CliDispatchContext): Promise<void> {
   const [sub, ...rest] = args;
-  const known = sub === 'backfill' || sub === 'scan' || isTrustOwnerSubcommand(sub);
+  const known = sub === 'backfill' || sub === 'scan' || sub === 'claim-sources' || isTrustOwnerSubcommand(sub);
   if (args.includes('--help') || args.includes('-h') || (!sub && !jsonRequested(args))) {
-    console.log(sub === 'backfill' || sub === 'scan' ? TRUST_BACKFILL_USAGE : TRUST_USAGE);
+    console.log(sub === 'backfill' || sub === 'scan' ? TRUST_BACKFILL_USAGE : sub === 'claim-sources' ? TRUST_CLAIM_USAGE : TRUST_USAGE);
     return;
   }
   if (!known) {
     if (!jsonRequested(args)) console.log(TRUST_USAGE);
     await refuse(args, !sub || sub.startsWith('-') ? 'gbrain trust needs a subcommand.' : `Unknown trust subcommand '${sub}'.`,
-      'gbrain trust --help lists the subcommands (review, confirm, explain, backfill, scan and the rest).');
+      'gbrain trust --help lists the subcommands (review, confirm, explain, backfill, scan, claim-sources and the rest).');
+    return;
+  }
+  if (sub === 'claim-sources') {
+    const { runTrustClaimSources } = await import('../../commands/trust-claim.ts');
+    await runTrustClaimSources(engine, rest, { completeStartup: ctx.completeStartup ? e => ctx.completeStartup!(e) : undefined });
     return;
   }
   if (sub !== 'backfill' && sub !== 'scan') {
@@ -79,7 +88,9 @@ export async function run(engine: BrainEngine, args: string[], ctx: CliDispatchC
   if (sub === 'scan') {
     await ctx.completeStartup?.(engine);
     const { runTrustScan } = await import('../../core/eligibility/scan.ts');
-    const scan = await runTrustScan(engine, batchSize ? { batchSize } : {});
+    let scan;
+    try { scan = await runTrustScan(engine, batchSize ? { batchSize } : {}); }
+    catch (error) { if (await reportTrustCliError(error, jsonRequested(args))) return; throw error; }
     if (jsonRequested(args)) await writeStdoutFinal(`${JSON.stringify(scan, null, 2)}\n`);
     else console.log([`Trust scan (detector v${scan.detector_version}):`,
       ...scan.tables.map(t => `  ${t.table}: ${t.scanned} row(s) scanned, ${t.flagged} flagged${t.done ? '' : ' (more to scan)'}`),

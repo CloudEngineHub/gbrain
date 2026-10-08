@@ -10,6 +10,9 @@
  * only makes the row ineligible for proactive injection until the owner
  * confirms it. Zero model calls.
  *
+ * Refuses (recovery_required) while a claimed source's lift is unfinished
+ * (trust/claim.ts): those legacy rows are about to become owner tier.
+ *
  * Bounded and resumable: keyset batches by id per table, with the cursor
  * (the detector version it was taken under and the id ceiling it covers:
  * the max ids the write gate went live at (`write_gate.scan_baseline`), or,
@@ -28,6 +31,8 @@ import { recordWriteGateReceipt } from '../write-gate-store.ts';
 import { WRITE_GATE_SCAN_BASELINE_KEY } from '../write-gate-schema.ts';
 import { storedTrustTier, TRUST_TIER_RANK, TRUST_TIERS, type TrustTier } from '../trust/tier.ts';
 import { ACTIVATION_TIER_CEILING } from './sql.ts';
+import { opError } from '../ops/contract.ts';
+import { claimPendingSql, TRUST_CLAIM_RESUME_COMMAND } from '../trust/claim-state.ts';
 
 export type ScanTable = 'pages' | 'facts' | 'takes' | 'timeline_entries';
 export const SCAN_TABLES: readonly ScanTable[] = ['pages', 'facts', 'takes', 'timeline_entries'];
@@ -135,6 +140,15 @@ export interface TrustScanOptions {
  */
 export async function runTrustScan(engine: BrainEngine, opts: TrustScanOptions = {}): Promise<TrustScanReport> {
   const batchSize = Math.max(1, Math.min(opts.batchSize ?? DEFAULT_SCAN_BATCH, 10_000));
+  // A claimed source's legacy rows are owner tier once its lift finishes; scanning them first would flag the owner's own notes.
+  const pending = await engine.executeRaw<{ id: string }>(`SELECT s.id FROM sources s WHERE ${claimPendingSql('s')} ORDER BY s.id`);
+  if (pending.length) {
+    throw opError('recovery_required', `Claimed source(s) ${pending.map(r => r.id).join(', ')} have not finished their lift, so the scan would treat the owner's notes as unverified.`,
+      'Run the fix (it finishes the claim the owner already confirmed), then run the scan again.', {
+        fix: { argv: [...TRUST_CLAIM_RESUME_COMMAND], consent: [], actor: 'agent', requires_exclusive: false,
+          why: 'Finishes lifting the claimed sources\' legacy rows in resumable batches; nothing goes above "your notes".', verify: { argv: ['gbrain', 'doctor', '--only', 'trust_sources_unclaimed', '--json'] } },
+      });
+  }
   const cursor = await currentCursor(engine);
   if (!cursor.until) {
     cursor.until = {};

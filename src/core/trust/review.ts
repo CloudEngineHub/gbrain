@@ -21,7 +21,8 @@ import { currentHoldStore, trustKillSwitchState } from './owner-actions.ts';
 import { getTrustProposal, listTrustProposals, pendingTrustProposalsFor, trustProposalRef, type TrustProposalAction, type TrustProposalRow } from './proposals.ts';
 import { lowerPageState, readPageTrustState } from './page-handlers.ts';
 import { formatTrustRef, pageRef, parseTrustRef, resolvePageRef } from './refs.ts';
-import { storedTrustTier, trustLabel, type TrustTier } from './tier.ts';
+import { OWNER_TIER_FLOOR, storedTrustTier, trustLabel, type TrustTier } from './tier.ts';
+import { claimPendingSql, TRUST_CLAIM_RESUME_COMMAND } from './claim-state.ts';
 import { listTrustAllowRules, type TrustAllowRule } from './allow-rules.ts';
 import { isQuarantined } from '../quarantine.ts';
 
@@ -140,6 +141,7 @@ async function standingPreferences(engine: BrainEngine, filter: TrustReviewFilte
   const rows = await engine.executeRaw<{ id: number; source_id: string; kind: string; fact: string; trust_tier: string; slug: string | null; created_at: string }>(
     `SELECT f.id, f.source_id, f.kind, f.fact, f.trust_tier, f.source_markdown_slug AS slug, f.created_at FROM facts f
       WHERE f.kind IN ('preference', 'commitment') AND f.trust_tier IN ('agent_written', 'unknown', 'external_untrusted') AND f.expired_at IS NULL
+        AND NOT (f.trust_tier = 'unknown' AND EXISTS (SELECT 1 FROM sources cs WHERE cs.id = f.source_id AND ${claimPendingSql('cs')}))
         AND ($1::text IS NULL OR f.source_id = $1) AND ($2::timestamptz IS NULL OR f.created_at >= $2)
         AND EXISTS (SELECT 1 FROM write_gate_receipts r WHERE r.target_table = 'facts' AND r.target_id = f.id::text
                       AND r.verdict = 'flag' AND 'standing_instruction' = ANY(r.reason_families))
@@ -247,6 +249,21 @@ export interface TrustExplanation {
   pending_proposals: Array<{ ref: string; action: string; commands: string[][] }>;
   activation: string;
   text?: string;
+  /** The row is still `unknown` in a source the owner claimed whose lift has not finished: shown as owner tier. */
+  claimed_source?: 'lift_pending';
+}
+
+/**
+ * A legacy `unknown` row in a claimed source whose lift has not finished is
+ * labeled and explained as owner tier: the lift makes it so (or lower, by its
+ * own signals; `gbrain trust claim-sources --resume` finishes it).
+ */
+async function claimView(engine: BrainEngine, sourceId: string, tier: TrustTier): Promise<{ tier: TrustTier; label: string; claimed_source?: 'lift_pending' }> {
+  if (tier !== 'unknown') return { tier, label: trustLabel(tier) };
+  const [pending] = await engine.executeRaw<{ id: string }>(`SELECT s.id FROM sources s WHERE s.id = $1 AND ${claimPendingSql('s')}`, [sourceId]);
+  return pending
+    ? { tier: OWNER_TIER_FLOOR, label: `${trustLabel(OWNER_TIER_FLOOR)} (claimed source; finish with ${TRUST_CLAIM_RESUME_COMMAND.join(' ')})`, claimed_source: 'lift_pending' }
+    : { tier, label: trustLabel(tier) };
 }
 
 // The write gate receipts for one row (write_gate_receipts), newest first.
@@ -299,10 +316,12 @@ export async function explainTrust(engine: BrainEngine, refOrQuery: string, opts
       const [row] = await engine.executeRaw<{ source_id: string; trust_tier: string; write_origin: unknown; text: string }>(sql, [ref.id]);
       if (!row) throw opError('not_found', `No ${ref.kind} ${formatTrustRef(ref)}.`, 'Check the ref; gbrain trust review lists items.');
       const tier = storedTrustTier(row.trust_tier);
+      const view = await claimView(engine, row.source_id, tier);
       const table = ref.kind === 'fact' ? 'facts' : 'takes';
       const gate = await gateReceipts(engine, table, ref.id);
-      return [{ ref: formatTrustRef(ref), kind: ref.kind, source_id: row.source_id, tier, label: trustLabel(tier), write_origin: originOf(row.write_origin),
-        gate, pending_proposals: await proposalsFor(engine, table, ref.id), activation: await activationNote(engine, tier, gate, false), text: snippet(row.text, 200) }];
+      return [{ ref: formatTrustRef(ref), kind: ref.kind, source_id: row.source_id, tier, label: view.label, write_origin: originOf(row.write_origin),
+        gate, pending_proposals: await proposalsFor(engine, table, ref.id), activation: await activationNote(engine, view.tier, gate, false), text: snippet(row.text, 200),
+        ...(view.claimed_source ? { claimed_source: view.claimed_source } : {}) }];
     }
     case 'page': {
       let resolved;
@@ -314,8 +333,10 @@ export async function explainTrust(engine: BrainEngine, refOrQuery: string, opts
       const [row] = await engine.executeRaw<{ write_origin: unknown }>('SELECT write_origin FROM pages WHERE id = $1', [state.pageId]);
       const gate = await gateReceipts(engine, 'pages', state.pageId);
       const quarantined = isQuarantined(state.snapshot.page.frontmatter);
-      return [{ ref: pageRef(sourceId, slug), kind: 'page', source_id: sourceId, tier: state.tier, label: trustLabel(state.tier), write_origin: originOf(row?.write_origin),
-        gate, quarantined, pending_proposals: await proposalsFor(engine, 'pages', state.pageId), activation: await activationNote(engine, state.tier, gate, quarantined) }];
+      const view = await claimView(engine, sourceId, state.tier);
+      return [{ ref: pageRef(sourceId, slug), kind: 'page', source_id: sourceId, tier: state.tier, label: view.label, write_origin: originOf(row?.write_origin),
+        gate, quarantined, pending_proposals: await proposalsFor(engine, 'pages', state.pageId), activation: await activationNote(engine, view.tier, gate, quarantined),
+        ...(view.claimed_source ? { claimed_source: view.claimed_source } : {}) }];
     }
     case 'hold': {
       const hold = await currentHoldStore().get(engine, ref.id);

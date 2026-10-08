@@ -313,6 +313,7 @@ export const BEHAVIOR_CHANGES: ReadonlyArray<{ since: string; text: ChangeText }
   { since: '0.60.108.0', text: 'A job error during worker shutdown now records `worker_shutdown: <handler error>` instead of bare `worker_shutdown`, and an `UnrecoverableError` thrown then dead-letters at once instead of running again.' },
   { since: '0.60.108.0', text: '`gbrain jobs supervisor stop` can now report `unverified` (exit 1) and `stale_pid_file` (exit 0, nothing signaled), and on Linux the supervisor PID file has a second line with the process start time; read only its first line.' },
   { since: '0.60.108.0', text: '`thinking: off` calls on native Google and OpenAI routes (eval judges, the synthesize triage judge, fence repair\'s model tier) now send the model\'s thinking switch (`thinkingBudget: 0`, `reasoningEffort: none`) and, where reasoning cannot be turned off (Gemini 2.5 Pro and 3.x, gpt-5/-mini/-nano, o-series), a 32,000-token reply cap; `eval takes-quality --budget-usd` and `eval cross-modal --max-usd` price that cap, so a budget that passed before can refuse earlier.' },
+  { since: '0.60.110.0', text: 'Memory trust: new agent-written content that reads as instructions to an agent is held back from proactive context until you confirm it (`gbrain trust review`). Content written before this release is held back only after you claim your own sources (`gbrain trust claim-sources`, in a terminal) and agree to `gbrain trust scan`; neither runs on its own.' },
 ];
 
 /** The newest disclosed change's release: the notice id moves only when a release adds rows. */
@@ -346,6 +347,23 @@ export function behaviorChangesNotice(chain: ChainDisclosure | null, opts: { rem
     : { argv: DOCTOR_ARGV, consent: [], actor: opts.remote ? 'host_admin' : 'agent', requires_exclusive: false,
       why: 'Shows this disclosure again; read-only.', docs: 'docs/guides/chat-fallback.md' };
   return { code: BEHAVIOR_NOTICE_CODE, kind: 'safety', why, fix };
+}
+
+/**
+ * #5575 legacy content: while unclaimed sources hold rows from before trust
+ * tiers, the notice's fix becomes the claim ask (`fix.next: ask_user`, the
+ * user_message explains claiming), unless it already carries the chat
+ * fallback removal. Best-effort: any fault keeps the notice as built.
+ */
+export async function withTrustClaimAsk(engine: BrainEngine, notice: Notice | null): Promise<Notice | null> {
+  if (!notice || (notice.fix?.argv && notice.fix.argv.join(' ') !== DOCTOR_ARGV.join(' '))) return notice;
+  try {
+    const { claimSourcesFix, readUnclaimedLegacySources, CLAIM_USER_MESSAGE } = await import('./trust/claim.ts');
+    if ((await readUnclaimedLegacySources(engine)).unclaimed.length === 0) return notice;
+    return { ...notice, fix: claimSourcesFix(), user_message: CLAIM_USER_MESSAGE };
+  } catch {
+    return notice;
+  }
 }
 
 // ── delivery ────────────────────────────────────────────────────────────────
@@ -418,7 +436,7 @@ export async function takeLocalBehaviorNotice(
     const after = laterRelease(await brainBaseline(engine, brainKey, { persist: true, now: opts.now }), localShownThrough(brainKey, channel));
     if (compareReleases(BEHAVIOR_NOTICE_SINCE, after) <= 0) return null;
     if (claimMarker(brainKey, channel) === 'shown') return null;
-    return behaviorChangesNotice(await chainDisclosure(engine, opts.cfg), { after });
+    return withTrustClaimAsk(engine, behaviorChangesNotice(await chainDisclosure(engine, opts.cfg), { after }));
   } catch {
     if (key) handled.delete(key);
     return null;
@@ -472,7 +490,7 @@ export async function takeHttpBehaviorNotice(
     const after = laterRelease(baseline, readHttpShown(raw)[client]?.since ?? PREDATES);
     if (compareReleases(BEHAVIOR_NOTICE_SINCE, after) <= 0) return null;
     try { await engine.setConfig(HTTP_SHOWN_KEY, recordHttpShown(raw, client, new Date(opts.now ?? Date.now()).toISOString())); } catch { /* deliver anyway */ }
-    return behaviorChangesNotice(await chainDisclosure(engine, opts.cfg), { remote: true, after });
+    return withTrustClaimAsk(engine, behaviorChangesNotice(await chainDisclosure(engine, opts.cfg), { remote: true, after }));
   } catch {
     if (key) handled.delete(key);
     return null;
