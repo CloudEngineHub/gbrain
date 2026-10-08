@@ -20,7 +20,7 @@ import type { BrainEngine } from '../engine.ts';
 import type { WriteRequest } from '../persistence/model.ts';
 import { frontmatterTrustCaps, requestChannelTrust, stampTrustMarker } from './channel.ts';
 import { insertTrustProposal, updatePendingTrustProposalAfter } from './proposals.ts';
-import { compareTrust, effectiveWriteTrust, minTrust, storedTrustTier, type TrustTier, type WriteTrust } from './tier.ts';
+import { OWNER_TIER_FLOOR, compareTrust, effectiveWriteTrust, minTrust, storedTrustTier, type TrustTier, type WriteTrust } from './tier.ts';
 
 /** Page writes that only edit a gbrain-managed fence (or strike a row) and keep the page's tier. */
 const FENCE_EDIT_OPERATIONS = ['remember', 'takes_add', 'takes_update', 'takes_supersede', 'takes_resolve', 'takes_remove',
@@ -38,6 +38,16 @@ export function pageWriteTrust(row: Pick<WriteRequest, 'id' | 'operation' | 'aut
   if (!channel || isFenceEditWrite(row)) return channel;
   const caps = frontmatterTrustCaps(frontmatter);
   return caps.length ? effectiveWriteTrust({ channel: channel.tier, lowerTo: caps, origin: channel.origin ?? { channel: row.operation } }) : channel;
+}
+
+/**
+ * The tier the page write gate assesses (ENG-18: the tier the page row ends
+ * with): a writer below operator_curated cannot raise the page, so the gate
+ * sees min(writer, stored). Fence edits are gated per row, not here.
+ */
+export function pageGateTrust(row: Pick<WriteRequest, 'operation' | 'intent'>, trust: WriteTrust | undefined, stored: TrustTier | null): WriteTrust | undefined {
+  if (!trust || isFenceEditWrite(row)) return undefined;
+  return stored && compareTrust(trust.tier, OWNER_TIER_FLOOR) < 0 ? { ...trust, tier: minTrust(trust.tier, stored) } : trust;
 }
 
 export async function storedPageTier(engine: BrainEngine, sourceId: string, slug: string): Promise<TrustTier | null> {

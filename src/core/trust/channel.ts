@@ -174,3 +174,11 @@ export async function ownerImportTrust(engine: Pick<BrainEngine, 'executeRaw'>, 
   const trust = ownerPageTrust({ frontmatter, sourceConfig: config, channel: requestChannel(row), requestId: row.id, sourceUri });
   return row.authority?.remote === true ? { ...trust, tier: minTrust(trust.tier, 'agent_written') } : trust;
 }
+
+/** A direct (unmanaged) import declares the tier its caller passed to the write gate (ENG-18); absent: undeclared. */
+export function writeTrustOfGate(input: { tier: TrustTier; origin?: { channel?: string | null; connector?: string | null; source_uri?: string | null } | null; requestId?: string | null } | undefined): WriteTrust | undefined {
+  if (!input) return undefined;
+  const o = input.origin;
+  return { tier: input.tier, origin: { channel: o?.channel ?? 'import', ...(o?.connector ? { connector: o.connector } : {}), ...(o?.source_uri ? { source_uri: o.source_uri } : {}),
+    ...(input.requestId ? { request_id: input.requestId } : {}) } };
+}

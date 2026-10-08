@@ -33,9 +33,12 @@ export function gateInput(trust: WriteTrust, requestId: string | null): WriteGat
 export function gateField(assessment: WriteGateAssessment | null | undefined, rowRef: string, receiptId: number | null): WriteGateOutcome | undefined {
   if (!assessment || assessment.verdict === 'allow') return undefined;
   const outcome = writeGateOutcome(assessment, receiptId !== null ? `wgr${receiptId}` : null);
-  if (outcome.next && assessment.verdict === 'flag') outcome.next = { ...outcome.next, argv: ['gbrain', 'trust', 'confirm', rowRef],
-    user_message: `An agent saved something that reads like a standing instruction (${rowRef}). It is stored but not acted on until you confirm it.` };
-  return outcome;
+  if (!outcome.next || assessment.verdict === 'reject') return outcome;
+  const verb = assessment.verdict === 'flag' ? 'confirm' : 'release';
+  const user_message = assessment.verdict === 'flag'
+    ? `An agent saved something that reads like a standing instruction (${rowRef}). It is stored but not acted on until you confirm it.`
+    : `Content from an untrusted source looked like an instruction, so ${rowRef} was quarantined for your review. Run the command if you want to keep it.`;
+  return { ...outcome, next: { ...outcome.next, argv: ['gbrain', 'trust', verb, rowRef], user_message } };
 }
 
 /** The stored outcome of a held fact or take: no row was inserted. */
