@@ -9,10 +9,10 @@ import { TRUST_ALLOW_RULES_SQL } from '../trust/allow-rules.ts';
 // names a source and optionally a server-stamped source URI prefix and one
 // reason family; removal keeps the row with removed_at as its receipt. A new
 // table with no backfill. No
-// schema.sql mirror: like the trust tier schema (v220), it exists only
+// schema.sql mirror: like the trust tier schema (v221), it exists only
 // through migrations.
-export const v223: Migration = {
-  version: 223,
+export const v224: Migration = {
+  version: 224,
   name: 'trust_allow_rules',
   idempotent: true,
   sql: TRUST_ALLOW_RULES_SQL,
