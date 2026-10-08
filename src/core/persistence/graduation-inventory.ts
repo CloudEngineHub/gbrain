@@ -155,6 +155,7 @@ export const GRADUATION_INVENTORY: Inventory = {
     carry('takes', 'user_data', 'Takes with attribution and supersession.'),
     carry('think_ab_results', 'operational', 'Think A/B eval results.'),
     carry('timeline_entries', 'user_data', 'Timeline entries with attribution.'),
+    carry('trust_allow_rules', 'user_data', 'The owner\'s receipted write-gate allow rules (gbrain trust allow); dropping them would re-quarantine sources the owner allowed.'),
     carry('wanted_links', 'user_data', 'Unresolved authored links (wanted pages); the edge appears when the target page is written, so they are not re-derived without a full re-extraction.'),
 
     entry('persistence_brain', 'rebind', 'user_data', 'Brain identity and flags carry (brain_id keeps every identity file valid); enabled is set on the target only at cutover.', {
