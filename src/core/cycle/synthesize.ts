@@ -1169,7 +1169,8 @@ async function runPhaseSynthesizeInner(
       }
     }
 
-    if (!maintenance) await stampDreamProvenance(engine, await withTranscriptTaint(engine, writtenRefs, worthProcessing, config.meetingTranscriptsDir), summaryDate, opts.signal);
+    if (!maintenance) writtenRefs = await withTranscriptTaint(engine, writtenRefs, worthProcessing, config.meetingTranscriptsDir);
+    if (!maintenance) await stampDreamProvenance(engine, writtenRefs, summaryDate, opts.signal);
 
     // Dual-write: reverse-render each DB row → markdown file.
     const reverseWriteCount = maintenance ? (maintenance.binding ? writtenRefs.length : 0)
