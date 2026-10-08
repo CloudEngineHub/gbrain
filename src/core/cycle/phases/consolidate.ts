@@ -31,6 +31,10 @@ import { isAborted } from '../../abort-check.ts';
 import { maintenancePreflight, submitMaintenanceConsolidation } from '../../persistence/prepared-maintenance.ts';
 import { managedPersistenceEnabled } from '../../persistence/ownership.ts';
 import { declareDerivation, derivedMaintenanceTransaction, derivedWriteTrust, isExternalTier, readTaintInputs } from '../../trust/taint.ts';
+import { DEFAULT_WRITE_GATE_CONFIG, type WriteGateConfig } from '../../write-gate.ts';
+import { loadImportSanityConfig } from '../../import-screen.ts';
+import { decideTakeWrite, recordFlaggedRow, recordWriteGateHold, type GatedRowDecision } from '../../write-gate-store.ts';
+import type { TaintInput, WriteTrust } from '../../trust/tier.ts';
 
 export interface ConsolidatePhaseOpts {
   dryRun?: boolean;
@@ -94,6 +98,10 @@ export async function runPhaseConsolidate(
   let bucketsProcessed = 0;
   let bucketsSkipped = 0;
   let clustersSkippedRetired = 0;
+  let clustersGateHeld = 0;
+  let clustersGateRejected = 0;
+  // #5575 write gate: unmanaged takes are gated here (managed ones in takes-prepare); read once per run.
+  let gateConfig: WriteGateConfig | undefined;
 
   // Pull every (source_id, entity_slug) bucket of unconsolidated facts.
   // Uses the partial idx_facts_unconsolidated index.
@@ -259,6 +267,12 @@ export async function runPhaseConsolidate(
       // derived tier. A re-promotion changes no content column, so the take is
       // lowered explicitly to min(existing, cluster): an external cluster
       // cannot keep an owner take's tier. Edges: take -> every cluster fact.
+      // Write gate on a new take: reject skips the cluster; hold records it for review and leaves the facts unconsolidated.
+      const takeRow = { page_id: pageId, row_num: nextRowNum, claim: best.fact, kind: 'fact', holder: 'self', weight: clamp01(avgWeight),
+        since_date: sinceISO, source: sources.slice(0, 200), active: true };
+      const gate = existing.length ? null : await gateNewTake(engine, derivation, takeRow, { sourceId: b.source_id, slug: b.entity_slug },
+        gateConfig ??= (await loadImportSanityConfig(engine)).writeGate ?? DEFAULT_WRITE_GATE_CONFIG);
+      if (gate && gate.action !== 'insert') { if (gate.action === 'hold') clustersGateHeld++; else clustersGateRejected++; continue; }
       const written = await derivedMaintenanceTransaction<{ created: boolean; takeId: number | null } | null>(engine, derivation, async tx => {
         let takeId: number;
         let created = false;
@@ -276,17 +290,7 @@ export async function runPhaseConsolidate(
             await tx.executeRaw(`UPDATE takes SET source = $1, updated_at = now() WHERE id = $2`, [sources.slice(0, 200), takeId]);
           }
         } else {
-          const inserted = await tx.addTakesBatch([{
-            page_id: pageId,
-            row_num: nextRowNum,
-            claim: best.fact,
-            kind: 'fact',
-            holder: 'self',
-            weight: clamp01(avgWeight),
-            since_date: sinceISO,
-            source: sources.slice(0, 200),
-            active: true,
-          }]);
+          const inserted = await tx.addTakesBatch([takeRow]);
           if (inserted < 1) return { result: null, rows: [] };
           const idRows = await tx.executeRaw<{ id: number }>(
             `SELECT id FROM takes WHERE page_id = $1 AND row_num = $2`,
@@ -295,6 +299,7 @@ export async function runPhaseConsolidate(
           if (idRows.length === 0) return { result: { created: true, takeId: null }, rows: [] };
           takeId = idRows[0].id;
           created = true;
+          if (gate) await recordFlaggedRow(tx, gate, { table: 'takes', id: takeId, sourceId: b.source_id });
         }
 
         // Mark all contributing facts consolidated.
@@ -346,7 +351,9 @@ export async function runPhaseConsolidate(
     summary: dryRun
       ? `(dry-run) would promote ${factsConsolidated} facts into ${takesWritten} takes across ${bucketsProcessed} buckets`
       : `promoted ${factsConsolidated} facts into ${takesWritten} takes across ${bucketsProcessed} buckets` +
-        (clustersSkippedRetired ? `; skipped ${clustersSkippedRetired} clusters with retired takes` : ''),
+        (clustersSkippedRetired ? `; skipped ${clustersSkippedRetired} clusters with retired takes` : '') +
+        (clustersGateHeld ? `; held ${clustersGateHeld} takes for write-gate review` : '') +
+        (clustersGateRejected ? `; write gate rejected ${clustersGateRejected} takes` : ''),
     details: {
       dryRun,
       cluster_threshold: threshold,
@@ -356,9 +363,25 @@ export async function runPhaseConsolidate(
       buckets_processed: bucketsProcessed,
       buckets_skipped: bucketsSkipped,
       clusters_skipped_retired: clustersSkippedRetired,
+      clusters_gate_held: clustersGateHeld,
+      clusters_gate_rejected: clustersGateRejected,
       ...(factsConsolidated === 0 && clustersSkippedRetired > 0 ? { reason: 'retired_take' } : {}),
     },
   };
+}
+
+/**
+ * #5575 write gate on one new unmanaged take, assessed at its cluster's
+ * derived tier (the gate never assesses operator_curated or above). A hold is
+ * recorded here, in an attributed transaction at that tier; the caller
+ * inserts on `insert` (recording a flag receipt) and skips otherwise.
+ */
+async function gateNewTake(engine: BrainEngine, derivation: { trust: WriteTrust; inputs: readonly TaintInput[] },
+  takeRow: { claim: string; source: string } & Record<string, unknown>, at: { sourceId: string; slug: string }, cfg: WriteGateConfig): Promise<GatedRowDecision> {
+  const gate = decideTakeWrite({ claim: takeRow.claim, source: takeRow.source }, { ...at, payload: takeRow,
+    input: { tier: derivation.trust.tier, origin: derivation.trust.origin, requestId: null }, cfg });
+  if (gate.action === 'hold') await derivedMaintenanceTransaction(engine, derivation, async tx => ({ result: await recordWriteGateHold(tx, gate.hold!), rows: [] }));
+  return gate;
 }
 
 /** The typed-claim columns of a fact (FactRow does not carry them). */
