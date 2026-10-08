@@ -19,6 +19,8 @@ import { isPrivatePage } from './search/private-visibility.ts';
 import { quarantineFilterFragment } from './quarantine.ts';
 import { maintenanceTransaction } from './persistence/attribution.ts';
 import { derivedWriteTrust } from './trust/taint.ts';
+import { derivedGateConfig, derivedGateInput, recordTimelineFlag, timelineRowAllowed } from './trust/derived-gate.ts';
+import { assessTimelineForGate } from './write-gate.ts';
 import { storedTrustTier, type TaintInput } from './trust/tier.ts';
 
 export interface ExtractTimelineFromMeetingsOpts {
@@ -45,6 +47,8 @@ export interface ExtractTimelineFromMeetingsResult {
   batch_errors: number;
   /** First batch-insert error message, when batch_errors > 0. */
   first_batch_error?: string;
+  /** #5575 B3: rows the write gate quarantined or rejected (timeline rows are skipped, not held). */
+  write_gate_skipped?: number;
 }
 
 interface MeetingRow {
@@ -137,6 +141,8 @@ export async function extractTimelineFromMeetings(
   const batch: TimelineBatchInput[] = [];
   // #5575 I2: the rows restate their meeting (no model), so a batch holds one meeting tier and is stamped with it.
   const batchInputs: TaintInput[] = [];
+  const gateCfg = await derivedGateConfig(engine);
+  let gateSkipped = 0;
   let entriesCreated = 0;
   const entitiesTouched = new Set<string>();
   let meetingsScanned = 0;
@@ -151,7 +157,14 @@ export async function extractTimelineFromMeetings(
     if (!dryRun) {
       try {
         const trust = derivedWriteTrust({ channel: 'derive:meeting_timeline', inputs: batchInputs, projection: true });
-        entriesCreated += await maintenanceTransaction(engine, tx => tx.addTimelineEntriesBatch(batch), trust);
+        // #5575 B3: the meeting title lands on other pages, so each row passes the write gate at the meeting's tier.
+        const kept = batch.map(row => ({ row, assessment: assessTimelineForGate(row, derivedGateInput(trust), gateCfg) })).filter(r => timelineRowAllowed(r.assessment));
+        gateSkipped += batch.length - kept.length;
+        entriesCreated += kept.length === 0 ? 0 : await maintenanceTransaction(engine, async tx => {
+          const count = await tx.addTimelineEntriesBatch(kept.map(r => r.row));
+          for (const r of kept) await recordTimelineFlag(tx, r.assessment, r.row);
+          return count;
+        }, trust);
       } catch (e) {
         // #2057: do NOT swallow. A bare `catch {}` here hid a brain-wide
         // timeline-write failure (the run reported 0 entries with no error).
@@ -281,5 +294,6 @@ export async function extractTimelineFromMeetings(
     entities_touched: entitiesTouched.size,
     batch_errors: batchErrors,
     first_batch_error: firstBatchError,
+    ...(gateSkipped ? { write_gate_skipped: gateSkipped } : {}),
   };
 }

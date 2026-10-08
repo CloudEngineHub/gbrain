@@ -29,6 +29,8 @@ import { isAvailable } from './ai/gateway.ts';
 import { isJunkEntityName } from './entity-name-quality.ts';
 import { maintenanceTransaction } from './persistence/attribution.ts';
 import { deriveTrust, derivedMaintenanceTransaction, lowerDerivedPage } from './trust/taint.ts';
+import { derivedGateConfig, derivedGateInput, recordTimelineFlag, timelineRowAllowed } from './trust/derived-gate.ts';
+import { assessTimelineForGate } from './write-gate.ts';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -243,12 +245,14 @@ export async function enrichEntity(
   // 4. Add timeline entry
   let timelineAdded = false;
   try {
-    await maintenanceTransaction(engine, tx => tx.addTimelineEntry(slug, { // gbrain-allow-direct-insert: auto-timeline reconciliation triggered by entity reference in source markdown
-      date: new Date().toISOString().split('T')[0] ?? '',
-      summary: `Referenced in [${request.sourceSlug}](${request.sourceSlug}) — ${request.context}`,
-      source: request.sourceSlug,
-    }, scope), derivation.trust);
-    timelineAdded = true;
+    const entry = { date: new Date().toISOString().split('T')[0] ?? '', summary: `Referenced in [${request.sourceSlug}](${request.sourceSlug}) — ${request.context}`, source: request.sourceSlug };
+    // #5575 B3: the caller's context lands on the entity page, so it passes the write gate at the derived tier.
+    const assessment = assessTimelineForGate(entry, derivedGateInput(derivation.trust), await derivedGateConfig(engine));
+    timelineAdded = timelineRowAllowed(assessment) && await maintenanceTransaction(engine, async tx => {
+      const added = await tx.addTimelineEntry(slug, entry, scope); // gbrain-allow-direct-insert: auto-timeline reconciliation triggered by entity reference in source markdown
+      if (added) await recordTimelineFlag(tx, assessment, { slug, source_id: sourceId, ...entry });
+      return true;
+    }, derivation.trust);
   } catch {
     // Timeline add failed (page might not support it)
   }
