@@ -55,6 +55,8 @@ import { appendContextNote, type InferredVia } from './subject-infer.ts';
 import { inferenceNote, inferMissingSubjects } from './subject-infer-write.ts';
 import { maintenanceTransaction } from '../persistence/attribution.ts';
 import type { FactNotabilityFilter } from './notability-filter.ts';
+import { intentContentOrigin } from '../trust/channel.ts';
+import { readTaintInputs, derivedWriteTrust, recordTaintEdges } from '../trust/taint.ts';
 
 // The notability-filter vocabulary lives in notability-filter.ts; re-exported for existing importers.
 export { NOTABILITY_FILTERS, coerceNotabilityFilter, type FactNotabilityFilter } from './notability-filter.ts';
@@ -190,6 +192,23 @@ const DEDUP_CANDIDATE_LIMIT = 5;
  * on every put_page in a long-running brain.
  */
 const _warnedKeys = new Set<string>();
+
+/**
+ * #5575 I2: the extractor's context is the source page (or the page a turn
+ * came from) plus the caller's turn text, so the facts' tier is the page's
+ * stored tier capped at agent_written, lowered by the caller's content
+ * origin. The facts-absorb job carries the page tier, never its runner's
+ * identity. A `sourceSlug` that names no page adds no input.
+ */
+async function factsDerivation(ctx: FactsBackstopCtx, input: PipelineInput) {
+  const inputs = (await readTaintInputs(ctx.engine, [...new Set([input.pageSlug, ctx.sourceSlug].filter((s): s is string => !!s))]
+    .map(slug => ({ table: 'pages' as const, sourceId: ctx.sourceId, slug }))))
+    .filter(i => typeof i.id === 'number' || i.id === `${ctx.sourceId}:${input.pageSlug}`);
+  const lowered = intentContentOrigin(ctx.requestIntent);
+  const trust = derivedWriteTrust({ channel: input.pageSlug ? 'derive:facts_backstop' : 'derive:extract_facts', inputs,
+    lowerTo: lowered ? [lowered] : [], requestId: ctx.persistenceRequestId ?? null });
+  return { trust, inputs };
+}
 function warnOnce(key: string, msg: string): void {
   if (_warnedKeys.has(key)) return;
   _warnedKeys.add(key);
@@ -611,7 +630,8 @@ async function runPipelineBodyInner(
   }
   const { prepareManagedFactsSession, resumeManagedFacts, publishManagedFacts, resolveManagedFactsEmbedding,
     assertManagedFactsEmbedding } = await import('../persistence/facts-maintenance.ts');
-  const managed = await prepareManagedFactsSession(ctx, input);
+  const derivation = await factsDerivation(ctx, input);
+  const managed = await prepareManagedFactsSession(ctx, input, derivation);
   if (managed) {
     const replay = await resumeManagedFacts(ctx.engine, managed);
     if (replay) return replay;
@@ -682,6 +702,12 @@ async function runPipelineBodyInner(
   if (!managed) await assertAmbientCaptureAdmissible(ctx.engine, ctx.source);
   if (managed) return withCaptureDrops(dropped, facts.length || !dropped.length ? await publishManagedFacts(ctx.engine, managed, ctx, facts, visibility, input.pageSlug) : null);
 
+  // Every DB-only insert below: one attributed transaction at the derived tier, with input edges for a new row.
+  const insertDerivedFact = (newFact: NewFact) => maintenanceTransaction(ctx.engine, async tx => {
+    const result = await tx.insertFact(newFact, { source_id: ctx.sourceId }); // gbrain-allow-direct-insert: the facts backstop's DB-only fallbacks (unparented / thin-client facts, stub-guard or unresolvable targets, a declined fence lane)
+    if (result.status !== 'duplicate') await recordTaintEdges(tx, { table: 'facts', id: result.id, sourceId: ctx.sourceId }, derivation.inputs);
+    return result;
+  }, derivation.trust);
   let inserted = 0;
   let duplicate = dropped.length;
   let superseded = 0;
@@ -817,7 +843,7 @@ async function runPipelineBodyInner(
       valid_from: factEventTime(f, ctx),
       context: annotateUnverifiedResolution(ctx.sourceSlug ?? input.pageSlug ?? null, resolutionSource, f.entity_inferred),
     };
-    const result = await maintenanceTransaction(ctx.engine, tx => tx.insertFact(newFact, { source_id: ctx.sourceId })); // gbrain-allow-direct-insert: legacy DB-only fallback for unparented / thin-client facts (no entity page to fence onto)
+    const result = await insertDerivedFact(newFact); // legacy DB-only fallback for unparented / thin-client facts (no entity page to fence onto)
     fact_ids.push(result.id);
     if (result.status === 'inserted') inserted += 1;
     else if ((result.status as FactInsertStatus) === 'duplicate') duplicate += 1;
@@ -867,6 +893,7 @@ async function runPipelineBodyInner(
       ctx.engine,
       { sourceId: ctx.sourceId, localPath, slug, resolutionSource: groupResolutionSource },
       inputFacts,
+      derivation,
     );
 
     if (result.fenceWriteFailed) {
@@ -904,7 +931,7 @@ async function runPipelineBodyInner(
           valid_from: factEventTime(f, ctx),
           context: ctx.sourceSlug ?? input.pageSlug ?? null,
         };
-        const legacyResult = await maintenanceTransaction(ctx.engine, tx => tx.insertFact(newFact, { source_id: ctx.sourceId })); // gbrain-allow-direct-insert: stub-guard / unresolvable-target fallback for unprefixed or fallback-resolved entity slugs (no fenceable page or usable tree)
+        const legacyResult = await insertDerivedFact(newFact); // stub-guard / unresolvable-target fallback for unprefixed or fallback-resolved entity slugs (no fenceable page or usable tree)
         fact_ids.push(legacyResult.id);
         if (legacyResult.status === 'inserted') inserted += 1;
         else if ((legacyResult.status as FactInsertStatus) === 'duplicate') duplicate += 1;
@@ -937,7 +964,7 @@ async function runPipelineBodyInner(
           valid_from: factEventTime(f, ctx),
           context: ctx.sourceSlug ?? input.pageSlug ?? null,
         };
-        const legacyResult = await maintenanceTransaction(ctx.engine, tx => tx.insertFact(newFact, { source_id: ctx.sourceId })); // gbrain-allow-direct-insert: DB-only fallback when the fence lane declined the write (write_through opt-out race / localPath echo)
+        const legacyResult = await insertDerivedFact(newFact); // DB-only fallback when the fence lane declined the write (write_through opt-out race / localPath echo)
         fact_ids.push(legacyResult.id);
         if (legacyResult.status === 'inserted') inserted += 1;
         else if ((legacyResult.status as FactInsertStatus) === 'duplicate') duplicate += 1;

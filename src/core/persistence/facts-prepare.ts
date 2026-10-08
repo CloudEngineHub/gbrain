@@ -20,6 +20,8 @@ import type { ManagedFactIntent, FrozenExtractedFact } from './facts-maintenance
 import { assertManagedFactsEmbedding } from './facts-maintenance.ts';
 import { normalizeTargetFences } from '../fence-repair/import-step.ts';
 import { pageFencesNormalized } from '../fence-repair/report.ts';
+import { declaredWriteTrust, derivedWriteTrust, readDerivationDeclaration, readTaintInputs, recordTaintEdges } from '../trust/taint.ts';
+import { minTrust, type TaintInput, type WriteTrust } from '../trust/tier.ts';
 
 const requestFix = (row: WriteRequest): Action => row.principal_kind === 'local_cli'
   ? readFix(`Reads fact request ${row.request_id}'s durable receipt: its state and recorded error, read-only.`, { argv: ['gbrain', 'write-request', '--', row.request_id] })
@@ -44,6 +46,22 @@ function thawFact(fact: FrozenExtractedFact): NewFact & { entity_slug: string | 
   return { ...fact, entity_slug: fact.entity_slug ?? null, kind: fact.kind ?? 'fact', visibility: fact.visibility ?? 'private',
     valid_from: new Date(fact.valid_from), valid_until: fact.valid_until ? new Date(fact.valid_until) : null,
     embedding: fact.embedding ? new Float32Array(fact.embedding) : null };
+}
+
+/**
+ * #5575 I2: extracted facts publish at the extraction's declared taint, never
+ * above the source page's current tier (an intent queued before tiers derives
+ * from its origin page alone). Undefined when neither exists: the request's
+ * channel tier applies.
+ */
+async function managedFactsTrust(engine: BrainEngine, p: ManagedFactIntent): Promise<{ trust: WriteTrust; inputs: Array<Pick<TaintInput, 'table' | 'id'>> } | undefined> {
+  const declaration = readDerivationDeclaration(p.derivation);
+  if (!declaration && !p.origin) return undefined;
+  const page = p.origin ? await readTaintInputs(engine, [{ table: 'pages', id: p.origin.pageId }]) : [];
+  const live = derivedWriteTrust({ channel: declaration?.origin.channel ?? 'derive:facts_backstop', inputs: page, requestId: p.originalRequestId });
+  if (!declaration) return { trust: live, inputs: page };
+  const declared = declaredWriteTrust(declaration);
+  return { trust: { tier: minTrust(declared.tier, live.tier), origin: declared.origin }, inputs: declaration.inputs };
 }
 
 export async function prepareManagedFactsMutation(engine: BrainEngine, row: WriteRequest, config: GBrainConfig): Promise<PreparedMutation> {
@@ -157,6 +175,7 @@ export async function prepareManagedFactsMutation(engine: BrainEngine, row: Writ
       visibility: canonical.visibility ?? entry.fact.visibility, entity_slug: row.slug,
       embedding: entry.fact.embedding, source_session: entry.fact.source_session };
   }
+  const taint = await managedFactsTrust(engine, p);
   let page: PreparedMutation | undefined;
   if (snapshot && entries.some(entry => entry.rowNum !== undefined)) {
     page = await preparePageMutation(engine, { ...row, intent: { ...p,
@@ -165,6 +184,7 @@ export async function prepareManagedFactsMutation(engine: BrainEngine, row: Writ
       `Entity page ${row.slug} changed while its ## Facts table was being prepared, so none of these facts were published.`);
   }
   return { observedRevision: snapshot?.revision ?? null, file: page?.file, ...(page?.exclusiveSources ? { exclusiveSources: page.exclusiveSources } : {}), noop: entries.every(entry => entry.duplicateId !== null || entry.duplicateOf !== undefined),
+    ...(taint ? { trust: taint.trust } : {}),
     additionalPageKeys, validate: async tx => {
       await validate(tx, true);
       await page?.validate?.(tx);
@@ -190,6 +210,7 @@ export async function prepareManagedFactsMutation(engine: BrainEngine, row: Writ
           ids.push(result.ids[0]);
         } else ids.push((await tx.insertFact(entry.fact, { source_id: row.source_id })).id);
         inserted++;
+        if (taint) await recordTaintEdges(tx, { table: 'facts', id: ids[ids.length - 1], sourceId: row.source_id }, taint.inputs);
         if (entry.supersedes) {
           await tx.executeRaw('UPDATE facts SET expired_at=COALESCE(expired_at,now()),superseded_by=$3 WHERE id=$1 AND source_id=$2',
             [entry.supersedes.id, row.source_id, ids[ids.length - 1]]);

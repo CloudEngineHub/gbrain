@@ -3,7 +3,8 @@ import type { Action } from '../agent-output.ts';
 import { opError } from '../ops/contract.ts';
 import { readFix, trustedCliRequired } from '../ops/op-fix.ts';
 import { currentSubmissionAuthority } from '../minions/submission-authority.ts';
-import { withCoordinatedWrite } from './context.ts';
+import { withCoordinatedWrite, withWriteTrust } from './context.ts';
+import { deriveTrust, recordTaintEdges } from '../trust/taint.ts';
 import { maintenanceAttribution, maintenanceTransaction } from './attribution.ts';
 import { currentVerifiedLocalWriter } from './identity.ts';
 import { managedPersistenceEnabled } from './ownership.ts';
@@ -55,20 +56,37 @@ export async function withDerivedFactsWrite<T>(engine: BrainEngine, sourceId: st
 }
 
 /**
+ * #5575 I2: the conversation fact extractor's context is the page alone, so
+ * its rows carry the page's stored tier capped at agent_written (an
+ * own-session transcript import is agent_written, a third-party one
+ * external_untrusted) and an edge to the page.
+ */
+const conversationDerivation = (engine: BrainEngine, sourceId: string, slug: string) =>
+  deriveTrust(engine, [{ table: 'pages', sourceId, slug }], { channel: 'derive:conversation_facts' });
+
+/** Edges for the fact ids a batch insert returned (`{ ids }`); other results (deletes, counts) record none. */
+async function recordInsertedEdges(tx: BrainEngine, sourceId: string, result: unknown, inputs: Awaited<ReturnType<typeof conversationDerivation>>['inputs']) {
+  const ids = (result as { ids?: unknown } | null)?.ids;
+  for (const id of Array.isArray(ids) ? ids : []) await recordTaintEdges(tx, { table: 'facts', id: Number(id), sourceId }, inputs);
+}
+
+/**
  * Legacy writers run in one maintenance transaction on unmanaged brains. On a
  * managed brain the page must still be live under its lock, so rows are never
  * published for a page deleted or purged while the model ran.
  */
 export async function writeDerivedFacts<T>(engine: BrainEngine, sourceId: string, slug: string,
   fn: (db: BrainEngine) => Promise<T>): Promise<T> {
-  if (!await managedPersistenceEnabled(engine)) return maintenanceTransaction(engine, fn);
+  const { trust, inputs } = await conversationDerivation(engine, sourceId, slug);
+  const write = async (db: BrainEngine) => { const result = await fn(db); await recordInsertedEdges(db, sourceId, result, inputs); return result; };
+  if (!await managedPersistenceEnabled(engine)) return maintenanceTransaction(engine, write, trust);
   return withDerivedFactsWrite(engine, sourceId, [slug], async tx => {
     const [page] = await tx.executeRaw('SELECT id FROM pages WHERE source_id=$1 AND slug=$2 AND deleted_at IS NULL', [sourceId, slug]);
     if (!page) {
       throw opError('page_not_found', 'The page was deleted during fact extraction; nothing was written.',
         `Page ${slug} in source ${sourceId} was deleted while its facts were extracted, so nothing was written. No action is needed unless the page should still exist.`);
     }
-    return fn(tx);
+    return withWriteTrust(tx, trust, () => write(tx));
   });
 }
 
@@ -94,7 +112,12 @@ export async function replaceDerivedFactsForPage(engine: BrainEngine, sourceId: 
       `WITH del AS (DELETE FROM facts WHERE source_id=$1 AND source_markdown_slug=$2 AND source LIKE $3 RETURNING 1)
        SELECT COUNT(*)::text AS count FROM del`, [sourceId, slug, `${input.sourcePrefix}%`]);
     const rows = await input.build(tx);
-    const { inserted } = rows.length ? await tx.insertFacts(rows, { source_id: sourceId }) : { inserted: 0 }; // gbrain-allow-direct-insert: managed replacement of a page's derived fact batch inside the coordinator transaction that deleted the prior batch
+    const { trust, inputs } = await conversationDerivation(tx, sourceId, slug);
+    const { inserted } = rows.length ? await withWriteTrust(tx, trust, async () => {
+      const result = await tx.insertFacts(rows, { source_id: sourceId }); // gbrain-allow-direct-insert: managed replacement of a page's derived fact batch inside the coordinator transaction that deleted the prior batch
+      await recordInsertedEdges(tx, sourceId, result, inputs);
+      return result;
+    }) : { inserted: 0 };
     return { deleted: Number(deleted?.count ?? 0), inserted };
   });
 }

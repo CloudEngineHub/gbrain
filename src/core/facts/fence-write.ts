@@ -56,6 +56,9 @@ import { logStubGuardEvent } from './stub-guard-audit.ts';
 import { isFactWithdrawn } from './withdrawal.ts';
 import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 import { maintenanceTransaction } from '../persistence/attribution.ts';
+import { withTrustKeep } from '../persistence/context.ts';
+import { recordTaintEdges } from '../trust/taint.ts';
+import type { TaintInput, WriteTrust } from '../trust/tier.ts';
 
 /** Resolved source binding for the entity page. */
 export interface FenceTarget {
@@ -288,6 +291,8 @@ export async function writeFactsToFence(
   engine: BrainEngine,
   target: FenceTarget,
   facts: FenceInputFact[],
+  /** #5575 I2: a deriver's taint; the new rows get its tier and input edges. Unmanaged path only. */
+  derivation?: { trust: WriteTrust; inputs: readonly TaintInput[] },
 ): Promise<FenceWriteResult> {
   if (await managedPersistenceEnabled(engine)) {
     // The coordinator owns the canonical file on a managed brain: publish the
@@ -523,9 +528,9 @@ export async function writeFactsToFence(
         const reparsed = parseMarkdown(tmpBody, `${target.slug}.md`);
         const existing = await engine.getPage(target.slug, { sourceId: target.sourceId });
         if (existing) {
-          await maintenanceTransaction(engine, tx => tx.refreshPageBody(target.slug, target.sourceId,
+          await maintenanceTransaction(engine, tx => withTrustKeep(tx, ['pages'], () => tx.refreshPageBody(target.slug, target.sourceId,
             sanitizeText(reparsed.compiled_truth), sanitizeText(reparsed.timeline),
-            existing.content_hash || contentHash(existing)));
+            existing.content_hash || contentHash(existing))));
         }
       } catch (err) {
         // The file is committed; the page cache stays stale until the next
@@ -554,7 +559,11 @@ export async function writeFactsToFence(
         source_session: facts[i].sessionId,
       }));
 
-      const result = await maintenanceTransaction(engine, tx => tx.insertFacts(enriched, { source_id: target.sourceId })); // gbrain-allow-direct-insert: writeFactsToFence is the markdown-first reconcile path; runs only after the atomic fence write commits
+      const result = await maintenanceTransaction(engine, async tx => {
+        const inserted = await tx.insertFacts(enriched, { source_id: target.sourceId }); // gbrain-allow-direct-insert: writeFactsToFence is the markdown-first reconcile path; runs only after the atomic fence write commits
+        for (const id of derivation ? inserted.ids : []) await recordTaintEdges(tx, { table: 'facts', id, sourceId: target.sourceId }, derivation!.inputs);
+        return inserted;
+      }, derivation?.trust);
       // v0.46 (#3014) — an unresolvable `superseded by #N` reference (self
       // / dangling / struck target) leaves superseded_by NULL; log it rather
       // than swallow it. The row still lands (expired_at set for struck

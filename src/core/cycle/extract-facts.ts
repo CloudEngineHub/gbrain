@@ -47,6 +47,9 @@ import { existsSync, readFileSync } from 'node:fs';
 
 import type { BrainEngine } from '../engine.ts';
 import { managedDerivedFactsPreflight, withDerivedFactsWrite } from '../persistence/derived-facts.ts';
+import { withWriteTrust } from '../persistence/context.ts';
+import { deriveTrust, recordTaintEdges } from '../trust/taint.ts';
+import type { WriteTrust } from '../trust/tier.ts';
 import { maintenanceTransaction } from '../persistence/attribution.ts';
 import {
   resolveSupersededByRow,
@@ -453,8 +456,8 @@ export async function runExtractFacts(
   // Managed brains reconcile the same way, but each database write commits
   // inside the coordinator's source capability under the page key.
   const managed = await managedDerivedFactsPreflight(engine, sourceId);
-  const transact = <T>(slugs: string[], fn: (tx: BrainEngine) => Promise<T>): Promise<T> =>
-    managed ? withDerivedFactsWrite(engine, sourceId, slugs, fn) : maintenanceTransaction(engine, fn);
+  const transact = <T>(slugs: string[], fn: (tx: BrainEngine) => Promise<T>, trust?: WriteTrust): Promise<T> =>
+    managed ? withDerivedFactsWrite(engine, sourceId, slugs, tx => trust ? withWriteTrust(tx, trust, () => fn(tx)) : fn(tx)) : maintenanceTransaction(engine, fn, trust);
   const result: ExtractFactsResult = {
     pagesScanned: 0,
     pagesWithFacts: 0,
@@ -813,6 +816,8 @@ export async function runExtractFacts(
       result.warnings.push(`${slug}: destructive fact reconciliation deferred; existing vectors preserved until embedding succeeds`);
     }
 
+    // #5575 I2: the fence rows restate the page (no model): they take its tier, capped at operator_curated.
+    const derivation = await deriveTrust(engine, [{ table: 'pages', id: page.id }], { channel: 'derive:facts_fence', projection: true });
     const apply = async () => {
       try {
         return await transact([slug], async tx => {
@@ -851,13 +856,14 @@ export async function runExtractFacts(
               inserts.map(f => ({ ...f, superseded_by_row: undefined })),
               { source_id: sourceId },
             );
+          for (const id of (inserted as { ids?: number[] }).ids ?? []) await recordTaintEdges(tx, { table: 'facts', id, sourceId }, derivation.inputs);
           const insertedRows = new Set(inserts.map(f => f.row_num));
           const linked = await syncSupersession(tx, sourceId, slug, extracted, chain, insertedRows);
           opts.signal?.throwIfAborted();
           const updated = new Set([...updates.map(f => f.row_num), ...linked.changed.filter(row => !insertedRows.has(row))]);
           if (watermark && !deferInserts) await settleFactsReconcile(tx, sourceId, slug, 'complete', page.knowledge_revision ?? null);
           return { inserted: inserted.inserted, updated: updated.size, warnings: linked.warnings };
-        });
+        }, derivation.trust);
       } catch (error) {
         if (!isAborted(opts.signal)) throw error;
         result.warnings.push(`${slug}: fact reconciliation cancelled; transaction rolled back`);

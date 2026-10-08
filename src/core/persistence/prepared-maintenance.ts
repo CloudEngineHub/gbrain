@@ -23,7 +23,6 @@ import { nativeLockCapability } from './native-lock.ts';
 import { assertPhysicalRoot } from './physical-root.ts';
 import { isConnectorSourceKind } from './connector-identity.ts';
 import { MaintenanceWriteWait } from './maintenance-wait.ts';
-import { withTrustKeep } from './context.ts';
 import { declaredWriteTrust, lowerToDerivedTier, readDerivationDeclaration, recordTaintEdges, type DerivationDeclaration } from '../trust/taint.ts';
 
 export interface MaintenanceAuthority {
@@ -344,8 +343,8 @@ export async function applyPreservingTakeResolutions(tx: BrainEngine, pageId: nu
  * #5575 I2: a maintenance intent that carries a derivation declaration
  * publishes at the declared tier (never above agent_written), lowers its
  * derived row when the publication changed no content column, and records
- * the complete input edges (ENG-7). A consolidation rewrites the entity
- * page's takes fence without authoring the page, so the page keeps its tier.
+ * the complete input edges (ENG-7). A consolidation's takes fence edit
+ * keeps the entity page's tier (page-prepare's fence-edit rule).
  */
 export async function prepareMaintenanceMutation(engine: BrainEngine, row: WriteRequest, config: GBrainConfig): Promise<PreparedMutation> {
   const prepared = await prepareMaintenanceKind(engine, row, config);
@@ -354,7 +353,7 @@ export async function prepareMaintenanceMutation(engine: BrainEngine, row: Write
   const trust = declaredWriteTrust(declaration);
   const consolidation = row.intent?.kind === 'managed_maintenance_consolidate';
   return { ...prepared, trust, apply: async (tx, preimage) => {
-    const outcome = consolidation ? await withTrustKeep(tx, ['pages'], () => prepared.apply(tx, preimage)) : await prepared.apply(tx, preimage);
+    const outcome = await prepared.apply(tx, preimage);
     const [derived] = consolidation ? (outcome.take_id ? [{ table: 'takes' as const, id: Number(outcome.take_id) }] : [])
       : (await tx.executeRaw<{ id: number }>('SELECT id FROM pages WHERE source_id=$1 AND slug=$2 AND deleted_at IS NULL', [row.source_id, row.slug]))
         .map(page => ({ table: 'pages' as const, id: Number(page.id) }));
