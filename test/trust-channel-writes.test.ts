@@ -316,6 +316,10 @@ describe('write gate on page writes (DX-1)', () => {
       for (const r of receipts) expect(r.tier).toBe(r.trust_tier);
       const plain = await run(b.remote, 'put_page', { slug: 'notes/plain-example', content: page('Plain', 'Ordinary notes.') });
       expect(plain.gate).toBeUndefined();
+      // ENG-11: a benign rewrite of the flagged page is re-gated and its old verdict is dropped.
+      await run(b.remote, 'put_page', { slug: 'notes/flagged-example', content: page('Flagged', 'Now just ordinary notes.'), force: true });
+      expect(await engine.executeRaw(`SELECT 1 FROM write_gate_receipts r JOIN pages p ON p.id::text = r.target_id AND r.target_table = 'pages'
+        WHERE p.source_id = $1 AND p.slug = 'notes/flagged-example'`, [b.sourceId])).toHaveLength(0);
     }
   }), 90_000);
 });

@@ -18,6 +18,7 @@
  *   fold into it) with the prior owner version to revert to.
  */
 import type { BrainEngine } from '../engine.ts';
+import { queuePageProjection } from '../page-state/projections.ts';
 import type { WriteRequest } from '../persistence/model.ts';
 import { frontmatterTrustCaps, requestChannelTrust, stampTrustMarker } from './channel.ts';
 import { insertTrustProposal, updatePendingTrustProposalAfter } from './proposals.ts';
@@ -93,4 +94,17 @@ export async function recordAgentPageLowering(tx: BrainEngine, row: Pick<WriteRe
   });
   if (!proposal.created) await updatePendingTrustProposalAfter(tx, proposal.id, after);
   return { proposal_ref: `tp${proposal.id}` };
+}
+
+/**
+ * L1b contract: chunks render fence rows by their tier relative to the page's
+ * (eligibility/fence-overlay.ts), so any tier change of a fact, take or page
+ * queues the page's projection rebuild (re-chunk) in the same transaction.
+ */
+export async function queueTierProjection(tx: BrainEngine, table: 'facts' | 'takes' | 'pages', id: number): Promise<void> {
+  const sql = table === 'facts' ? 'SELECT source_id, source_markdown_slug AS slug FROM facts WHERE id = $1 AND source_markdown_slug IS NOT NULL'
+    : table === 'takes' ? 'SELECT p.source_id, p.slug FROM takes t JOIN pages p ON p.id = t.page_id WHERE t.id = $1'
+      : 'SELECT source_id, slug FROM pages WHERE id = $1';
+  const [page] = await tx.executeRaw<{ source_id: string; slug: string }>(sql, [id]);
+  if (page) await queuePageProjection(tx, page.source_id, page.slug, 'trust_tier_changed');
 }

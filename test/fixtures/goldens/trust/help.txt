@@ -1,4 +1,4 @@
-Usage: gbrain trust <review|confirm|release|drop|revert|explain|allow|disable|backfill> [options]
+Usage: gbrain trust <review|confirm|release|drop|revert|explain|allow|disable|backfill|scan> [options]
   review [--from <source>] [--kind <kind>] [--since <7d|date>] [--json]
       Everything waiting for you: trust proposals (tp<id>), pages an agent edit lowered, unconfirmed standing
       preferences (f<id>), held writes (h<id>) and your allow rules (a<id>), grouped by day and page, each with
@@ -31,3 +31,8 @@ Usage: gbrain trust backfill [--dry-run] [--resume] [--batch-size N] [--json]
   the journaled request that wrote the row. Rows with no signal stay "unverified origin"; nothing becomes
   "confirmed by you". --dry-run is read-only (no migrations, no writes) and works before the trust migration;
   it reports the projected count per table and tier. --resume continues an interrupted run.
+
+Usage: gbrain trust scan [--batch-size N] [--json]
+  Runs the write gate's deterministic detector over agent-written and lower rows written before the gate,
+  recording a receipt for each instruction-like row so proactive surfaces stop injecting it until you confirm
+  it (gbrain trust review). Changes no row; resumable (rerun to continue); a detector upgrade rescans.

@@ -21,7 +21,7 @@ import {
   assessPageForGate, DEFAULT_WRITE_GATE_CONFIG, parseWriteGateConfig, writeGateDetail, writeGateRejectedError,
   type WriteGateAssessment, type WriteGateConfig, type WriteGateInput,
 } from './write-gate.ts';
-import { recordPageGateReceipt } from './write-gate-store.ts';
+import { clearStalePageGateReceipts, recordPageGateReceipt } from './write-gate-store.ts';
 import { loadOperatorLiterals } from './content-sanity-literals.ts';
 import { classifyImportHold, contentSizeHold, parseMarkdown, type ContentHold, type ParseOpts, type ParsedMarkdown } from './markdown.ts';
 import { isCodeFilePath } from './sync.ts';
@@ -249,6 +249,7 @@ export async function settleContentDisposition(engine: BrainEngine, parsed: Pars
   return {
     quarantined: pageQuarantined, flagged: pageFlagged, ...(pageFlagReason ? { flagReason: pageFlagReason } : {}), gate,
     persistReceipt: async tx => {
+      if (gate?.ran) await clearStalePageGateReceipts(tx, { slug, sourceId: sourceId ?? 'default', contentHash: gate.contentHash });
       if (gate) await recordPageGateReceipt(tx, { slug, sourceId: sourceId ?? 'default', assessment: gate, requestId: ctx.writeGate?.requestId ?? null });
     },
   };

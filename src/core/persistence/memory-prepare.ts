@@ -134,7 +134,7 @@ export async function prepareMemoryMutation(engine: BrainEngine, row: WriteReque
     // Reuse the canonical parser/chunker and durable filesystem publication.
     // The original caller revision was checked above; this CAS binds this render.
     // #5575 ENG-1: the new row has no facts row yet; its chunks are cut at the append's tier.
-    page = await withPendingFenceRows({ sourceId: row.source_id, slug: row.slug, rowNums: [appended.rowNum], tier: fenceAppendPendingTier() },
+    page = await withPendingFenceRows({ sourceId: row.source_id, slug: row.slug, rowNums: [appended.rowNum], tier: fenceAppendPendingTier(writerTier) },
       () => preparePageMutation(engine, { ...row, intent: { ...p, content, expected_revision: observedRevision, force: false } }, config, undefined, signal));
     if (page.observedRevision !== observedRevision) conflict(row);
   }

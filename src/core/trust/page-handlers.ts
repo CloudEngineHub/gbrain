@@ -23,6 +23,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { BrainEngine } from '../engine.ts';
+import { queueTierProjection } from './page-write.ts';
 import type { GBrainConfig } from '../config.ts';
 import type { OperationContext } from '../ops/contract.ts';
 import { opError } from '../ops/contract.ts';
@@ -135,6 +136,7 @@ export async function setRowTier(engine: BrainEngine, input: {
           WHERE id = $1 RETURNING id`, [input.id, input.tier, JSON.stringify({ tier: input.tier, at: new Date().toISOString(), ...input.note })]);
       const rows = input.ceiling ? await withTrustPromotion(tx, input.ceiling, update) : await update();
       if (rows.length !== 1) return false;
+      await queueTierProjection(tx, input.table, input.id);
       await input.also?.(tx);
       return true;
     };

@@ -24,6 +24,7 @@ import {
   type TrustDecision, type TrustDecisionContext, type TrustProposalAction, type TrustProposalRow,
 } from './proposals.ts';
 import { tierRaiseFix } from './confirm.ts';
+import { queueTierProjection } from './page-write.ts';
 import { compareTrust, effectiveWriteTrust, storedTrustTier, type TrustTier, type WriteTrust } from './tier.ts';
 
 /** I3: a write at `writer` may supersede, expire or forget a row at `target` only when it is at least as trusted. */
@@ -146,12 +147,14 @@ export const TRUST_PAIR_STORE: PairProposalStore = {
   async onAccept(tx, proposal) {
     await withTrustPromotion(tx, 'user_confirmed', () => tx.executeRaw(
       `UPDATE facts SET trust_tier = 'user_confirmed' WHERE id = $1 AND source_id = $2`, [proposal.new_fact_id, proposal.source_id]));
+    for (const id of [proposal.old_fact_id, proposal.new_fact_id]) await queueTierProjection(tx, 'facts', id);
   },
   /** Undo returns the new fact to the tier it had before the accept confirmed it (lowering needs no promotion). */
   async onUndo(tx, proposal) {
     const row = await getTrustProposal(tx, proposal.id);
     const prior = storedTrustTier((row?.before_state.new as { tier?: unknown } | undefined)?.tier);
     await tx.executeRaw(`UPDATE facts SET trust_tier = $3 WHERE id = $1 AND source_id = $2`, [proposal.new_fact_id, proposal.source_id, prior]);
+    for (const id of [proposal.old_fact_id, proposal.new_fact_id]) await queueTierProjection(tx, 'facts', id);
   },
 };
 registerPairProposalStore(TRUST_PAIR_STORE);
