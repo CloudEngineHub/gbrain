@@ -1,6 +1,6 @@
 import { assertUnmanagedCanonicalWriter } from './persistence/maintenance.ts';
 import { suffixedFrontmatterSlugHold } from './persistence/suffixed-slug.ts';
-import { maintenanceTransaction, ownerSourceGateInput, trustMarkerChanged, writeTrustOfGate } from './persistence/attribution.ts';
+import { maintenanceTransaction, ownerSourceGateInput, suppliedTrustMarkerView, trustMarkerChanged, writeTrustOfGate } from './persistence/attribution.ts';
 import { assertImportBase, sameCanonicalImport, sameContentAnyKeyOrder } from './page-state/import-guard.ts';
 import { stabilizeSafetyAssessments } from './persistence/reconcile-safety.ts';
 import { decideImportIdentity, collidingSlugOwner, fileOriginUri } from './import-identity.ts';
@@ -474,6 +474,9 @@ export async function importFromContent(
   // formula (byte-parity pinned by test/content-hash-parity-3694.test.ts).
   // Sort tags in place first to preserve the pre-#3694 downstream behavior
   // (parsedPage.tags was sorted by the old inline `.sort()` mutation).
+  // #5575 CEO-21: prepareFrontmatter may stamp the server's lower-only trust_tier marker; whether the write is a
+  // no-op is decided on the caller's own frontmatter, so an unchanged round trip stays an unstamped no-op.
+  const suppliedTrustMarker = parsed.frontmatter.trust_tier;
   if (opts.prepare) opts.prepareFrontmatter?.(parsed);
   parsed.tags.sort();
   const hash = contentHash({
@@ -521,9 +524,13 @@ export async function importFromContent(
       timeline: parsed.timeline,
       frontmatter: parsed.frontmatter,
     });
-  const unchanged = !!existing && !existing.deleted_at && !opts.forceRechunk && !needsProjectionRebuild && !embedSkipChanged && !trustMarkerChanged(existing.frontmatter, parsed.frontmatter) && (existing.content_hash === hash
-    ? !opts.prepare || sameCanonicalImport(existingSnapshot, parsedPage)
-    : !legacyHashMatch && await sameContentAnyKeyOrder(engine, existing, existingSnapshot?.tags ?? null, parsedPage, sourceId ?? 'default'));
+  const unchangedAs = async (page: ParsedPage) => !!existing && !existing.deleted_at && !opts.forceRechunk && !needsProjectionRebuild && !embedSkipChanged
+    && !trustMarkerChanged(existing.frontmatter, page.frontmatter) && (existing.content_hash === hash
+      ? !opts.prepare || sameCanonicalImport(existingSnapshot, page)
+      : !legacyHashMatch && await sameContentAnyKeyOrder(engine, existing, existingSnapshot?.tags ?? null, page, sourceId ?? 'default'));
+  // Unchanged as stamped (the stored page already carries the marker), or as the caller sent it (the marker would be new).
+  const suppliedPage: ParsedPage = { ...parsedPage, frontmatter: suppliedTrustMarkerView(parsed.frontmatter, suppliedTrustMarker) };
+  const unchanged = await unchangedAs(parsedPage) || (suppliedTrustMarker !== parsed.frontmatter.trust_tier && await unchangedAs(suppliedPage));
   if (existing && unchanged) {
     // #5050: unchanged content chunked before the safe-chunk fence is re-sealed
     // projection-only; the canonical write stays a no-op.

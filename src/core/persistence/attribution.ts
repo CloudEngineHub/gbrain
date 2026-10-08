@@ -4,7 +4,7 @@ import type { BrainEngine } from '../engine.ts';
 import { withWriteAttribution } from './context.ts';
 import type { WriteTrust } from '../trust/tier.ts';
 import { requestChannelTrust } from '../trust/channel.ts';
-export { ownerSourceGateInput, trustMarkerChanged, writeTrustOfGate } from '../trust/channel.ts';
+export { ownerSourceGateInput, suppliedTrustMarkerView, trustMarkerChanged, writeTrustOfGate } from '../trust/channel.ts';
 
 /**
  * The actor the database stamps on rows written inside withCoordinatedWrite

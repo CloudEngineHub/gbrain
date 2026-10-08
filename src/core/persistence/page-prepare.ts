@@ -55,6 +55,7 @@ import { fenceRepairCommit } from './effect-model.ts';
 import { purgePageInTransaction } from './page-purge.ts';
 import { withTrustKeep } from './context.ts';
 import { isFenceEditWrite, pageGateTrust, pageWriteTrust, recordAgentPageLowering, stampPageTrustMarker, storedPageTier } from '../trust/page-write.ts';
+import { suppliedTrustMarkerView } from '../trust/channel.ts';
 import { gateField, gateInput } from '../trust/gate-outcomes.ts';
 
 
@@ -371,6 +372,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
   }
   let prepared: PreparedContentImport | undefined;
   let provenance: CanonicalProvenance | undefined;
+  let suppliedTrustMarker: unknown;
   // #5575: the page's tier, computed once before import so the write gate sees exactly it (ENG-18).
   const trust = pageWriteTrust(row, typeof content === 'string' && !isFenceEditWrite(row) ? parseMarkdown(content, row.slug, { activePack }).frontmatter : null);
   const gateTrust = pageGateTrust(row, trust, storedTier);
@@ -384,9 +386,11 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
     source_uri: typeof p.source_uri === 'string' ? p.source_uri : null,
     ingested_via: typeof p.ingested_via === 'string' ? p.ingested_via : null,
     ...(gateTrust ? { writeGate: gateInput(gateTrust, row.id) } : {}),
+    // Provenance compares the caller's page with the stored one, so it runs before the server's trust marker is stamped.
     prepareFrontmatter: page => {
-      stampPageTrustMarker(row, page.frontmatter, trust, storedTier);
       provenance = putProvenance(row, snapshot, page);
+      suppliedTrustMarker = page.frontmatter.trust_tier;
+      stampPageTrustMarker(row, page.frontmatter, trust, storedTier);
     },
     prepare: async value => { prepared = value; return value.result; },
   }).catch(error => {
@@ -427,7 +431,9 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
   const tags = versionTags ?? [...new Set([...(snapshot?.tags ?? []), ...ready.parsedPage.tags])].sort();
   const renderedPage: Page = { ...(snapshot?.page ?? { id: 0, slug: row.slug, source_id: row.source_id, created_at: new Date(), updated_at: new Date() }), ...ready.parsedPage };
   const rendered = serializePageToMarkdown(renderedPage, tags);
-  const logicalNoop = snapshot !== null && digest(canonical(snapshot.page, snapshot.tags)) === digest(canonical(ready.parsedPage, tags));
+  // CEO-21: the server-stamped trust marker alone never makes a write: unchanged as stamped or as the caller sent it.
+  const callerPage = { ...ready.parsedPage, frontmatter: suppliedTrustMarkerView(ready.parsedPage.frontmatter, suppliedTrustMarker) };
+  const logicalNoop = snapshot !== null && [ready.parsedPage, callerPage].some(page => digest(canonical(snapshot.page, snapshot.tags)) === digest(canonical(page, tags)));
   const noop = logicalNoop && (snapshot?.page.deleted_at != null) === targetDeleted;
   const project = projected ? await prepareCanonicalProjections(engine,ready.parsedPage,row.slug,row.source_id,snapshot,writer,timelinePolicy) : undefined;
   const ordinaryPage = ['put_page','capture','restore_page','revert_version','edit_page'].includes(row.operation);

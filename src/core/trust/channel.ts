@@ -216,6 +216,16 @@ export async function ownerSourceGateInput(engine: Pick<BrainEngine, 'executeRaw
  * change is adding or removing it would read as unchanged; removing it by hand
  * is the owner act that restamps a page on the next sync (CEO-21), so it counts.
  */
+/**
+ * CEO-21: `frontmatter` with its trust_tier marker set back to what the caller
+ * supplied (removed when it supplied none). No-op detection compares this
+ * view, so a server-stamped marker never turns an unchanged write into a write.
+ */
+export function suppliedTrustMarkerView(frontmatter: Record<string, unknown>, supplied: unknown): Record<string, unknown> {
+  const { trust_tier: _stamped, ...rest } = frontmatter;
+  return supplied === undefined ? rest : { ...rest, trust_tier: supplied };
+}
+
 export function trustMarkerChanged(prior: Record<string, unknown> | null | undefined, next: Record<string, unknown> | null | undefined): boolean {
   return (prior?.trust_tier ?? null) !== (next?.trust_tier ?? null);
 }
