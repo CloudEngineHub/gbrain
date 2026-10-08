@@ -330,5 +330,6 @@ export async function submitPurgeFactMutation(ctx: OperationContext, params: Rec
   if (row.state !== 'committed') return { ...(row.outcome ?? {}), request_id: row.request_id, state: row.state, error: row.error_code };
   const receipt: PurgeReceipt = await verifyFactPurge(ctx.engine, { target, plan: committedPlan, dryRun: false, removed: counts, prose,
     vacuum: params.vacuum === true });
-  return { ...receipt, request_id: row.request_id, state: row.state, similar_active: similar, ...await purgeCompletion(ctx.engine, row as WriteRequest, receipt) };
+  return { ...receipt, purge: (row.outcome as { purge?: unknown } | null)?.purge, request_id: row.request_id, state: row.state, similar_active: similar,
+    ...await purgeCompletion(ctx.engine, row as WriteRequest, receipt) };
 }
