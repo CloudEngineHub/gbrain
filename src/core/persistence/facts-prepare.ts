@@ -191,7 +191,7 @@ export async function prepareManagedFactsMutation(engine: BrainEngine, row: Writ
   if (snapshot && entries.some(entry => entry.rowNum !== undefined)) {
     // #5575 ENG-1: the appended rows have no facts rows yet; their chunks are cut at the append's tier.
     const rowNums = entries.flatMap(entry => entry.rowNum === undefined ? [] : [entry.rowNum]);
-    page = await withPendingFenceRows({ sourceId: row.source_id, slug: row.slug, rowNums, tier: fenceAppendPendingTier() },
+    page = await withPendingFenceRows({ sourceId: row.source_id, slug: row.slug, rowNums, tier: fenceAppendPendingTier(taint?.trust.tier) },
       () => preparePageMutation(engine, { ...row, intent: { ...p,
         content: serializePageToMarkdown({ ...snapshot.page, compiled_truth: body, timeline: target!.page.timeline }, snapshot.tags) } }, config));
     if (page.observedRevision !== snapshot.revision) throw factsRefusal('revision_conflict', 'The fact entity changed during preparation.', row,

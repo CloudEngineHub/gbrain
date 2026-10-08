@@ -220,7 +220,7 @@ export async function enrichEntity(
       // when a provider is configured) and reachable by the recall arms.
       const md = serializeMarkdown(frontmatter, content, '', { type, title, tags: [] });
       await importFromContent(engine, slug, md, {
-        noEmbed: !isAvailable('embedding'),
+        noEmbed: !isAvailable('embedding'), writeGate: derivedGateInput(derivation.trust),
         ...(opts?.sourceId ? { sourceId: opts.sourceId } : {}),
       });
       await lowerDerivedPage(engine, derivation, sourceId, slug);

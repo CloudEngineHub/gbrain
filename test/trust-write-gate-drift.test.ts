@@ -65,19 +65,15 @@ const EXEMPT: Record<string, string> = {
   'src/core/trust/owner-actions.ts': 'owner release publishes a held row the owner confirmed (CEO-9); the gate already held it',
   'src/core/trust/supersede-handlers.ts': 'owner accept/undo re-tiers existing rows inside the checked supersede',
   'src/core/repair/conversation-labels.ts': 'owner repair of existing conversation labels',
+  'src/commands/extract-conversation-facts.ts': 'extracted rows go through insertDerivedFacts (persistence/derived-facts.ts), which gates them; its direct writes are gbrain audit outcome rows',
+  'src/core/cycle/dream-taint.ts': 'the dream summary index page lists the run\'s output pages (gbrain-generated), stamped at their taint',
+  'src/core/facts/fence-write.ts': 'callers decide the gate (backstop, loops-extract) and pass the decision; it records the flag receipt on the new row',
+  'src/core/facts/write-single.ts': 'callers gate first (loops-extract decides; remember gates in memory-prepare); it records a passed decision\'s flag receipt',
+  'src/core/output/writer.ts': 'gbrain integrity auto-repair (owner-run local CLI) rewrites citations and back-links of existing pages',
+  'src/core/persistence/atom-maintenance.ts': 'pending: the managed atom page carries intent.derivation; the page gate runs in page-prepare once it reads that declaration',
+  'src/core/persistence/prepared-maintenance.ts': 'consolidation takes gate in takes-prepare; pending: derived maintenance pages carry intent.derivation for the page-prepare gate',
+  'src/core/think/index.ts': 'pending: the think --save page (quote-grounded synthesis, unverified claims moved to frontmatter) has no page gate seam on its direct putPage',
 };
-/**
- * Derivers whose gate lands with the lane L1a taint sub-lane (they compute the
- * derived tier and gate each row at the same point). Emptied when it merges.
- */
-const PENDING_TAINT_LANE = [
-  'src/commands/extract-conversation-facts.ts', 'src/core/chronicle/publish.ts', 'src/core/cycle/extract-atoms.ts', 'src/core/cycle/extract-facts.ts',
-  'src/core/cycle/extract-takes.ts', 'src/core/cycle/phases/consolidate.ts', 'src/core/cycle/synthesize.ts', 'src/core/facts/backstop.ts',
-  'src/core/facts/conversation-publication.ts', 'src/core/facts/fence-write.ts', 'src/core/facts/write-single.ts', 'src/core/output/writer.ts',
-  'src/core/persistence/atom-maintenance.ts', 'src/core/persistence/facts-prepare.ts', 'src/core/persistence/prepared-maintenance.ts',
-  'src/core/think/index.ts', 'src/commands/extract.ts', 'src/core/enrichment-service.ts', 'src/core/extract-timeline-from-meetings.ts',
-];
-for (const path of PENDING_TAINT_LANE) EXEMPT[path] ??= 'pending: deriver gate lands with the lane L1a taint sub-lane';
 
 function inventory(): string[] {
   const doc = readFileSync(join(root, 'docs/architecture/system-of-record.md'), 'utf8');
