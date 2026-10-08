@@ -58,6 +58,12 @@ export const TRUST_GENERATION_WHEN: Readonly<Record<string, Partial<Record<Gener
   fact_purges: { insert: 'TRUE' },
   take_purges: { insert: 'TRUE' },
   page_purges: { insert: 'TRUE' },
+  // A new or changed flag receipt changes what activation control withholds (CEO-20).
+  write_gate_receipts: {
+    insert: 'TRUE',
+    update: '(OLD.verdict, OLD.reason_families, OLD.content_hash, OLD.target_table, OLD.target_id) IS DISTINCT FROM (NEW.verdict, NEW.reason_families, NEW.content_hash, NEW.target_table, NEW.target_id)',
+    delete: 'TRUE',
+  },
   needs_rederive: { insert: 'TRUE' },
 };
 
@@ -79,21 +85,6 @@ export function trustGenerationTriggerSql(table: string, event: GenerationEvent,
       FOR EACH ROW WHEN (${when}) EXECUTE FUNCTION ${TRUST_GENERATION_FUNCTION}()`,
   ];
 }
-
-/**
- * The write gate's verdict receipts (write_gate_receipts, lane L2a) suppress
- * a row from proactive surfaces, so a receipt insert or a verdict change must
- * bump the generation too. Not part of the migration until that table exists
- * on this branch: after L2a merges, append these statements to
- * TRUST_GENERATION_SCHEMA_STATEMENTS (its migration runs before this one on
- * fresh installs and upgrades alike).
- */
-export const WRITE_GATE_RECEIPTS_GENERATION_STATEMENTS: readonly string[] = [
-  ...trustGenerationTriggerSql('write_gate_receipts', 'insert', 'TRUE'),
-  ...trustGenerationTriggerSql('write_gate_receipts', 'update',
-    '(OLD.verdict, OLD.reason_families, OLD.content_hash, OLD.target_table, OLD.target_id) IS DISTINCT FROM (NEW.verdict, NEW.reason_families, NEW.content_hash, NEW.target_table, NEW.target_id)'),
-  ...trustGenerationTriggerSql('write_gate_receipts', 'delete', 'TRUE'),
-];
 
 export const TRUST_GENERATION_SCHEMA_STATEMENTS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS ${TRUST_POLICY_STATE_TABLE} (

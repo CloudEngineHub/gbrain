@@ -23,7 +23,7 @@ import type { BrainEngine } from '../src/core/engine.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { testBackends } from './helpers/test-backends.ts';
 import { readTrustGeneration, trustCacheIdentity } from '../src/core/eligibility/generation.ts';
-import { TRUST_GENERATION_TRIGGERS, TRUST_GENERATION_WHEN, WRITE_GATE_RECEIPTS_GENERATION_STATEMENTS } from '../src/core/eligibility/generation-schema.ts';
+import { TRUST_GENERATION_TRIGGERS, TRUST_GENERATION_WHEN } from '../src/core/eligibility/generation-schema.ts';
 import { withTrustPromotion, withWriteTrust } from '../src/core/persistence/context.ts';
 import { setMinTrust } from '../src/core/trust/min-trust.ts';
 
@@ -68,10 +68,9 @@ const promote = (engine: BrainEngine, table: string, id: number) => engine.trans
   () => tx.executeRaw(`UPDATE ${table} SET trust_tier = 'user_confirmed' WHERE id = $1`, [id])));
 
 describe('trust generation schema', () => {
-  test('every trigger is a deferred AFTER row trigger, and the write-gate spot names write_gate_receipts', () => {
+  test('every listed table carries a generation trigger, write_gate_receipts included', () => {
     expect(Object.keys(TRUST_GENERATION_WHEN).sort()).toEqual(
-      ['access_tokens', 'config', 'fact_purges', 'facts', 'needs_rederive', 'oauth_clients', 'page_purges', 'pages', 'take_purges', 'takes', 'timeline_entries']);
-    expect(WRITE_GATE_RECEIPTS_GENERATION_STATEMENTS.join('\n')).toContain('ON write_gate_receipts');
+      ['access_tokens', 'config', 'fact_purges', 'facts', 'needs_rederive', 'oauth_clients', 'page_purges', 'pages', 'take_purges', 'takes', 'timeline_entries', 'write_gate_receipts']);
   });
 
   test('the identity changes with the generation, the floor and the activation mode', () => {
@@ -162,6 +161,18 @@ for (const backendName of testBackends()) {
       expect(await bumps(engine, () => engine.executeRaw(`INSERT INTO take_purges(source_id, claim_hash) VALUES('default',$1)`, [hash]))).toBe(1);
       expect(await bumps(engine, () => engine.executeRaw(`INSERT INTO page_purges(source_id, content_hash, slug) VALUES('default',$1,'gen/purged')`, [hash]))).toBe(1);
       expect(await bumps(engine, () => engine.executeRaw(`INSERT INTO needs_rederive(derived_table, derived_id, source_id, reason) VALUES('facts',$1,'default','test')`, [hash]))).toBe(1);
+    });
+
+    test('a write-gate receipt insert, verdict change and delete bump; a re-sighting does not', async () => {
+      const engine = engineOf();
+      const hash = randomUUID();
+      const insert = () => engine.executeRaw(`INSERT INTO write_gate_receipts (target_table, target_id, source_id, content_hash, tier, detector_version, verdict, reason_families)
+        VALUES ('facts', '999999', 'default', $1, 'agent_written', 1, 'flag', ARRAY['standing_instruction'])
+        ON CONFLICT (target_table, target_id, content_hash, detector_version) DO UPDATE SET last_seen_at = now()`, [hash]);
+      expect(await bumps(engine, insert)).toBe(1);
+      expect(await bumps(engine, insert)).toBe(0);
+      expect(await bumps(engine, () => engine.executeRaw(`UPDATE write_gate_receipts SET verdict = 'quarantine' WHERE content_hash = $1`, [hash]))).toBe(1);
+      expect(await bumps(engine, () => engine.executeRaw('DELETE FROM write_gate_receipts WHERE content_hash = $1', [hash]))).toBe(1);
     });
 
     test('a transaction bumps once however many transitions it commits; a rollback bumps nothing', async () => {
