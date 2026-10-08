@@ -1,6 +1,6 @@
 import { assertUnmanagedCanonicalWriter } from './persistence/maintenance.ts';
 import { suffixedFrontmatterSlugHold } from './persistence/suffixed-slug.ts';
-import { maintenanceTransaction, ownerSourceGateInput, writeTrustOfGate } from './persistence/attribution.ts';
+import { maintenanceTransaction, ownerSourceGateInput, trustMarkerChanged, writeTrustOfGate } from './persistence/attribution.ts';
 import { assertImportBase, sameCanonicalImport, sameContentAnyKeyOrder } from './page-state/import-guard.ts';
 import { stabilizeSafetyAssessments } from './persistence/reconcile-safety.ts';
 import { decideImportIdentity, collidingSlugOwner, fileOriginUri } from './import-identity.ts';
@@ -521,7 +521,7 @@ export async function importFromContent(
       timeline: parsed.timeline,
       frontmatter: parsed.frontmatter,
     });
-  const unchanged = !!existing && !existing.deleted_at && !opts.forceRechunk && !needsProjectionRebuild && !embedSkipChanged && (existing.content_hash === hash
+  const unchanged = !!existing && !existing.deleted_at && !opts.forceRechunk && !needsProjectionRebuild && !embedSkipChanged && !trustMarkerChanged(existing.frontmatter, parsed.frontmatter) && (existing.content_hash === hash
     ? !opts.prepare || sameCanonicalImport(existingSnapshot, parsedPage)
     : !legacyHashMatch && await sameContentAnyKeyOrder(engine, existing, existingSnapshot?.tags ?? null, parsedPage, sourceId ?? 'default'));
   if (existing && unchanged) {

@@ -200,3 +200,12 @@ export async function ownerSourceGateInput(engine: Pick<BrainEngine, 'executeRaw
   const trust = ownerPageTrust({ frontmatter, sourceConfig: config, channel: 'import' });
   return { tier: trust.tier, origin: { channel: 'import' }, requestId: null };
 }
+
+/**
+ * The `trust_tier` marker is hash-ephemeral (utils.ts), so an import whose only
+ * change is adding or removing it would read as unchanged; removing it by hand
+ * is the owner act that restamps a page on the next sync (CEO-21), so it counts.
+ */
+export function trustMarkerChanged(prior: Record<string, unknown> | null | undefined, next: Record<string, unknown> | null | undefined): boolean {
+  return (prior?.trust_tier ?? null) !== (next?.trust_tier ?? null);
+}

@@ -65,7 +65,7 @@ export interface ProposalActionResult {
 /**
  * The proposal record a checked supersede reads and transitions: decide_proposals
  * (S9) by default, or another typed store with the same pair shape (#5575
- * trust_proposals, registered by trust/supersede-handlers.ts). `onAccept` /
+ * trust_proposals, trust/supersede-handlers.ts TRUST_PAIR_STORE). `onAccept` /
  * `onUndo` run inside the same transaction after the facts change.
  */
 export type PairProposal = Pick<ProposalRow, 'id' | 'source_id' | 'old_fact_id' | 'new_fact_id' | 'status' | 'before_state' | 'after_state'>;
@@ -80,12 +80,11 @@ export const DECIDE_PROPOSAL_STORE: PairProposalStore = {
   name: 'decide', get: getProposal,
   transition: (engine, id, from, to, state) => transitionProposal(engine, id, from as ProposalRow['status'], to as ProposalRow['status'], state),
 };
-const pairStores = new Map<string, PairProposalStore>([[DECIDE_PROPOSAL_STORE.name, DECIDE_PROPOSAL_STORE]]);
-export function registerPairProposalStore(store: PairProposalStore): void { pairStores.set(store.name, store); }
+/** The store a managed decide_proposal intent names; loaded lazily so the trust module and this one never cycle at init. */
 async function pairStore(name: unknown): Promise<PairProposalStore | null> {
   if (name === undefined || name === null) return DECIDE_PROPOSAL_STORE;
-  if (name === 'trust' && !pairStores.has('trust')) await import('../trust/supersede-handlers.ts');
-  return typeof name === 'string' ? pairStores.get(name) ?? null : null;
+  if (name === 'trust') return (await import('../trust/supersede-handlers.ts')).TRUST_PAIR_STORE;
+  return null;
 }
 
 export class ProposalConflictError extends Error {

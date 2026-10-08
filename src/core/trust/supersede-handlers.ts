@@ -13,7 +13,7 @@
  */
 import type { BrainEngine } from '../engine.ts';
 import {
-  applyProposalAction, registerPairProposalStore, type PairProposal, type PairProposalStore, type ProposalActionResult,
+  applyProposalAction, type PairProposal, type PairProposalStore, type ProposalActionResult,
 } from '../facts/proposal-supersede.ts';
 import { currentWriteTrust, withTrustPromotion, withWriteAttribution } from '../persistence/context.ts';
 import { normalizeDimension } from '../chronicle/ontology.ts';
@@ -157,7 +157,6 @@ export const TRUST_PAIR_STORE: PairProposalStore = {
     for (const id of [proposal.old_fact_id, proposal.new_fact_id]) await queueTierProjection(tx, 'facts', id);
   },
 };
-registerPairProposalStore(TRUST_PAIR_STORE);
 
 function fromPairResult(proposal: TrustProposalRow, decision: TrustDecision, result: ProposalActionResult) {
   const status = result.status === 'stale' ? 'superseded' : result.status;

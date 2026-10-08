@@ -21,6 +21,7 @@ import type { BrainEngine } from '../engine.ts';
 import { queuePageProjection } from '../page-state/projections.ts';
 import type { WriteRequest } from '../persistence/model.ts';
 import { frontmatterTrustCaps, requestChannelTrust, stampTrustMarker } from './channel.ts';
+import { declaredWriteTrust, readDerivationDeclaration } from './taint.ts';
 import { insertTrustProposal, updatePendingTrustProposalAfter } from './proposals.ts';
 import { OWNER_TIER_FLOOR, compareTrust, effectiveWriteTrust, minTrust, storedTrustTier, type TrustTier, type WriteTrust } from './tier.ts';
 
@@ -36,7 +37,9 @@ export function isFenceEditWrite(row: Pick<WriteRequest, 'operation' | 'intent'>
 
 /** The tier of one journaled page write, or undefined when the request's channel declares none. */
 export function pageWriteTrust(row: Pick<WriteRequest, 'id' | 'operation' | 'authority' | 'intent'>, frontmatter: Record<string, unknown> | null | undefined): WriteTrust | undefined {
-  const channel = requestChannelTrust(row);
+  // A managed derived page (atoms, synthesis, concepts, chronicle) carries its derivation declaration (trust/taint.ts).
+  const derivation = readDerivationDeclaration(row.intent?.derivation);
+  const channel = derivation ? declaredWriteTrust(derivation) : requestChannelTrust(row);
   if (!channel || isFenceEditWrite(row)) return channel;
   const caps = frontmatterTrustCaps(frontmatter);
   return caps.length ? effectiveWriteTrust({ channel: channel.tier, lowerTo: caps, origin: channel.origin ?? { channel: row.operation } }) : channel;

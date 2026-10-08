@@ -244,7 +244,8 @@ async function publishOwnerPage(engine: BrainEngine, input: PageActionInput, int
       if ((await tx.readPageSnapshot(input.slug, { sourceId: input.sourceId }))?.revision !== input.expectedRevision) {
         throw changedSincePreview(pageRef(input.sourceId, input.slug), intent.mode === 'confirm' ? 'its confirmation' : 'the revert');
       }
-      await importFromContent(tx, input.slug, markdown, { sourceId: input.sourceId, noEmbed: true, preserveGateMarkers: intent.mode === 'confirm', forceRechunk: intent.mode === 'revert', allowEmptyOverwrite: intent.mode === 'revert' });
+      // forceRechunk: the trust_tier marker is hash-ephemeral, so removing it alone would read as unchanged content.
+      await importFromContent(tx, input.slug, markdown, { sourceId: input.sourceId, noEmbed: true, preserveGateMarkers: intent.mode === 'confirm', forceRechunk: true, allowEmptyOverwrite: intent.mode === 'revert' });
       await closeProposal(tx, intent.proposal, input.by);
     }))));
 }
