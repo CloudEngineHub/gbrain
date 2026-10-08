@@ -64,8 +64,8 @@ async function saveCursor(engine: Pick<BrainEngine, 'executeRaw'>, cursor: Curso
 }
 
 /**
- * Each table's max id when the write gate went live (migration v221, detector
- * v1): rows above it were assessed by their writers. Only a baseline taken
+ * Each table's max id when the write gate went live (migration v221, under
+ * the detector version it records): rows above it were assessed by their writers. Only a baseline taken
  * under the current detector bounds the scan; a detector bump rescans all.
  */
 async function readBaseline(engine: Pick<BrainEngine, 'executeRaw'>): Promise<Cursor['until'] | null> {

@@ -3274,7 +3274,7 @@
         "name": "write_gate",
         "sql": {
           "length": 2797,
-          "sha256": "d6fc495e2d5aa3ae42a3048fec344af6845d7833fc3c3a1c66610ae2312876bb"
+          "sha256": "2a3434eded166927c0c55b55cb7465cb10494a55404fd6ad9b2b92c72b7f5d17"
         },
         "sqlFor": "absent",
         "transaction": "absent",

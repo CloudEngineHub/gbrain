@@ -219,7 +219,7 @@ describe('context_pack and quarantined pages (ENG-8, ENG-15)', () => {
     const remote = await op('context_pack').handler(ctx({ remote: true, scopes: ['read'] }), { entities: 'companies/poisoned-example,companies/clean-example', include_quarantined: true }) as Pack;
     expect(remote.cards.map(c => c.slug)).toEqual(['companies/clean-example']);
     expect(JSON.stringify(remote)).not.toContain('99-0000-999');
-    expect(remote.cards[0]).toMatchObject({ trust_tier: 'unknown', origin: expect.any(String) });
+    expect(remote.cards[0]).toMatchObject({ trust_tier: 'agent_written', origin: 'cli:put_page' }); // a local put_page writes at agent_written (A3)
 
     const local = await op('context_pack').handler(ctx(), { entities: 'companies/poisoned-example' }) as Pack;
     expect(local.cards).toEqual([]);

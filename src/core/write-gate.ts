@@ -28,8 +28,9 @@ import { MAX_MATCH_CHARS, MAX_PRECEDING_CHARS, WRITE_GATE_PATTERNS, WRITE_GATE_R
 
 export type { WriteGateReasonFamily } from './write-gate-patterns.ts';
 
-/** Bumped whenever the pattern table changes meaning; stored on every receipt and hold. */
-export const WRITE_GATE_DETECTOR_VERSION = 2;
+import { WRITE_GATE_DETECTOR_VERSION } from './write-gate-schema.ts';
+
+export { WRITE_GATE_DETECTOR_VERSION };
 
 /** The trust-tier vocabulary lives in `trust/tier.ts`; the gate takes the effective tier the writer computed there. */
 export { TRUST_TIERS as WRITE_GATE_TIERS } from './trust/tier.ts';

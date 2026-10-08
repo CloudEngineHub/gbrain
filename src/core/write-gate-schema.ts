@@ -17,6 +17,13 @@
  * content arriving again re-opens a released or dropped hold.
  */
 
+/**
+ * Bumped whenever the pattern table changes meaning; stored on every receipt
+ * and hold, and in the legacy-scan baseline v221 records (a brain created
+ * under this detector owes no scan of rows its writers already gated).
+ */
+export const WRITE_GATE_DETECTOR_VERSION = 2;
+
 export const WRITE_GATE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS write_gate_receipts (
   id               BIGSERIAL PRIMARY KEY,
