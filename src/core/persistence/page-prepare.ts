@@ -457,6 +457,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
     let autoLinks: Awaited<ReturnType<NonNullable<typeof links>['apply']>> | undefined;
     let removedTimeline: TimelineRowsRemoved | null = null;
     let lowered: { proposal_ref: string } | null = null;
+    let contested: string[] = [];
     if (!noop) {
       const prior = snapshot ? await storedPageTier(tx, row.source_id, row.slug) : null;
       // ENG-1: a managed fence edit keeps the page's tier; CEO-12: an agent rewrite that lowers a page files a queue item.
@@ -480,7 +481,9 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
         for (const tag of versionTags) await tx.addTag(row.slug, tag, source);
       }
       // #6007: the page the import just wrote live is the page the projections describe; no re-read.
-      removedTimeline = (await project?.(tx, row.operation === 'restore_page' ? undefined : applied?.pageId))?.timelineRowsRemoved ?? null;
+      const projected = await project?.(tx, row.operation === 'restore_page' ? undefined : applied?.pageId);
+      removedTimeline = projected?.timelineRowsRemoved ?? null;
+      contested = projected?.contested ?? [];
       autoLinks = await links?.apply(tx);
       if (targetDeleted) await tx.softDeletePage(row.slug, source);
       // Index installation and terminal receipt share this transaction. The import sealed the projection
@@ -500,7 +503,9 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
       ...(!noop && quarantineOutcome(ready.parsedPage.frontmatter) ? { quarantined: quarantineOutcome(ready.parsedPage.frontmatter) } : {}),
       ...(row.operation === 'capture' ? { channel: 'capture', content_hash: p.capture_hash } : {}),
       ...(edited ? editDiff(row.slug, edited.before, edited.after) : {}), ...fencesNormalized, ...fenceRepairOutcome,
-      ...(lowered ? { trust_lowered: lowered } : {}), ...(gate ? { gate } : {}) };
+      ...(lowered ? { trust_lowered: lowered } : {}), ...(gate ? { gate } : {}),
+      // DX-1: a guarded supersession reports contested (the first proposal; every one when the write contested several rows).
+      ...(contested.length ? { contested: { proposal_ref: contested[0], ...(contested.length > 1 ? { proposal_refs: contested } : {}) } } : {}) };
   } };
 }
 

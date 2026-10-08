@@ -20,7 +20,7 @@ import { requestChannelTrust } from '../trust/channel.ts';
 import { gateField, gateInput, heldOutcome, loadWriteGateConfig } from '../trust/gate-outcomes.ts';
 import { decideFactWrite, recordFlaggedRow, recordWriteGateHold } from '../write-gate-store.ts';
 import { writeGateRejectedError } from '../write-gate.ts';
-import { recordContestedFact, supersessionGuarded } from '../trust/supersede-handlers.ts';
+import { lexicalContestCandidate, recordContestedFact, supersessionGuarded } from '../trust/supersede-handlers.ts';
 import { storedTrustTier } from '../trust/tier.ts';
 import { pageFencesNormalized } from '../fence-repair/report.ts';
 import { fenceAppendPendingTier, withPendingFenceRows } from '../eligibility/fence-overlay.ts';
@@ -88,11 +88,16 @@ export async function prepareMemoryMutation(engine: BrainEngine, row: WriteReque
   const writerTier = requestChannelTrust(row)?.tier ?? 'unknown';
   const contested = decision.status === 'superseded' && supersessionGuarded(writerTier, decision.candidate!.trust_tier);
   const status = contested ? 'inserted' : decision.status;
+  // Without a fact vector the slot has no cosine; a lexical same-subject match still contests a more trusted fact (never supersedes).
+  const lexical = (tx: BrainEngine) => decision.status === 'inserted' && !dedupEmbedding && replaces === null ? lexicalContestCandidate(tx, row.source_id, input, writerTier) : Promise.resolve(null);
+  const lexicalOld = await lexical(engine);
+  const contestedOld = contested ? decision.candidate! : lexicalOld;
   const validate = async (tx: BrainEngine) => {
     await assertFactNotWithdrawn(tx, row.source_id, input);
     if (embedding && JSON.stringify(await tx.executeRaw(`${embeddingConfigSql} FOR SHARE`)) !== observedEmbeddingConfig) conflict(row);
     const current = await decide(tx, true);
     if (candidateState(current) !== candidateState(decision)) conflict(row);
+    if ((await lexical(tx))?.id !== lexicalOld?.id) conflict(row);
   };
   if (decision.status === 'duplicate') {
     const duplicate = decision.candidate!;
@@ -155,8 +160,9 @@ export async function prepareMemoryMutation(engine: BrainEngine, row: WriteReque
     }
     if (status === 'superseded') await tx.executeRaw(`UPDATE facts SET expired_at=now(),superseded_by=$3
       WHERE id=$1 AND source_id=$2 AND expired_at IS NULL`, [decision.candidate!.id, row.source_id, id]);
-    const contestedBy = contested ? await recordContestedFact(tx, { sourceId: row.source_id, oldId: decision.candidate!.id,
-      oldTier: storedTrustTier(decision.candidate!.trust_tier), newId: id, newTier: writerTier, guard: replaces !== null ? 'remember.replaces' : 'conflict_slot' }) : null;
+    const contestedBy = contestedOld ? await recordContestedFact(tx, { sourceId: row.source_id, oldId: contestedOld.id,
+      oldTier: storedTrustTier(contestedOld.trust_tier), newId: id, newTier: writerTier,
+      guard: replaces !== null ? 'remember.replaces' : contested ? 'conflict_slot' : 'conflict_slot_lexical' }) : null;
     const flagged = gateField(gate.assessment, `f${id}`, await recordFlaggedRow(tx, gate, { table: 'facts', id, sourceId: row.source_id }));
     return { ...outcome(id, status, input.entity_slug, validUntil, degraded, p, status === 'superseded' ? decision.candidate!.id : undefined), ...fencesNormalized,
       ...(contestedBy ? { contested: contestedBy } : {}), ...(flagged ? { gate: flagged } : {}) };

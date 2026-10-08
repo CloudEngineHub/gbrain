@@ -84,6 +84,7 @@ export const DECIDE_PROPOSAL_STORE: PairProposalStore = {
 async function pairStore(name: unknown): Promise<PairProposalStore | null> {
   if (name === undefined || name === null) return DECIDE_PROPOSAL_STORE;
   if (name === 'trust') return (await import('../trust/supersede-handlers.ts')).TRUST_PAIR_STORE;
+  if (name === 'trust_reverse') return (await import('../trust/supersede-handlers.ts')).TRUST_REVERSE_PAIR_STORE;
   return null;
 }
 

@@ -26,6 +26,7 @@ import type { Principal } from '../persistence/model.ts';
 import type { OwnerConfirmation } from './confirm.ts';
 import { tierRaiseFix } from './confirm.ts';
 import { decideTrustProposal } from './decide.ts';
+import { resolveContestedFactOnConfirm } from './supersede-handlers.ts';
 import { getTrustProposal, pendingTrustProposalsFor, trustProposalRef, type TrustDecisionResult, type TrustProposalRow } from './proposals.ts';
 import {
   confirmPage, latestPageVersionId, lowerPageState, readPageTrustState, readPageVersion, revertLoweredPage, revertPageToVersion,
@@ -432,9 +433,12 @@ export async function applyOwnerAction(engine: BrainEngine, input: OwnerActionIn
     case 'confirm':
     case 'release': {
       if (ref?.kind === 'fact' || ref?.kind === 'take') {
-        if (!preview.raises) return { action: input.action, ref: preview.ref, status: 'unchanged', tier: 'user_confirmed', prior_tier: 'user_confirmed' };
         const read = ref.kind === 'fact' ? readFactTarget : readTakeTarget;
         const row = (await read(engine, ref.id))!;
+        // A contested fact: confirming either side resolves its supersede_fact proposal (one value stays current), even when it is already confirmed.
+        const resolved = ref.kind === 'fact' && row.binding === opts.binding ? await resolveContestedFactOnConfirm(engine, ref.id, decision) : null;
+        if (resolved?.status === 'accepted') return { action: input.action, ref: preview.ref, status: 'confirmed', tier: 'user_confirmed', prior_tier: row.tier, detail: { resolved_proposal: resolved.ref } };
+        if (!preview.raises) return { action: input.action, ref: preview.ref, status: 'unchanged', tier: 'user_confirmed', prior_tier: 'user_confirmed' };
         const ok = await setRowTier(engine, { table: row.table, id: row.id, sourceId: row.sourceId, tier: 'user_confirmed', ceiling: 'user_confirmed', by,
           note: { via: confirmation.via, action: 'confirm', by: principalLabel(by) },
           expect: async tx => (await read(tx, ref.id))?.binding === opts.binding });

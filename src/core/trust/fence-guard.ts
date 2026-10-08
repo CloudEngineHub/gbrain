@@ -30,8 +30,8 @@ const WRITER_RANK = trustRankSql(`COALESCE(NULLIF(current_setting('gbrain.write_
 export interface FenceGuard<T extends FenceFact> {
   /** The fence rows to insert (held and rejected rows removed, moved rows removed). */
   rows: T[];
-  /** After the caller's expiry and insert: proposals for contested rows, receipts for flagged rows. */
-  finish(tx: BrainEngine): Promise<void>;
+  /** After the caller's expiry and insert: proposals for contested rows (their tp refs), receipts for flagged rows. */
+  finish(tx: BrainEngine): Promise<string[]>;
 }
 
 /**
@@ -85,22 +85,25 @@ export async function guardFenceRows<T extends FenceFact>(tx: BrainEngine, input
   return {
     rows: inserted,
     async finish(db) {
+      const refs: string[] = [];
       const at = async (rowNum: number) => (await db.executeRaw<{ id: number; trust_tier: string }>(
         `SELECT id, trust_tier FROM facts WHERE source_id = $1 AND source_markdown_slug = $2 AND row_num = $3 AND expired_at IS NULL`, [sourceId, slug, rowNum]))[0];
       for (const g of contested) {
         const replacement = fresh.has(Number(g.row_num)) ? await at(Number(g.row_num)) : undefined;
         if (replacement) {
-          await recordContestedFact(db, { sourceId, oldId: Number(g.id), oldTier: storedTrustTier(g.trust_tier), newId: Number(replacement.id),
-            newTier: storedTrustTier(replacement.trust_tier), guard: 'fence_projection' });
+          refs.push((await recordContestedFact(db, { sourceId, oldId: Number(g.id), oldTier: storedTrustTier(g.trust_tier), newId: Number(replacement.id),
+            newTier: storedTrustTier(replacement.trust_tier), guard: 'fence_projection' })).proposal_ref);
         } else {
-          await insertTrustProposal(db, { action: 'forget', sourceId, target: { table: 'facts', id: Number(g.id) }, proposer: 'fence_projection',
+          const { id } = await insertTrustProposal(db, { action: 'forget', sourceId, target: { table: 'facts', id: Number(g.id) }, proposer: 'fence_projection',
             before: { guard: 'fence_projection', fact: { id: Number(g.id), tier: storedTrustTier(g.trust_tier) }, writer_tier: trust.tier, slug } });
+          refs.push(`tp${id}`);
         }
       }
       for (const { row, decision } of gated) {
         const stored = await at(row.row_num);
         if (stored) await recordFlaggedRow(db, decision, { table: 'facts', id: Number(stored.id), sourceId });
       }
+      return refs;
     },
   };
 }

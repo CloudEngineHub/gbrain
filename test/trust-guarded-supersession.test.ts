@@ -207,7 +207,10 @@ describe('guarded fence re-projection (A5, ENG-1)', () => {
       for (const id of Object.values(before)) await confirmFact(b, id);
       const current = await operationsByName.get_page.handler(b.remote, { slug, include_content: true }) as Record<string, any>;
       // Row 1 rewritten, row 2 removed, row 3 renumbered to 2 (behind a new row 1 order change).
-      await run(b.remote, 'put_page', { slug, content: page('Erin', body([row(1, 'Erin lives in Bergen'), row(2, 'Erin speaks Norwegian')])), expected_revision: current.revision });
+      const rewrite = await run(b.remote, 'put_page', { slug, content: page('Erin', body([row(1, 'Erin lives in Bergen'), row(2, 'Erin speaks Norwegian')])), expected_revision: current.revision });
+      // DX-1 (38-2): the put_page response reports the guarded supersession it filed.
+      expect(rewrite.contested?.proposal_ref).toMatch(/^tp\d+$/);
+      expect(rewrite.contested.proposal_refs).toHaveLength(2);
       const after = await engine.executeRaw<{ id: number; fact: string; row_num: number | null; expired_at: unknown; trust_tier: string }>(
         'SELECT id::int AS id, fact, row_num, expired_at, trust_tier FROM facts WHERE source_id=$1 AND source_markdown_slug=$2 ORDER BY id', [b.sourceId, slug]);
       const by = (fact: string) => after.find(r => r.fact === fact)!;
@@ -291,6 +294,48 @@ describe('owner release of a held fact (CEO-9, B6)', () => {
       expect(fact?.trust_tier).toBe('user_confirmed');
       const [hold] = await engine.executeRaw<{ status: string }>('SELECT status FROM write_gate_holds WHERE id=$1', [Number(ref.slice(1))]);
       expect(hold?.status).toBe('released');
+    }
+  }), 90_000);
+});
+
+describe('resolving a contested pair by confirming one side (38-4) and the keyless conflict slot (38-3)', () => {
+  test('without fact vectors a lower-tier same-subject contradiction is contested; confirming the old side supersedes the contested row, confirming the new side accepts', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+    const { previewOwnerAction, applyOwnerAction } = await import('../src/core/trust/owner-actions.ts');
+    const confirm = async (ref: string) => {
+      const preview = await previewOwnerAction(currentEngine!, { action: 'confirm', ref });
+      return applyOwnerAction(currentEngine!, { action: 'confirm', ref }, { binding: preview.binding, confirmation: { via: 'tty' }, by: { kind: 'local_cli', id: 'owner-example' } });
+    };
+    let currentEngine: BrainEngine | null = null;
+    for (const engine of engines) {
+      currentEngine = engine;
+      const b = await brain(engine);
+      await ownerPage(b, 'people/ivy-example', 'Ivy.');
+      // Two confirmed facts and two keyless agent contradictions of them (no replaces, embedding disabled on this brain).
+      const homeFact = await run(b.local, 'remember', { fact: 'Ivy lives in Lisbon', provenance: 'owner', entity: 'people/ivy-example' });
+      const colorFact = await run(b.local, 'remember', { fact: 'Ivy favorite color is blue', provenance: 'owner', entity: 'people/ivy-example' });
+      for (const f of [homeFact, colorFact]) await confirmFact(b, Number(f.id));
+      const moved = await run(b.remote, 'remember', { fact: 'Ivy lives in Porto', provenance: 'chat', entity: 'people/ivy-example' });
+      const green = await run(b.remote, 'remember', { fact: 'Ivy favorite color is green', provenance: 'chat', entity: 'people/ivy-example' });
+      expect(moved.status).toBe('inserted');
+      expect(moved.contested?.proposal_ref).toMatch(/^tp\d+$/);
+      expect(green.contested?.proposal_ref).toMatch(/^tp\d+$/);
+      // Confirm the contested new row: the proposal is accepted and the old value is superseded.
+      const r1 = await confirm(`f${moved.id}`);
+      expect(r1).toMatchObject({ status: 'confirmed', detail: { resolved_proposal: moved.contested.proposal_ref } });
+      expect((await factRow(b, homeFact.id)).expired_at).not.toBeNull();
+      expect(await factRow(b, moved.id)).toMatchObject({ expired_at: null, trust_tier: 'user_confirmed' });
+      // Confirm the old side: the contested row is superseded by it and the proposal closes rejected.
+      const r2 = await confirm(`f${colorFact.id}`);
+      expect(r2).toMatchObject({ status: 'confirmed', detail: { resolved_proposal: green.contested.proposal_ref } });
+      expect(await factRow(b, green.id)).toMatchObject({ superseded_by: Number(colorFact.id) });
+      expect((await factRow(b, green.id)).expired_at).not.toBeNull();
+      expect(await factRow(b, colorFact.id)).toMatchObject({ expired_at: null, trust_tier: 'user_confirmed' });
+      const statuses = await engine.executeRaw<{ status: string }>(`SELECT status FROM trust_proposals WHERE id = ANY($1::bigint[]) ORDER BY id`,
+        [[parseTrustProposalRef(moved.contested.proposal_ref)!, parseTrustProposalRef(green.contested.proposal_ref)!]]);
+      expect(statuses.map(r => r.status)).toEqual(['accepted', 'rejected']);
+      // An unrelated agent fact about the same entity is not contested.
+      const other = await run(b.remote, 'remember', { fact: 'Ivy plays the cello on weekends', provenance: 'chat', entity: 'people/ivy-example' });
+      expect(other.contested).toBeUndefined();
     }
   }), 90_000);
 });

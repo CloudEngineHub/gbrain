@@ -422,14 +422,14 @@ export async function prepareCanonicalProjections(engine: BrainEngine, page: Par
     // #5575: rows more trusted than the writer are never expired by it, and new rows pass the write gate (trust/fence-guard.ts).
     const guard = await guardFenceRows(tx, { sourceId, slug, incoming, rows: factRows, cfg: loadWriteGateConfig }, () => pipelined(tx, [expireFacts]));
     if (guard.rows.length) await tx.insertFacts(guard.rows, { source_id: sourceId }); // gbrain-allow-direct-insert: canonical fence projection shares the journal publication transaction
-    await guard.finish(tx);
+    const contested = await guard.finish(tx);
     await pipelined(tx, [...factFields, checkTakes, dropTakes]);
     if (takes.length) {
       await tx.addTakesBatch(takes.map(t => takesPreparation.toCanonicalBatchInput(id, t)));
       await pipelined(tx, [...resolveTakes, ...timelineRows]);
     } else await pipelined(tx, timelineRows);
-    return { timelineRowsRemoved: removedSummary(removedDates) };
+    return { timelineRowsRemoved: removedSummary(removedDates), ...(contested.length ? { contested } : {}) };
   };
 }
 
-export interface CanonicalProjectionResult { timelineRowsRemoved: TimelineRowsRemoved | null }
+export interface CanonicalProjectionResult { timelineRowsRemoved: TimelineRowsRemoved | null; /** #5575 A5: trust proposals the guarded fence re-projection filed. */ contested?: string[] }

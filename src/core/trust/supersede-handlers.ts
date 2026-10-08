@@ -20,16 +20,49 @@ import { normalizeDimension } from '../chronicle/ontology.ts';
 import { verbError, type OperationError } from '../ops/contract.ts';
 import type { Principal } from '../persistence/model.ts';
 import {
-  decisionResult, getTrustProposal, insertTrustProposal, registerTrustProposalHandler, transitionTrustProposal, trustProposalRef,
+  decisionResult, getTrustProposal, insertTrustProposal, pendingTrustProposalsFor, registerTrustProposalHandler, transitionTrustProposal, trustProposalRef,
   type TrustDecision, type TrustDecisionContext, type TrustProposalAction, type TrustProposalRow,
 } from './proposals.ts';
 import { tierRaiseFix } from './confirm.ts';
 import { queueTierProjection } from './page-write.ts';
-import { compareTrust, effectiveWriteTrust, storedTrustTier, type TrustTier, type WriteTrust } from './tier.ts';
+import { compareTrust, effectiveWriteTrust, storedTrustTier, trustRankSql, type TrustTier, type WriteTrust } from './tier.ts';
 
 /** I3: a write at `writer` may supersede, expire or forget a row at `target` only when it is at least as trusted. */
 export function supersessionGuarded(writer: TrustTier | null | undefined, target: unknown): boolean {
   return compareTrust(writer ?? 'unknown', storedTrustTier(target)) < 0;
+}
+
+/** Word tokens for the keyless conflict slot: NFKC, lowercase, letters and digits only. */
+function slotTokens(text: string): Set<string> {
+  return new Set(text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').split(' ').filter(Boolean));
+}
+/** The keyless conflict-slot threshold: shared words over all words (Jaccard) of two claims about one entity. */
+export const LEXICAL_SLOT_THRESHOLD = 0.5;
+
+/**
+ * 38-3: the conflict slot on a brain without fact vectors. The most similar
+ * active fact about the same entity, kind and visibility that is MORE trusted
+ * than the writer, when the two claims share at least half their words and
+ * differ (an exact match is a duplicate, handled first). It only contests
+ * (files a proposal); without a vector the slot never supersedes. Deterministic,
+ * zero model calls.
+ */
+export async function lexicalContestCandidate(engine: BrainEngine, sourceId: string,
+  input: { fact: string; kind: string; visibility: string; entity_slug: string | null }, writer: TrustTier): Promise<{ id: number; trust_tier: TrustTier } | null> {
+  if (!input.entity_slug) return null;
+  const rows = await engine.executeRaw<{ id: number; fact: string; trust_tier: string }>(
+    `SELECT id, fact, trust_tier FROM facts WHERE source_id = $1 AND entity_slug = $2 AND kind = $3 AND visibility = $4
+       AND expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) AND ${trustRankSql('trust_tier')} > ${trustRankSql('$5::text')}
+     ORDER BY id DESC LIMIT 200`, [sourceId, input.entity_slug, input.kind, input.visibility, writer]);
+  const mine = slotTokens(input.fact);
+  let best: { id: number; trust_tier: TrustTier; score: number } | null = null;
+  for (const row of rows) {
+    const theirs = slotTokens(row.fact);
+    const shared = [...mine].filter(t => theirs.has(t)).length;
+    const score = shared / (mine.size + theirs.size - shared || 1);
+    if (score >= LEXICAL_SLOT_THRESHOLD && score < 1 && (!best || score > best.score)) best = { id: Number(row.id), trust_tier: storedTrustTier(row.trust_tier), score };
+  }
+  return best ? { id: best.id, trust_tier: best.trust_tier } : null;
 }
 
 /** The pending supersede_fact proposal for a contested write, inside its publication transaction. */
@@ -157,6 +190,37 @@ export const TRUST_PAIR_STORE: PairProposalStore = {
     for (const id of [proposal.old_fact_id, proposal.new_fact_id]) await queueTierProjection(tx, 'facts', id);
   },
 };
+
+/**
+ * The same proposal read reversed (38-4): the owner confirmed the OLD side of a
+ * contested pair, so the contested new row is superseded by it. Accepting this
+ * view closes the proposal as `rejected` (the lower-tier write lost) and
+ * confirms the old row.
+ */
+export const TRUST_REVERSE_PAIR_STORE: PairProposalStore = {
+  name: 'trust_reverse',
+  async get(engine, id, lock) {
+    const pair = await TRUST_PAIR_STORE.get(engine, id, lock);
+    return pair ? { ...pair, old_fact_id: pair.new_fact_id, new_fact_id: pair.old_fact_id } : null;
+  },
+  transition: (engine, id, from, to, state) => TRUST_PAIR_STORE.transition(engine, id, from, to === 'accepted' ? 'rejected' : to, state),
+  onAccept: (tx, proposal) => TRUST_PAIR_STORE.onAccept!(tx, proposal),
+};
+
+/**
+ * CEO-9 + A5 (38-4): confirming either side of a contested fact resolves its
+ * pending supersede_fact proposal through the checked supersede, so one value
+ * stays current: confirming the contested (new) row accepts the proposal;
+ * confirming the higher-tier (old) row supersedes the contested one. Null when
+ * the fact has no pending supersede_fact proposal.
+ */
+export async function resolveContestedFactOnConfirm(engine: BrainEngine, factId: number, ctx: TrustDecisionContext): Promise<{ ref: string; status: string; reason?: string } | null> {
+  const pending = (await pendingTrustProposalsFor(engine, 'facts', factId)).find(p => p.action === 'supersede_fact');
+  if (!pending) return null;
+  const store = pending.related_id === factId ? TRUST_PAIR_STORE : TRUST_REVERSE_PAIR_STORE;
+  const result = await applyProposalAction(engine, pending.id, 'accept', ctx.config, store);
+  return { ref: trustProposalRef(pending.id), status: result.status, ...(result.reason ? { reason: result.reason } : {}) };
+}
 
 function fromPairResult(proposal: TrustProposalRow, decision: TrustDecision, result: ProposalActionResult) {
   const status = result.status === 'stale' ? 'superseded' : result.status;
