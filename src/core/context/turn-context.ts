@@ -42,7 +42,7 @@ import type { ArmStatus, RawFactRef } from './delta-cursor.ts';
 import { buildEntityCard, type EntityCard, type EntityOpenThread } from '../verbs/entity-card.ts';
 import { estimateTokens } from '../search/token-budget.ts';
 import type { DecideSlotMeta } from '../search/decide-stage.ts';
-import type { TrustTier } from '../trust/tier.ts';
+import { admitsTrust, type TrustTier } from '../trust/tier.ts';
 import { resolveReadEligibility, type ReadEligibility } from '../eligibility/policy.ts';
 import { proactiveEligibility } from '../eligibility/registry.ts';
 import { pageActivationVerdicts, pageKey, suppressionSummary, type SuppressionSummary } from '../eligibility/activation.ts';
@@ -278,7 +278,7 @@ export async function assembleTurnContext(
   // loaded lazily so pack/delta and envelope importers stay light).
   const startedAt = Date.now();
   // #5575 (CEO-20, DX-10): one proactive policy for every arm of this turn.
-  const policy = opts.eligibility ?? await proactiveEligibility({ engine }, 'hook.user_prompt').catch(() => ({ suppressFlagged: true }));
+  const policy: ReadEligibility = opts.eligibility ?? await proactiveEligibility({ engine }, 'hook.user_prompt').catch(() => ({ suppressFlagged: true }));
   // Pages withheld by both the pointer and the volunteer arm count once.
   const withheldPages = new Set<string>();
   let withheldFacts = 0;
@@ -360,6 +360,7 @@ export async function assembleTurnContext(
         sourceId: opts.sourceId,
         sessionId: opts.sessionId,
         takesHoldersAllowList: ['world'],
+        ...(policy.floor ? { auth: { minTrust: policy.floor } as OperationContext['auth'] } : {}),
       };
       const meta = await getBrainHotMemoryMeta('turn_context', metaCtx);
       const hot = meta?.brain_hot_memory as { facts?: TurnContextFact[]; suppressed?: SuppressionSummary } | undefined;
@@ -525,6 +526,7 @@ async function fetchHotFacts(
   engine: BrainEngine,
   opts: AssembleTurnContextOpts,
   remote: boolean,
+  floor?: TrustTier,
 ): Promise<{ facts: TurnContextFact[]; withheld: number }> {
   try {
     const metaCtx: OperationContext = {
@@ -536,10 +538,13 @@ async function fetchHotFacts(
       sourceId: opts.sourceId,
       sessionId: opts.sessionId,
       takesHoldersAllowList: ['world'],
+      // #5575 CEO-18: the calling connection's floor keys and filters hot memory too.
+      ...(floor ? { auth: { minTrust: floor } as OperationContext['auth'] } : {}),
     };
     const meta = await getBrainHotMemoryMeta('turn_context', metaCtx);
     const hot = meta?.brain_hot_memory as { facts?: TurnContextFact[]; suppressed?: SuppressionSummary } | undefined;
-    return { facts: Array.isArray(hot?.facts) ? [...hot.facts] : [], withheld: hot?.suppressed?.withheld ?? 0 };
+    const facts = Array.isArray(hot?.facts) ? hot.facts.filter(f => !floor || admitsTrust(f.trust_tier ?? 'unknown', floor)) : [];
+    return { facts, withheld: hot?.suppressed?.withheld ?? 0 };
   } catch {
     return { facts: [], withheld: 0 };
   }
@@ -563,7 +568,7 @@ async function assemblePack(
 
   const acc: { cards: EntityCard[]; facts: TurnContextFact[]; withheld: number } = { cards: [], facts: [], withheld: 0 };
   // #5575 (CEO-20): context_pack is a proactive surface.
-  const policy = opts.eligibility ?? await proactiveEligibility({ engine }, 'context_pack').catch(() => ({ suppressFlagged: true }));
+  const policy: ReadEligibility = opts.eligibility ?? await proactiveEligibility({ engine }, 'context_pack').catch(() => ({ suppressFlagged: true }));
   // Cooperative deadline (perf review): raceDeadline abandons but cannot stop
   // the build, and on PGLite's single connection orphaned card queries would
   // queue AHEAD of the caller's next work. Check between iterations so no new
@@ -586,7 +591,7 @@ async function assemblePack(
       }
     }
     if (deadlineAt !== null && Date.now() >= deadlineAt) return;
-    const hot = await fetchHotFacts(engine, opts, remote);
+    const hot = await fetchHotFacts(engine, opts, remote, policy.floor);
     acc.facts = hot.facts;
     acc.withheld += hot.withheld;
   })();
