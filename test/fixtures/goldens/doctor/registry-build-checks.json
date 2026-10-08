@@ -687,6 +687,10 @@
       },
       {
         "category": "brain",
+        "name": "trust_tiers"
+      },
+      {
+        "category": "brain",
         "name": "core_memory"
       },
       {

@@ -384,6 +384,8 @@ export const CLI_COMMANDS: readonly CliCommandRecord[] = [  // Pre-connect: disp
   { name: 'pages', phase: 'post-connect', thinClient: 'refuse', selfHelp: true, load: () => import('./commands/pages.ts') },
   // selfHelp: #6259 router (list, clear, scan); its usage prints before any engine is opened.
   { name: 'quarantine', phase: 'post-connect', thinClient: 'route-then-refuse', selfHelp: true, load: () => import('./commands/quarantine.ts') },
+  // #5575: memory trust. Observational startup: `trust backfill --dry-run` runs with no migrations and no writes.
+  { name: 'trust', phase: 'post-connect', thinClient: 'refuse', selfHelp: true, json: 'document', skipStartupHooks: true, startup: 'observational', load: () => import('./commands/trust.ts') },
   // selfHelp: v0.43 (#2095): watch ships WATCH_HELP (flags + the stdin-turn protocol).
   // thin client: v0.43 (#2095): watch streams against a LOCAL engine; thin clients get the
   // volunteer_context MCP op instead.

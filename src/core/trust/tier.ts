@@ -84,6 +84,16 @@ export function storedTrustTier(value: unknown): TrustTier {
   return isTrustTier(value) ? value : 'unknown';
 }
 
+/**
+ * A per-token read floor (`oauth_clients.min_trust`, `access_tokens.min_trust`,
+ * CEO-18) read back at token verification: NULL means no floor; a value that
+ * names no tier (a damaged row) fails closed to the strictest floor.
+ */
+export function storedMinTrust(value: unknown): TrustTier | undefined {
+  if (value === null || value === undefined) return undefined;
+  return isTrustTier(value) ? value : 'user_confirmed';
+}
+
 /** SQL expression mapping a tier-valued expression to its rank (unrecognized and NULL -> 0). */
 export function trustRankSql(expr: string): string {
   return `(CASE ${expr} ${TRUST_TIERS.map(tier => `WHEN '${tier}' THEN ${TRUST_TIER_RANK[tier]}`).join(' ')} ELSE 0 END)`;

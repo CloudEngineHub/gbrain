@@ -2516,6 +2516,14 @@ More: [docs/guides/data-ingestion.md#credential-redaction](../../docs/guides/dat
 |---|---|---|---|---|---|---|
 | Dream triage did not re-judge a transcript because its last judge verdict was truncated, refused or unparseable and its backoff has not ended. | An unreliable verdict is never cached, so without a backoff the same input was paid for every cycle; it waits 24h, doubling per repeat up to 7 days, and a content or triage-model change re-judges at once. | Leave it (it is retried after the backoff), or ask the user before `gbrain dream retriage --force`, which re-judges every transcript now and pays per file. Run: gbrain dream retriage --dry-run --json | agent | `repeat the read that failed` | 1 | yes |
 
+### trust_raise_refused
+
+<a id="trust_raise_refused"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A write tried to raise the trust tier of a fact, take, page or timeline entry without the owner's confirmation, so nothing was changed. | Only the owner can make memory more trusted: confirming on an interactive terminal, or through a connection that holds the memory_confirm scope. The database refuses any other raise so a bug or an agent write cannot promote its own content. | Do not retry. Ask the user to confirm the row themselves on the brain host (gbrain trust confirm <ref>), or leave its tier as it is. | user | `repeat the read that failed` | 3 | no |
+
 ### trusted_local_only
 
 <a id="trusted_local_only"></a>
