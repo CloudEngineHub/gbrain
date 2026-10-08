@@ -17,6 +17,7 @@ import { sha256 } from './digest.ts';
 import { assertPersistenceAccepting, estimatedRetryAfterMs, waitForWrite, writeResponse } from './service.ts';
 import { parseWireWriteWaitMs } from './write-wait.ts';
 import { assertTimelineNotOmitted, isTimelineSection, timelineSectionOf, type TimelineSection } from './timeline-omission.ts';
+import { contentOriginTier } from '../trust/tier.ts';
 import { admitWrite, assertPageRequestIdentity, assertReplayIntent, getWriteRequest, intentDigest, type WriteAdmission } from './journal.ts';
 import { submissionAuthority, authorizeStoredRequest } from './authority.ts';
 import { currentVerifiedLocalWriter, localHostId, readLocalWriter, registerLocalWriter, withVerifiedLocalRegistration } from './identity.ts';
@@ -208,6 +209,7 @@ export async function preparePageAdmission(ctx: OperationContext,
   }
   const { page_batch: _forged, timeline_section: _section, ...params } = input.params;
   const p: Record<string, unknown> = { ...params, ...parseMutationPrecondition(params) };
+  if (p.content_origin !== undefined) contentOriginTier(p.content_origin);
   if (input.batch) p.page_batch = { id: input.batch.id, index: input.batch.index, size: input.batch.size };
   const requestId = input.batch ? input.batch.requestId : typeof p.request_id === 'string' ? p.request_id : randomUUID();
   const sourceId = pageMutationSource(ctx, p, input.operation);

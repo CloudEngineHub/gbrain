@@ -53,6 +53,9 @@ import { pageFencesNormalized } from '../fence-repair/report.ts';
 import { parseFenceRepairReceipt } from '../fence-repair/receipt.ts';
 import { fenceRepairCommit } from './effect-model.ts';
 import { purgePageInTransaction } from './page-purge.ts';
+import { withTrustKeep } from './context.ts';
+import { isFenceEditWrite, pageWriteTrust, recordAgentPageLowering, stampPageTrustMarker, storedPageTier } from '../trust/page-write.ts';
+import type { WriteTrust } from '../trust/tier.ts';
 
 
 const ownerStatusFix = (sourceId: string): Action => readFix(`Shows source ${sourceId}'s canonical owner with its pending, failed and recovering requests, read-only.`,
@@ -352,6 +355,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
     const { timeline, materialized } = await materializeTimeline(engine,parsed,row.slug,snapshot,writer,timelinePolicy);
     if (materialized) content = serializePageToMarkdown({...snapshot.page,...parsed,timeline,type:parsed.typeExplicit ? parsed.type : snapshot.page.type},parsed.tags);
   }
+  const storedTier = snapshot ? await storedPageTier(engine, row.source_id, row.slug) : null;
   // Detect an exact canonical no-op before ingestion can invoke any provider.
   // Revision/identity checks above still apply to stale identical replacements.
   if (snapshot && (snapshot.page.deleted_at != null) === targetDeleted && typeof content === 'string') {
@@ -367,6 +371,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
   }
   let prepared: PreparedContentImport | undefined;
   let provenance: CanonicalProvenance | undefined;
+  let trust: WriteTrust | undefined;
   const result = await importFromContent(engine, row.slug, content, {
     ...source, noEmbed: true, remote: row.authority.remote, activePack, fences: projected ? 'coordinated' : 'lenient',
     forceRechunk: row.operation === 'restore_page' || row.operation === 'revert_version',
@@ -374,7 +379,11 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
     source_kind: typeof p.source_kind === 'string' ? p.source_kind : null,
     source_uri: typeof p.source_uri === 'string' ? p.source_uri : null,
     ingested_via: typeof p.ingested_via === 'string' ? p.ingested_via : null,
-    prepareFrontmatter: page => { provenance = putProvenance(row, snapshot, page); },
+    prepareFrontmatter: page => {
+      trust = pageWriteTrust(row, page.frontmatter);
+      stampPageTrustMarker(row, page.frontmatter, trust, storedTier);
+      provenance = putProvenance(row, snapshot, page);
+    },
     prepare: async value => { prepared = value; return value.result; },
   }).catch(error => {
     if (!(error instanceof ContentSanityBlockError)) throw error;
@@ -439,12 +448,16 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
   // Always-loaded core tier: owner-only marking, brain-wide budget, remote-edit policy (core-guard.ts).
   const core = noop ? null : await prepareCoreGuard(engine, { row, snapshot, incoming: targetDeleted ? null : ready.parsedPage });
   return { observedRevision, noop, additionalPageKeys:links?.pageKeys, file, ...await pageDatabaseOnlyPublication(engine, row, file),
-    ...(core ? { exclusiveSources: core.exclusiveSources } : {}),
+    ...(core ? { exclusiveSources: core.exclusiveSources } : {}), ...(trust ? { trust } : {}),
     validate: async tx => { await ready.validate(tx); await core?.validate(tx); }, apply: async tx => {
     let autoLinks: Awaited<ReturnType<NonNullable<typeof links>['apply']>> | undefined;
     let removedTimeline: TimelineRowsRemoved | null = null;
+    let lowered: { proposal_ref: string } | null = null;
     if (!noop) {
-      const applied = await ready.apply(tx);
+      const prior = snapshot ? await storedPageTier(tx, row.source_id, row.slug) : null;
+      // ENG-1: a managed fence edit keeps the page's tier; CEO-12: an agent rewrite that lowers a page files a queue item.
+      const applied = isFenceEditWrite(row) ? await withTrustKeep(tx, ['pages'], () => ready.apply(tx)) : await ready.apply(tx);
+      lowered = prior ? await recordAgentPageLowering(tx, row, { tier: prior, revision: snapshot!.revision }) : null;
       // Mandatory metadata shares publication rollback; exact no-ops never heal it.
       if (sourcePath && !snapshot?.page.source_path) await tx.executeRaw(`UPDATE pages SET source_path = $1
         WHERE source_id=$2 AND slug=$3 AND source_path IS NULL`, [sourcePath, row.source_id, row.slug]);
@@ -479,7 +492,8 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
       ...(ready.result.chunks === 0 ? {chunk_skip_reason: noop ? 'write_skipped'
         : isEmbedSkipped(ready.parsedPage.frontmatter) || isQuarantined(ready.parsedPage.frontmatter) ? 'embed_skip' : 'empty_body'} : {}),
       ...(row.operation === 'capture' ? { channel: 'capture', content_hash: p.capture_hash } : {}),
-      ...(edited ? editDiff(row.slug, edited.before, edited.after) : {}), ...fencesNormalized, ...fenceRepairOutcome };
+      ...(edited ? editDiff(row.slug, edited.before, edited.after) : {}), ...fencesNormalized, ...fenceRepairOutcome,
+      ...(lowered ? { trust_lowered: lowered } : {}) };
   } };
 }
 

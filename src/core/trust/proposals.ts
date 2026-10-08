@@ -148,6 +148,11 @@ export async function pendingTrustProposalsFor(engine: BrainEngine, table: Trust
   return rows.map(normalize);
 }
 
+/** Refreshes a pending proposal's after state (a later write folded into the same queue item). */
+export async function updatePendingTrustProposalAfter(tx: BrainEngine, id: number, after: Record<string, unknown>): Promise<void> {
+  await tx.executeRaw(`UPDATE trust_proposals SET after_state = $2::text::jsonb, updated_at = now() WHERE id = $1 AND status = 'pending'`, [id, JSON.stringify(after)]);
+}
+
 /** Compare-and-set on status; records the decider and an after state. False when the proposal was not in `from`. */
 export async function transitionTrustProposal(tx: BrainEngine, id: number, from: TrustProposalStatus, to: TrustProposalStatus,
   opts: { after?: Record<string, unknown>; decidedBy?: Principal | null } = {}): Promise<boolean> {
