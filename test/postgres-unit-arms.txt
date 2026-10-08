@@ -117,3 +117,4 @@ test/trust-guarded-supersession.test.ts
 test/trust-owner-actions.test.ts
 test/withdrawal-overlay-concurrency.test.ts
 test/withdrawal-publication-file.test.ts
+test/writer-status-owner-backends.test.ts

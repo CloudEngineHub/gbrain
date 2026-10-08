@@ -16,7 +16,7 @@
  *
  * "Legacy" rows are the ones that existed when trust tiers and the write gate
  * arrived: ids at or below each table's max id recorded then
- * (`write_gate.scan_baseline`, migration v223; zero on a brain created
+ * (`write_gate.scan_baseline`, migration v224; zero on a brain created
  * since). A row a writer stored as `unknown` later is not legacy, so a claim
  * never lifts it and a fresh brain never reads as unclaimed.
  */

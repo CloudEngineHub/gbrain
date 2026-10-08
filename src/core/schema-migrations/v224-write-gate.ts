@@ -12,8 +12,8 @@ import { WRITE_GATE_DETECTOR_VERSION, WRITE_GATE_SCAN_BASELINE_KEY, WRITE_GATE_S
 // table's max id at this point (`write_gate.scan_baseline`; zero on an empty
 // brain, which therefore has nothing to scan). Graduation carries config and
 // row ids, so a copy keeps the baseline valid.
-export const v223: Migration = {
-  version: 223,
+export const v224: Migration = {
+  version: 224,
   name: 'write_gate',
   idempotent: true,
   sql: `${WRITE_GATE_SCHEMA_SQL}

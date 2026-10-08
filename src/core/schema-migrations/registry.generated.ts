@@ -222,11 +222,12 @@ import { v218 } from './v218-purge-legacy-worktree-manifest-files.ts';
 import { v219 } from './v219-pages-reconcile-name-indexes.ts';
 import { v220 } from './v220-persistence-request-preparation-attempts.ts';
 import { v221 } from './v221-chunk-embedding-pending-since.ts';
-import { v222 } from './v222-trust-tiers.ts';
-import { v223 } from './v223-write-gate.ts';
-import { v224 } from './v224-memory-purge.ts';
-import { v225 } from './v225-trust-allow-rules.ts';
-import { v226 } from './v226-trust-generation.ts';
+import { v222 } from './v222-persistence-consumers.ts';
+import { v223 } from './v223-trust-tiers.ts';
+import { v224 } from './v224-write-gate.ts';
+import { v225 } from './v225-memory-purge.ts';
+import { v226 } from './v226-trust-allow-rules.ts';
+import { v227 } from './v227-trust-generation.ts';
 
 // Array order is historical (see HISTORICAL_ARRAY_ORDER in the generator); the
 // runner sorts by version before applying.
@@ -452,4 +453,5 @@ export const MIGRATIONS: Migration[] = [
   v224,
   v225,
   v226,
+  v227,
 ];

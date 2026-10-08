@@ -12,8 +12,8 @@ import { TRUST_GENERATION_SCHEMA_SQL } from '../eligibility/generation-schema.ts
 // key their caches on it. No schema.sql mirror: the triggers read columns
 // that exist only through the trust tiers migration, so a fresh install
 // replays this migration like that one.
-export const v226: Migration = {
-  version: 226,
+export const v227: Migration = {
+  version: 227,
   name: 'trust_generation',
   idempotent: true,
   sql: TRUST_GENERATION_SCHEMA_SQL,
