@@ -168,9 +168,13 @@ claim said.
 it (tombstoned), its takes, take proposals, open loops, core notices, stored
 write intents, attached file records and blobs, and the page row with its
 chunks, versions, timeline, links and raw data. It records the page's content
-hash, so the same content is refused under any slug until
+hash and the hash of every saved version, so the same content or an older version of it is refused under any slug until
 `gbrain pages unpurge <slug>`; `gbrain pages purges list` shows the tombstones.
-An edited file imports normally.
+An edited file imports normally. Its response carries the same store-by-store
+`receipt` as a fact purge, naming other pages whose prose still states one of
+the purged page's facts. A write refused because it carries purged content,
+or accepted as a no-op after its purged rows were dropped, keeps no copy of
+that content in its stored write request.
 
 ## Verify in the actual harness
 
