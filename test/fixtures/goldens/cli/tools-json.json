@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 219437,
-    "stdoutSha256": "d51f1094ade15139c8afd64979b53cbc2f9e410136aa62c9f073637c74db6c40",
+    "stdoutBytes": 219622,
+    "stdoutSha256": "1c785448eb88a9eed2b5545f0f3e807d9c1a16cfe3727b8b5ff0a1c7e9d94094",
     "toolNames": [
       "remember",
       "entity",
@@ -5700,6 +5700,7 @@
           "budget_tokens": "number?",
           "entities": "string?",
           "include_private": "boolean?",
+          "include_quarantined": "boolean?",
           "min_trust": "string?",
           "session_id": "string?",
           "since": "string?"
@@ -5717,6 +5718,10 @@
             },
             "include_private": {
               "description": "Local trusted callers only.",
+              "type": "boolean"
+            },
+            "include_quarantined": {
+              "description": "Admin or memory_confirm: quarantined cards.",
               "type": "boolean"
             },
             "min_trust": {

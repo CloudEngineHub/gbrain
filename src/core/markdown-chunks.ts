@@ -121,10 +121,10 @@ async function overlaidChunks(page: { compiled_truth: string; timeline?: string 
     for (const c of chunkText(text, { maxTokens })) chunks.push({ chunk_index: chunks.length, chunk_text: c.text, chunk_source: source });
   }
   if (fenced && truth.main.trim()) chunks.push(...await fenced(truth.main, chunks.length));
-  for (const { tier, body } of [...truth.lowTier, ...timeline.lowTier]) {
-    const room = Math.max(1, maxTokens - estimateEmbedTokens(fenceTrustMarker(tier)) - 1);
+  for (const { tier, unconfirmed, body } of [...truth.lowTier, ...timeline.lowTier]) {
+    const room = Math.max(1, maxTokens - estimateEmbedTokens(fenceTrustMarker(tier, unconfirmed)) - 1);
     for (const c of chunkText(body, { maxTokens: room })) {
-      chunks.push({ chunk_index: chunks.length, chunk_text: markFenceChunk(tier, c.text), chunk_source: 'compiled_truth' });
+      chunks.push({ chunk_index: chunks.length, chunk_text: markFenceChunk(tier, c.text, unconfirmed), chunk_source: 'compiled_truth' });
     }
   }
   return chunks;

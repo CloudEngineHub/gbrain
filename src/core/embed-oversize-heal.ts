@@ -98,8 +98,8 @@ export function healOversizedChunks(
 
     splitCount++;
     // #5575 ENG-1: a low-tier facts-fence chunk keeps its trust marker on every piece.
-    const { tier, body } = unmarkFenceChunk(c.chunk_text);
-    const room = tier ? Math.max(1, maxTokens - estimateEmbedTokens(fenceTrustMarker(tier)) - 1) : maxTokens;
+    const { tier, unconfirmed, body } = unmarkFenceChunk(c.chunk_text);
+    const room = tier ? Math.max(1, maxTokens - estimateEmbedTokens(fenceTrustMarker(tier, unconfirmed)) - 1) : maxTokens;
     const parts = chunkText(body, { maxTokens: room });
     // Pathological: estimator / splitter disagreement — hard-split by chars
     // so we never re-emit the original oversized row unchanged.
@@ -110,7 +110,7 @@ export function healOversizedChunks(
 
     for (const piece of pieces) {
       if (!piece) continue;
-      const text = tier ? markFenceChunk(tier, piece) : piece;
+      const text = tier ? markFenceChunk(tier, piece, unconfirmed) : piece;
       out.push(carryHealedMetadata(c, {
         chunk_index: out.length,
         chunk_text: text,
