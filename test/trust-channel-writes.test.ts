@@ -39,6 +39,7 @@ import { listTrustProposals } from '../src/core/trust/proposals.ts';
 import { claimWorktree } from '../src/core/persistence/ownership.ts';
 import { performManagedSync } from '../src/core/persistence/sync-run.ts';
 import { renderFactsTable } from '../src/core/facts-fence.ts';
+import { runSetTrust } from '../src/commands/sources-trust.ts';
 
 const engines: BrainEngine[] = [];
 const home = mkdtempSync(join(tmpdir(), 'gbrain-trust-channel-'));
@@ -260,4 +261,30 @@ describe('owner-source sync tiers and the git round trip (CEO-21)', () => {
       expect(await tier('people/alice-example')).toBe('tool_observed');
     }
   }), 120_000);
+});
+
+describe('gbrain sources set-trust', () => {
+  test('stores a default at or below operator_curated, refuses user_confirmed, clears', async () => {
+    const engine = engines[0]!;
+    await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
+    await engine.executeRaw(`INSERT INTO sources(id,name,config) VALUES('mirror-example','mirror-example','{}') ON CONFLICT DO NOTHING`);
+    await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
+    const config = async () => (await engine.executeRaw<{ t: string | null }>(`SELECT config->>'trust_tier' AS t FROM sources WHERE id='mirror-example'`))[0]?.t ?? null;
+    const quietRun = async (args: string[]) => {
+      const [log, err, exit] = [console.log, console.error, process.exit];
+      let code: number | undefined;
+      console.log = () => {}; console.error = () => {};
+      process.exit = ((c?: number) => { code = c; throw new Error('exit'); }) as never;
+      try { await runSetTrust(engine, args); } catch (e) { if ((e as Error).message !== 'exit') throw e; }
+      finally { console.log = log; console.error = err; process.exit = exit; }
+      return code;
+    };
+    expect(await quietRun(['mirror-example', 'external_untrusted'])).toBeUndefined();
+    expect(await config()).toBe('external_untrusted');
+    expect(await quietRun(['mirror-example', 'user_confirmed'])).toBe(2);
+    expect(await config()).toBe('external_untrusted');
+    expect(await quietRun(['mirror-example', '--clear'])).toBeUndefined();
+    expect(await config()).toBeNull();
+    expect(await quietRun(['missing-example', 'agent_written'])).toBe(4);
+  });
 });
