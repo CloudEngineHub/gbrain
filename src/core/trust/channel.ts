@@ -189,3 +189,11 @@ export async function ownerGateInput(engine: Pick<BrainEngine, 'executeRaw'>, ro
   const trust = await ownerImportTrust(engine, row, frontmatter, sourceUri);
   return { tier: trust.tier, origin: { channel: trust.origin?.channel ?? null, source_uri: trust.origin?.source_uri ?? null }, requestId: row.id };
 }
+
+/** The write-gate input of an unmanaged owner file import (direct sync / import of a source's files): the source default lowered by markers. */
+export async function ownerSourceGateInput(engine: Pick<BrainEngine, 'executeRaw'>, sourceId: string, frontmatter: Record<string, unknown> | null | undefined) {
+  const [source] = await engine.executeRaw<{ config: Record<string, unknown> | string | null }>('SELECT config FROM sources WHERE id = $1', [sourceId]);
+  const config = typeof source?.config === 'string' ? JSON.parse(source.config) as Record<string, unknown> : source?.config ?? null;
+  const trust = ownerPageTrust({ frontmatter, sourceConfig: config, channel: 'import' });
+  return { tier: trust.tier, origin: { channel: 'import' }, requestId: null };
+}

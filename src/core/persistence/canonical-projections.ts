@@ -16,6 +16,8 @@ import type { OperationError } from '../ops/contract.ts';
 import { protectedRegions } from '../fence-scan.ts';
 import { FENCE_ROWS_MAX, fenceOperationError, scanCanonicalFences } from '../fence-repair/refusal.ts';
 import type { FenceSection } from '../fence-repair/types.ts';
+import { guardFenceRows } from '../trust/fence-guard.ts';
+import { loadWriteGateConfig } from '../trust/gate-outcomes.ts';
 
 const FENCE_PAIRS=[{begin:FACTS_FENCE_BEGIN,end:FACTS_FENCE_END},{begin:TAKES_FENCE_BEGIN,end:TAKES_FENCE_END}];
 
@@ -417,11 +419,11 @@ export async function prepareCanonicalProjections(engine: BrainEngine, page: Par
       await pipelined(tx, timelineRows);
       return { timelineRowsRemoved: removedSummary(removedDates) };
     }
-    if (factRows.length) {
-      await pipelined(tx, [expireFacts]);
-      await tx.insertFacts(factRows, { source_id: sourceId }); // gbrain-allow-direct-insert: canonical fence projection shares the journal publication transaction
-      await pipelined(tx, [...factFields, checkTakes, dropTakes]);
-    } else await pipelined(tx, [expireFacts, checkTakes, dropTakes]);
+    // #5575: rows more trusted than the writer are never expired by it, and new rows pass the write gate (trust/fence-guard.ts).
+    const guard = await guardFenceRows(tx, { sourceId, slug, incoming, rows: factRows, cfg: loadWriteGateConfig }, () => pipelined(tx, [expireFacts]));
+    if (guard.rows.length) await tx.insertFacts(guard.rows, { source_id: sourceId }); // gbrain-allow-direct-insert: canonical fence projection shares the journal publication transaction
+    await guard.finish(tx);
+    await pipelined(tx, [...factFields, checkTakes, dropTakes]);
     if (takes.length) {
       await tx.addTakesBatch(takes.map(t => takesPreparation.toCanonicalBatchInput(id, t)));
       await pipelined(tx, [...resolveTakes, ...timelineRows]);

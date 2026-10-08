@@ -192,3 +192,37 @@ describe('write gate on remember (DX-1)', () => {
     }
   }), 90_000);
 });
+
+describe('guarded fence re-projection (A5, ENG-1)', () => {
+  const row = (n: number, claim: string) => ({ rowNum: n, claim, kind: 'fact', confidence: 1, visibility: 'world', notability: 'medium', active: true });
+  const body = (rows: ReturnType<typeof row>[]) => `Profile.\n\n## Facts\n\n${renderFactsTable(rows as never)}`;
+  test('an agent rewrite cannot expire a confirmed fence row: rewritten -> contested, removed -> forget proposal, renumbered -> moved', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+    for (const engine of engines) {
+      const b = await brain(engine);
+      const slug = 'people/erin-example';
+      await run(b.local, 'put_page', { slug, content: page('Erin', body([row(1, 'Erin lives in Oslo'), row(2, 'Erin owns a boat'), row(3, 'Erin speaks Norwegian')])) });
+      const ids = async () => Object.fromEntries((await engine.executeRaw<{ fact: string; id: number }>(
+        'SELECT fact, id FROM facts WHERE source_id=$1 AND source_markdown_slug=$2 AND expired_at IS NULL', [b.sourceId, slug])).map(r => [r.fact, Number(r.id)]));
+      const before = await ids();
+      for (const id of Object.values(before)) await confirmFact(b, id);
+      const current = await operationsByName.get_page.handler(b.remote, { slug, include_content: true }) as Record<string, any>;
+      // Row 1 rewritten, row 2 removed, row 3 renumbered to 2 (behind a new row 1 order change).
+      await run(b.remote, 'put_page', { slug, content: page('Erin', body([row(1, 'Erin lives in Bergen'), row(2, 'Erin speaks Norwegian')])), expected_revision: current.revision });
+      const after = await engine.executeRaw<{ id: number; fact: string; row_num: number | null; expired_at: unknown; trust_tier: string }>(
+        'SELECT id, fact, row_num, expired_at, trust_tier FROM facts WHERE source_id=$1 AND source_markdown_slug=$2 ORDER BY id', [b.sourceId, slug]);
+      const by = (fact: string) => after.find(r => r.fact === fact)!;
+      expect(by('Erin lives in Oslo')).toMatchObject({ row_num: null, expired_at: null, trust_tier: 'user_confirmed' });
+      expect(by('Erin owns a boat')).toMatchObject({ row_num: null, expired_at: null });
+      expect(by('Erin speaks Norwegian')).toMatchObject({ id: before['Erin speaks Norwegian'], row_num: 2, expired_at: null, trust_tier: 'user_confirmed' });
+      expect(by('Erin lives in Bergen')).toMatchObject({ row_num: 1, expired_at: null, trust_tier: 'agent_written' });
+      const proposals = await listTrustProposals(engine, { sourceId: b.sourceId });
+      expect(proposals.map(p => [p.action, p.target_id, p.related_id]).sort()).toEqual([
+        ['forget', before['Erin owns a boat'], null],
+        ['supersede_fact', before['Erin lives in Oslo'], Number(by('Erin lives in Bergen').id)],
+      ].sort());
+      const supersede = proposals.find(p => p.action === 'supersede_fact')!;
+      expect((await decideTrustProposal(engine, supersede.id, 'accept', owner)).status).toBe('accepted');
+      expect((await factRow(b, before['Erin lives in Oslo'])).expired_at).not.toBeNull();
+    }
+  }), 90_000);
+});

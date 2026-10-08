@@ -1,6 +1,6 @@
 import { assertUnmanagedCanonicalWriter } from './persistence/maintenance.ts';
 import { suffixedFrontmatterSlugHold } from './persistence/suffixed-slug.ts';
-import { maintenanceTransaction, writeTrustOfGate } from './persistence/attribution.ts';
+import { maintenanceTransaction, ownerSourceGateInput, writeTrustOfGate } from './persistence/attribution.ts';
 import { assertImportBase, sameCanonicalImport, sameContentAnyKeyOrder } from './page-state/import-guard.ts';
 import { stabilizeSafetyAssessments } from './persistence/reconcile-safety.ts';
 import { decideImportIdentity, collidingSlugOwner, fileOriginUri } from './import-identity.ts';
@@ -1133,7 +1133,7 @@ export async function importFromFile(
   // filename `2024-03-15`.
   const fileBasename = basename(relativePath, '.md');
   const imported = await importFromContent(engine, resolvedSlug, content, {
-    ...opts, preserveGateMarkers: true,
+    ...opts, preserveGateMarkers: true, writeGate: await ownerSourceGateInput(engine, opts.sourceId ?? 'default', parsed.frontmatter),
     filename: fileBasename,
     sourcePath: relativePath,
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- walks up from the caller's own file path by the depth of its own relative path to recover the import root; import-identity confines every probe under that root
