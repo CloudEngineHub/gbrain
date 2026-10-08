@@ -141,6 +141,7 @@
     "check:guard-self-test": "bash scripts/guard-self-test.sh",
     "build:error-codes": "bun scripts/build-error-codes.ts",
     "check:error-codes": "bun scripts/build-error-codes.ts --check",
+    "check:write-gate-regex": "bun scripts/check-write-gate-regex.ts",
     "build:agent-protocol": "bun scripts/build-agent-protocol.ts",
     "check:agent-protocol": "bun scripts/build-agent-protocol.ts --check",
     "check:agent-contract": "bun scripts/check-agent-contract.ts",

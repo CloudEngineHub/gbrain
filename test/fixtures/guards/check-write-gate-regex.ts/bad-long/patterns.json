@@ -1,0 +1,9 @@
+[
+  {
+    "name": "long",
+    "source": "\\bsend[^.]{0,200}[^.]{0,200}to\\b",
+    "anchors": [
+      "send"
+    ]
+  }
+]
