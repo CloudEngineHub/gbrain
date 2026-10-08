@@ -86,7 +86,8 @@ const rank = trustRankSql;
 const lowerOf = (a: string, b: string) => `(CASE WHEN ${rank(a)} <= ${rank(b)} THEN ${a} ELSE ${b} END)`;
 const contentExpr = (row: 'NEW' | 'OLD', table: TrustTable) => TRUST_CONTENT_COLUMNS[table]
   .map(column => table === 'pages' && column === 'frontmatter'
-    ? `(${row}.frontmatter - ARRAY[${TRUST_EPHEMERAL_FRONTMATTER_KEYS.map(key => `'${key}'`).join(',')}]::text[])`
+    // A non-object frontmatter (legacy or raw-SQL rows) has no keys to drop; jsonb `-` would raise on it.
+    ? `(CASE WHEN jsonb_typeof(${row}.frontmatter) = 'object' THEN ${row}.frontmatter - ARRAY[${TRUST_EPHEMERAL_FRONTMATTER_KEYS.map(key => `'${key}'`).join(',')}]::text[] ELSE ${row}.frontmatter END)`
     : `${row}.${column}`)
   .join(', ');
 const contentChanged = (table: TrustTable) => `(${contentExpr('NEW', table)}) IS DISTINCT FROM (${contentExpr('OLD', table)})`;

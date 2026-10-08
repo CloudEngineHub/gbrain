@@ -103,6 +103,13 @@ for (const backendName of testBackends()) {
   const engineOf = () => backends.find(b => b.name === backendName)!.engine;
 
   describe(`trust tier trigger (${backendName})`, () => {
+    test('a page whose frontmatter is not a JSON object still updates (legacy or raw-SQL rows)', async () => {
+      const { id } = await newPage(engineOf());
+      await engineOf().executeRaw(`UPDATE pages SET frontmatter = '"scalar"'::jsonb WHERE id = $1`, [id]);
+      await engineOf().executeRaw(`UPDATE pages SET frontmatter = '{}'::jsonb WHERE id = $1`, [id]);
+      expect(await tierOf(engineOf(), 'pages', id)).toBe('unknown');
+    });
+
     test('fires last among BEFORE ROW triggers on every trust table', async () => {
       for (const table of TRUST_TABLES) {
         const names = (await engineOf().executeRaw<{ tgname: string }>(

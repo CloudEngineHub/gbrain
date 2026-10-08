@@ -3260,8 +3260,8 @@
         "idempotent": true,
         "name": "trust_tiers",
         "sql": {
-          "length": 20902,
-          "sha256": "7a9173b109dfce15adad60b4f0520e1ca7f086ef42333d3b5e7ff86fc1dc3a2a"
+          "length": 21064,
+          "sha256": "e970169acfdd98bfc4b51d361522f0137341b67988d0db3cf4b1c0f7f9433eca"
         },
         "sqlFor": "absent",
         "transaction": "absent",
