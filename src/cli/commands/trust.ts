@@ -8,9 +8,7 @@
 import { jsonRequested, setCliExitVerdict, writeStdoutFinal } from '../../core/cli-force-exit.ts';
 import type { BrainEngine } from '../../core/engine.ts';
 import { TRUST_TIERS, trustLabel } from '../../core/trust/tier.ts';
-import { runTrustBackfill, type TrustBackfillReport } from '../../core/trust/backfill.ts';
-import { runTrustScan } from '../../core/eligibility/scan.ts';
-import { explainTrust } from '../../core/eligibility/explain.ts';
+import type { TrustBackfillReport } from '../../core/trust/backfill.ts';
 import type { CliDispatchContext } from '../command-table.ts';
 
 export const TRUST_USAGE = [
@@ -43,29 +41,44 @@ function render(report: TrustBackfillReport): string {
   return lines.join('\n');
 }
 
+/** A typed refusal: the error envelope under --json, `Error [code]` text otherwise. */
+async function refuse(args: string[], code: 'invalid_params' | 'not_found', message: string, suggestion: string): Promise<void> {
+  const { OperationError } = await import('../../core/ops/contract.ts');
+  const { reportPersistenceCliError } = await import('../../commands/persistence-delegate.ts');
+  await reportPersistenceCliError(new OperationError(code, message, suggestion), jsonRequested(args));
+  setCliExitVerdict(code === 'not_found' ? 1 : 2);
+}
+
 export async function run(engine: BrainEngine, args: string[], ctx: CliDispatchContext): Promise<void> {
   const [sub, ...rest] = args;
   const known = sub === 'backfill' || sub === 'scan' || sub === 'explain';
-  if (!sub || args.includes('--help') || args.includes('-h') || !known) {
+  if (args.includes('--help') || args.includes('-h') || (!sub && !jsonRequested(args))) {
     console.log(TRUST_USAGE);
-    if (sub && !known && !args.includes('--help') && !args.includes('-h')) setCliExitVerdict(2);
+    return;
+  }
+  if (!known) {
+    if (!jsonRequested(args)) console.log(TRUST_USAGE);
+    await refuse(args, 'invalid_params', !sub || sub.startsWith('-') ? 'gbrain trust needs a subcommand.' : `Unknown trust subcommand '${sub}'.`, 'Run gbrain trust backfill, gbrain trust scan or gbrain trust explain <ref> (gbrain trust --help lists them).');
     return;
   }
   const dryRun = rest.includes('--dry-run');
   const sizeAt = rest.indexOf('--batch-size');
   const batchSize = sizeAt >= 0 ? Number(rest[sizeAt + 1]) : undefined;
   if (batchSize !== undefined && (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 100_000)) {
-    console.error('--batch-size must be an integer from 1 to 100000.');
-    setCliExitVerdict(2);
+    await refuse(args, 'invalid_params', '--batch-size must be an integer from 1 to 100000.', `Run gbrain trust ${sub} --batch-size 500, or omit --batch-size for the default.`);
     return;
   }
   if (sub === 'explain') {
     const ref = rest.find(a => !a.startsWith('--'));
-    if (!ref) { console.error('Usage: gbrain trust explain <ref> [--json]'); setCliExitVerdict(2); return; }
+    if (!ref) { await refuse(args, 'invalid_params', 'gbrain trust explain needs a ref.', 'Run gbrain trust explain <ref> with f<id>, t<id>, e<id>, h<id> or p:<source>/<slug>.'); return; }
+    const { explainTrust } = await import('../../core/eligibility/explain.ts');
     const why = await explainTrust(engine, ref);
-    if (!why.found) setCliExitVerdict(1);
+    if (!why.found) {
+      await refuse(args, 'not_found', `${ref}: no fact, take, timeline entry, hold or page has this ref.`,
+        'Check the ref: f<id> fact, t<id> take, e<id> timeline entry, h<id> hold, p:<source>/<slug> page (gbrain recall and gbrain get show ids and slugs).');
+      return;
+    }
     if (jsonRequested(args)) { await writeStdoutFinal(`${JSON.stringify(why, null, 2)}\n`); return; }
-    if (!why.found) { console.log(`${ref}: no fact, take, timeline entry, hold or page has this ref.`); return; }
     console.log([`${ref}: ${why.label} (${why.trust_tier}), origin ${why.origin}; gate verdict ${why.verdict}${why.unconfirmed ? ', unconfirmed' : ''}`,
       ...Object.entries(why.activation).map(([surface, decision]) => `  ${surface}: ${decision}`),
       ...(why.next ? [`  Review: ${why.next.join(' ')}`] : [])].join('\n'));
@@ -73,6 +86,7 @@ export async function run(engine: BrainEngine, args: string[], ctx: CliDispatchC
   }
   if (sub === 'scan') {
     await ctx.completeStartup?.(engine);
+    const { runTrustScan } = await import('../../core/eligibility/scan.ts');
     const scan = await runTrustScan(engine, batchSize ? { batchSize } : {});
     if (jsonRequested(args)) await writeStdoutFinal(`${JSON.stringify(scan, null, 2)}\n`);
     else console.log([`Trust scan (detector v${scan.detector_version}):`,
@@ -81,6 +95,7 @@ export async function run(engine: BrainEngine, args: string[], ctx: CliDispatchC
     return;
   }
   if (!dryRun) await ctx.completeStartup?.(engine);
+  const { runTrustBackfill } = await import('../../core/trust/backfill.ts');
   const report = await runTrustBackfill(engine, { dryRun, resume: rest.includes('--resume'), ...(batchSize ? { batchSize } : {}) });
   if (jsonRequested(args)) await writeStdoutFinal(`${JSON.stringify(report, null, 2)}\n`);
   else console.log(render(report));
