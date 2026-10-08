@@ -52,6 +52,9 @@ export const CONTENT_ORIGIN_PARAM: ParamDef = {
   type: 'string',
   enum: ['user_said', 'tool_output', 'inferred'],
   description: 'Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.',
+  // Like remember.replaces: advertised on the verbs and full surfaces, accepted on every surface (dispatch validates
+  // against the registry), off the starter schema so its list stays inside its size budget; safety never depends on it.
+  fullSurfaceOnly: true,
 };
 /** Page mutation params plus `content_origin`, for verbs whose caller supplies the content (put_page, put_pages, capture, edit_page, remember). */
 export const AGENT_CONTENT_PARAMS: Record<string, ParamDef> = { ...PAGE_MUTATION_PARAMS, content_origin: CONTENT_ORIGIN_PARAM };

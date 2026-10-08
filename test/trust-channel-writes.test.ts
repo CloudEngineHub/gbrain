@@ -21,7 +21,9 @@ import { join } from 'node:path';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
 import type { OperationContext } from '../src/core/ops/contract.ts';
-import { operationsByName } from '../src/core/operations.ts';
+import { operations, operationsByName } from '../src/core/operations.ts';
+import { dispatchToolCall } from '../src/mcp/dispatch.ts';
+import { allowedOpNames, filterOpsForSurface } from '../src/mcp/surface.ts';
 import { mintLegacyToken } from '../src/core/token-mint.ts';
 import { registerLocalWriter, readLocalWriter } from '../src/core/persistence/identity.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
@@ -148,6 +150,20 @@ describe('channel tiers on journaled writes', () => {
       await run(b.local, 'put_page', { slug: 'notes/claims-example', content: page('Claims', 'Claims to be confirmed.', 'trust_tier: user_confirmed\n') });
       expect((await pageRow(b, 'notes/claims-example')).trust_tier).toBe('agent_written');
     }
+  }), 60_000);
+
+  test('content_origin is off the starter schema but a starter caller that passes it is honored (dispatch)', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+    const b = await brain(engines[0]!);
+    for (const op of ['remember', 'put_page', 'capture']) {
+      const advertised = (surface: 'verbs' | 'starter' | 'full') => filterOpsForSurface(operations, surface).find(o => o.name === op)?.params ?? {};
+      expect({ op, starter: 'content_origin' in advertised('starter'), full: 'content_origin' in advertised('full') }).toEqual({ op, starter: false, full: true });
+    }
+    expect('content_origin' in filterOpsForSurface(operations, 'verbs').find(o => o.name === 'remember')!.params).toBe(true);
+    const response = await dispatchToolCall(b.engine, 'put_page', { slug: 'notes/starter-tool-example', content: page('Starter', 'Pasted web text.'),
+      content_origin: 'tool_output', request_id: randomUUID() }, { ...b.remote, allowedOps: allowedOpNames(operations, 'starter') });
+    expect(response.isError).toBeFalsy();
+    expect(JSON.stringify(response)).not.toContain('content_origin');
+    expect((await pageRow(b, 'notes/starter-tool-example')).trust_tier).toBe('external_untrusted');
   }), 60_000);
 
   test('an unknown content_origin is invalid_params listing the accepted values, on remember and put_page', async () => withEnv({ GBRAIN_HOME: home }, async () => {
