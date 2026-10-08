@@ -256,7 +256,7 @@ export async function runTrustBackfill(engine: BrainEngine, opts: TrustBackfillO
     throw opError('migrations_pending', 'This brain has no trust_tier columns yet, so there is nothing to backfill.',
       'Apply the pending schema migrations on the brain host, then run the backfill. gbrain trust backfill --dry-run previews it without them.', {
         fix: { argv: ['gbrain', 'apply-migrations', '--yes'], consent: [], actor: 'agent', requires_exclusive: true,
-          why: 'Applies the pending schema migrations, including the trust tier columns.', verify: { argv: ['gbrain', 'trust', 'backfill', '--dry-run', '--json'] } },
+          why: 'Applies the pending schema migrations, including the trust tier columns.', verify: { argv: ['gbrain', 'doctor', '--json'] } },
       });
   }
   const { forTable, signals } = classifier(cols);

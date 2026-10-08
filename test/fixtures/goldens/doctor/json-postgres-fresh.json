@@ -502,7 +502,7 @@
         },
         {
           "category": "ops",
-          "message": "RLS enabled on 120/120 public tables",
+          "message": "RLS enabled on 121/121 public tables",
           "name": "rls",
           "status": "ok"
         },
@@ -1723,6 +1723,78 @@
           },
           "message": "Every page has its revision; the page revision backfill is complete.",
           "name": "revision_backfill",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "backfill": {
+              "completed_at": null,
+              "interrupted": false
+            },
+            "by_tier": {
+              "agent_written": 0,
+              "external_untrusted": 0,
+              "operator_curated": 0,
+              "tool_observed": 0,
+              "unknown": 0,
+              "user_confirmed": 0
+            },
+            "rows": 0,
+            "tables": [
+              {
+                "by_tier": {
+                  "agent_written": 0,
+                  "external_untrusted": 0,
+                  "operator_curated": 0,
+                  "tool_observed": 0,
+                  "unknown": 0,
+                  "user_confirmed": 0
+                },
+                "rows": 0,
+                "table": "pages"
+              },
+              {
+                "by_tier": {
+                  "agent_written": 0,
+                  "external_untrusted": 0,
+                  "operator_curated": 0,
+                  "tool_observed": 0,
+                  "unknown": 0,
+                  "user_confirmed": 0
+                },
+                "rows": 0,
+                "table": "facts"
+              },
+              {
+                "by_tier": {
+                  "agent_written": 0,
+                  "external_untrusted": 0,
+                  "operator_curated": 0,
+                  "tool_observed": 0,
+                  "unknown": 0,
+                  "user_confirmed": 0
+                },
+                "rows": 0,
+                "table": "takes"
+              },
+              {
+                "by_tier": {
+                  "agent_written": 0,
+                  "external_untrusted": 0,
+                  "operator_curated": 0,
+                  "tool_observed": 0,
+                  "unknown": 0,
+                  "user_confirmed": 0
+                },
+                "rows": 0,
+                "table": "timeline_entries"
+              }
+            ],
+            "unknown_pct": 0
+          },
+          "message": "No facts, takes, timeline entries or pages yet.",
+          "name": "trust_tiers",
           "status": "ok"
         },
         {

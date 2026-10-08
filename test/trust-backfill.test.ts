@@ -199,25 +199,26 @@ for (const backendName of testBackends()) {
 }
 
 describe('trust backfill dry run before the trust migration', () => {
-  test('classifies from existing columns only and writes nothing', async () => {
-    const engine = new PGLiteEngine();
+  let engine: PGLiteEngine;
+  beforeAll(async () => {
+    engine = new PGLiteEngine();
     await engine.connect({});
     await engine.initSchema();
-    try {
-      const f = await seed(engine);
-      for (const table of ['facts', 'takes', 'timeline_entries', 'pages']) await engine.executeRaw(`ALTER TABLE ${table} DROP COLUMN trust_tier CASCADE, DROP COLUMN write_origin`);
-      const [before] = await engine.executeRaw<{ n: number }>(`SELECT (SELECT count(*) FROM op_checkpoints) + (SELECT count(*) FROM config) AS n`);
-      const report = await runTrustBackfill(engine, { dryRun: true });
-      const [after] = await engine.executeRaw<{ n: number }>(`SELECT (SELECT count(*) FROM op_checkpoints) + (SELECT count(*) FROM config) AS n`);
-      expect(Number(after!.n)).toBe(Number(before!.n));
-      expect(report.schema).toBe('pre_trust');
-      expect(report.tables.every(t => t.current === undefined)).toBe(true);
-      expect(report.projected).toEqual({ user_confirmed: 0, operator_curated: 1, tool_observed: 0, agent_written: 8, unknown: 4, external_untrusted: 6 });
-      expect(report.rows).toBe(Object.keys(f.pages).length + Object.keys(f.facts).length + 2);
-      expect((await doctor(engine)).details).toEqual({ schema: 'pre_trust' });
-      await expect(runTrustBackfill(engine, { log: quiet })).rejects.toMatchObject({ code: 'migrations_pending' });
-    } finally {
-      await engine.disconnect();
-    }
   }, 120_000);
+  afterAll(async () => { await engine.disconnect(); });
+
+  test('classifies from existing columns only and writes nothing', async () => {
+    const f = await seed(engine);
+    for (const table of ['facts', 'takes', 'timeline_entries', 'pages']) await engine.executeRaw(`ALTER TABLE ${table} DROP COLUMN trust_tier CASCADE, DROP COLUMN write_origin`);
+    const [before] = await engine.executeRaw<{ n: number }>(`SELECT (SELECT count(*) FROM op_checkpoints) + (SELECT count(*) FROM config) AS n`);
+    const report = await runTrustBackfill(engine, { dryRun: true });
+    const [after] = await engine.executeRaw<{ n: number }>(`SELECT (SELECT count(*) FROM op_checkpoints) + (SELECT count(*) FROM config) AS n`);
+    expect(Number(after!.n)).toBe(Number(before!.n));
+    expect(report.schema).toBe('pre_trust');
+    expect(report.tables.every(t => t.current === undefined)).toBe(true);
+    expect(report.projected).toEqual({ user_confirmed: 0, operator_curated: 1, tool_observed: 0, agent_written: 8, unknown: 4, external_untrusted: 6 });
+    expect(report.rows).toBe(Object.keys(f.pages).length + Object.keys(f.facts).length + 2);
+    expect((await doctor(engine)).details).toEqual({ schema: 'pre_trust' });
+    await expect(runTrustBackfill(engine, { log: quiet })).rejects.toMatchObject({ code: 'migrations_pending' });
+  });
 });

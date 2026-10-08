@@ -64,6 +64,7 @@ const PERMITTED_TEST_ONLY = [
   { path: 'src/core/progressive-batch/orchestrator.ts', reason: 'held: TODOS.md keeps an open item to re-compose progressive-batch with --workers on the 3 reindex sites (callers dropped in the v0.41.17.0 merge)' },
   { path: 'src/core/progressive-batch/retrofit-wrap.ts', reason: 'held: progressive-batch re-compose item still open in TODOS.md' },
   { path: 'src/core/progressive-batch/stage-report.ts', reason: 'held: progressive-batch re-compose item still open in TODOS.md' },
+  { path: 'src/core/trust/confirm.ts', reason: 'held: memory-trust foundation (#5575 lane F); confirm_memory and gbrain trust review/release/revert (lane L1) are its runtime callers in the same feature PR; drop this row when they land' },
   { path: 'src/core/ingestion/daemon.ts', reason: 'held: ingestion cluster awaits a wire-up vs delete product decision (public gbrain/ingestion export, docs/guides/data-ingestion.md)' },
   { path: 'src/core/ingestion/dedup.ts', reason: 'held: ingestion cluster awaits a wire-up vs delete product decision' },
   { path: 'src/core/ingestion/skillpack-load.ts', reason: 'held: ingestion cluster awaits a wire-up vs delete product decision' },
