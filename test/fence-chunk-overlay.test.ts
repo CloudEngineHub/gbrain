@@ -50,7 +50,8 @@ describe('fence trust marker', () => {
     for (const tier of TRUST_TIERS) {
       expect(fenceTrustMarker(tier)).toBe(compactTrustLabel({ trust_tier: tier, origin: 'facts-fence' }));
       expect(chunkTrustMarker(`${fenceTrustMarker(tier)}\n| 3 | claim |`)).toBe(tier);
-      expect(unmarkFenceChunk(`${fenceTrustMarker(tier)}\nbody`)).toEqual({ tier, body: 'body' });
+      expect(unmarkFenceChunk(`${fenceTrustMarker(tier)}\nbody`)).toEqual({ tier, unconfirmed: false, body: 'body' });
+      expect(unmarkFenceChunk(`${fenceTrustMarker(tier, true)}\nbody`)).toEqual({ tier, unconfirmed: true, body: 'body' });
     }
     expect(fenceTrustMarker('agent_written')).toBe('[written by an agent · facts-fence]');
     expect(chunkTrustMarker('[written by an agent · mcp:remember]\nx')).toBeNull();

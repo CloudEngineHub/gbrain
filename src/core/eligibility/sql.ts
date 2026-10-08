@@ -89,3 +89,15 @@ export function pageEligibleSql(alias: string, policy: ReadEligibility | undefin
   if (policy?.suppressFlagged) clauses.push(`NOT ${activationSuppressedSql('pages', alias)}`);
   return clauses.length ? clauses.join(' AND ') : 'TRUE';
 }
+
+/**
+ * Plan A5: `tp<id>:challenger|challenged` for the first pending supersede
+ * proposal naming the row (as the new lower-tier row or the row it would
+ * supersede), or NULL. labels.ts `parseContested` reads it back.
+ */
+export function contestedRefSql(table: Exclude<EligibilityTable, 'pages' | 'timeline_entries'>, alias: string): string {
+  return `(SELECT 'tp' || elig_tp.id::text || ':' || CASE WHEN elig_tp.related_table = '${table}' AND elig_tp.related_id = ${alias}.id THEN 'challenger' ELSE 'challenged' END
+    FROM trust_proposals elig_tp WHERE elig_tp.status = 'pending' AND elig_tp.action IN ('supersede_fact', 'supersede_take')
+      AND ((elig_tp.target_table = '${table}' AND elig_tp.target_id = ${alias}.id) OR (elig_tp.related_table = '${table}' AND elig_tp.related_id = ${alias}.id))
+    ORDER BY elig_tp.id LIMIT 1)`;
+}

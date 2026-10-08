@@ -25,6 +25,7 @@ import type { BrainEngine, FactRow } from '../engine.ts';
 import type { TrustTier } from '../trust/tier.ts';
 import type { ReadEligibility } from '../eligibility/policy.ts';
 import { trustFields } from '../eligibility/labels.ts';
+import { isQuarantined } from '../quarantine.ts';
 import { loadPageTrust } from '../eligibility/stamp.ts';
 import { loadRelationshipNotes, relationshipNoteKey } from '../link-relationship-notes.ts';
 import { normalizeAlias } from '../search/alias-normalize.ts';
@@ -107,6 +108,8 @@ export interface EntityCard {
   /** #5575 A6 (additive): the entity page's trust tier and short write origin. */
   trust_tier?: TrustTier;
   origin?: string;
+  /** #5575 ENG-15 (additive): the page is quarantined; renderers wrap its summary as external data. */
+  quarantined?: true;
 }
 
 export interface ReferenceGroupView {
@@ -147,6 +150,13 @@ export interface EntityCardOpts {
    * and activation control.
    */
   eligibility?: ReadEligibility;
+  /**
+   * #5575 (ENG-8, ENG-15): leave out a page the content-quality gate
+   * quarantined, as if it did not exist (no suggestion names it). Proactive
+   * callers always pass it unless an authorized `include_quarantined` asked;
+   * the entity verb passes it for remote callers, like get_page.
+   */
+  omitQuarantined?: boolean;
 }
 
 interface CardPageRow {
@@ -270,6 +280,11 @@ export async function buildEntityCard(
         : 0)
       || lastTouchedMs(b.row) - lastTouchedMs(a.row));
 
+  if (opts.omitQuarantined && candidates.some(c => isQuarantined(c.row.frontmatter))) {
+    const live = candidates.filter(c => !isQuarantined(c.row.frontmatter));
+    if (live.length === 0) return { found: false, suggestions: [] };
+    candidates.splice(0, candidates.length, ...live);
+  }
   if (candidates.length === 0) {
     return {
       found: false, suggestions: await nearMissSuggestions(engine, sourceId, trimmed, excludePrivate),
@@ -510,6 +525,7 @@ async function assembleCard(
   return {
     entity: { slug: pageSlug, title: row.title ?? pageSlug, type: row.type ?? null },
     ...(pageTrust ?? { trust_tier: 'unknown' as const, origin: 'unrecorded' }),
+    ...(isQuarantined(row.frontmatter) ? { quarantined: true as const } : {}),
     aka,
     // v0.45.7: summary widens in lockstep with the card's fact visibility —
     // remote (world-only) keeps ['world']; a local include_private card widens.
