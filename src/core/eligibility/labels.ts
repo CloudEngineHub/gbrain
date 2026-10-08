@@ -25,6 +25,21 @@ export interface TrustFields {
    * proactive surfaces never inject it.
    */
   unconfirmed?: true;
+  /**
+   * Plan A5: a pending trust proposal (supersede_fact / supersede_take) names
+   * this row. `challenger` is the lower-tier row inserted active-but-contested,
+   * `challenged` the higher-tier row it would supersede; both stay current
+   * until the owner decides `proposal_ref`.
+   */
+  contested?: Contested;
+}
+
+export interface Contested { proposal_ref: string; role: 'challenger' | 'challenged' }
+
+/** `tp12:challenger` (the contestedRefSql column) -> its Contested value; anything else -> undefined. */
+export function parseContested(value: unknown): Contested | undefined {
+  const m = typeof value === 'string' ? /^(tp\d+):(challenger|challenged)$/.exec(value) : null;
+  return m ? { proposal_ref: m[1]!, role: m[2] as Contested['role'] } : undefined;
 }
 
 const ORIGIN_MAX = 40;
@@ -54,10 +69,17 @@ export interface LabelOpts {
   unconfirmed?: boolean;
 }
 
-/** The compact per-item text label, e.g. `[written by an agent · mcp:remember]`. */
+/**
+ * The compact per-item text label, e.g. `[written by an agent · mcp:remember]`.
+ * An unconfirmed flagged row says so (`[unconfirmed, agent-written · …]`, or
+ * `[unconfirmed, external, untrusted · …]` below agent_written); a contested
+ * row names its pending proposal (`· contested tp7`).
+ */
 export function compactTrustLabel(fields: TrustFields, opts: LabelOpts = {}): string {
-  const words = opts.unconfirmed || fields.unconfirmed ? 'unconfirmed, agent-written' : trustLabel(fields.trust_tier);
-  return `[${words} · ${fields.origin}]`;
+  const words = opts.unconfirmed || fields.unconfirmed
+    ? `unconfirmed, ${fields.trust_tier === 'agent_written' ? 'agent-written' : trustLabel(fields.trust_tier)}`
+    : trustLabel(fields.trust_tier);
+  return `[${words} · ${fields.origin}${fields.contested ? ` · contested ${fields.contested.proposal_ref}` : ''}]`;
 }
 
 /** Tiers below this are wrapped as data instead of labeled (CEO-28: `unknown` keeps the short label). */

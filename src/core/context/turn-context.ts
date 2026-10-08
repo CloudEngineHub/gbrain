@@ -245,6 +245,8 @@ export interface AssembleTurnContextOpts {
    * the brain's read policy.
    */
   eligibility?: ReadEligibility;
+  /** #5575 ENG-15: an authorized caller asked for quarantined pages' cards (otherwise they are left out). */
+  includeQuarantined?: boolean;
 }
 
 /** Default entity-card fan-out cap for pack mode. */
@@ -579,7 +581,7 @@ async function assemblePack(
     for (const name of entities) {
       if (deadlineAt !== null && Date.now() >= deadlineAt) return;
       try {
-        const res = await buildEntityCard(engine, opts.sourceId, name, { remote, eligibility: policy });
+        const res = await buildEntityCard(engine, opts.sourceId, name, { remote, eligibility: policy, omitQuarantined: opts.includeQuarantined !== true });
         if (res.found && res.card) {
           const verdict = (await pageActivationVerdicts(engine, [{ source_id: opts.sourceId, slug: res.card.entity.slug }], policy))
             .get(pageKey({ source_id: opts.sourceId, slug: res.card.entity.slug }));
@@ -763,7 +765,7 @@ async function assembleDelta(
     for (const name of entities) {
       if (pastDeadline()) return;
       try {
-        const res = await buildEntityCard(engine, opts.sourceId, name, { remote, eligibility: { floor: policy.floor } });
+        const res = await buildEntityCard(engine, opts.sourceId, name, { remote, eligibility: { floor: policy.floor }, omitQuarantined: true });
         if (res.found && res.card) {
           for (const t of res.card.open_threads ?? []) {
             if (!since || (t.date && isAfter(t.date, since))) items.push(t);
@@ -839,8 +841,10 @@ const labelOf = (item: { trust_tier?: TrustTier; origin?: string }): TrustFields
   ({ trust_tier: item.trust_tier ?? 'unknown', origin: item.origin ?? 'legacy' });
 const labeled = (item: { trust_tier?: TrustTier; origin?: string }, text: string): string =>
   item.trust_tier ? renderTrustedInline(text, labelOf(item)) : text;
+const cardSummary = (c: EntityCard, text: string): string =>
+  c.quarantined ? renderTrustedInline(text, { trust_tier: 'external_untrusted', origin: 'quarantined' }) : labeled(c, text);
 export const renderCardLine = (c: EntityCard): string =>
-  `- **${c.entity.title}** → \`${c.entity.slug}\`${c.summary ? ` — ${labeled(c, c.summary)}` : c.trust_tier ? ` — ${labeled(c, '')}` : ''}${c.relationship_note ? ` [${c.relationship_note}]` : ''} (use get_page/entity before relying on details)`;
+  `- **${c.entity.title}** → \`${c.entity.slug}\`${c.summary ? ` — ${cardSummary(c, c.summary)}` : c.trust_tier ? ` — ${cardSummary(c, '')}` : ''}${c.relationship_note ? ` [${c.relationship_note}]` : ''} (use get_page/entity before relying on details)`;
 export const renderThreadLine = (t: EntityOpenThread): string =>
   `- [${t.kind}] ${labeled(t, t.text)}${t.date ? ` (${t.date})` : ''}`;
 export const renderFactLine = (f: TurnContextFact): string =>
