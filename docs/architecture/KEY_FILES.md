@@ -44,8 +44,8 @@ boundary and add its link here rather than raising the cap.
 | [Core Minions (2/2)](key-files/core-minions-2.md) | `src/core/minions/run-child.ts` through `src/core/minions/worker.ts` |
 | [Core Persistence](key-files/core-persistence.md) | `src/core/persistence/` write journal, coordinator, effects, canonical projections and managed sync |
 | [Core Persistence (continued)](key-files/core-persistence-continued.md) | `worktree-refresh*.ts`, `persistence/connector-*.ts`, `src/core/connectors/item-holds*.ts`, checkpoint validation, no-op kernel, accepted-pending receipts, verb types/errors, database-write, attribution, purge-deleted and loop-fact retirement |
-| [Core Persistence (engine graduation)](key-files/core-persistence-graduation.md) | `engine-graduation*.ts`, `graduation-*.ts`, `src/commands/migrate-graduation.ts`, the graduation doctor finding |
-| [Managed sync and persistence stalls (key files cluster)](key-files/persistence-stalls.md) | `claim-phase.ts`, `pre-activation-release.ts`, `sync-concurrent-write.ts`, `worktree-manifest.ts`, `src/core/hardened-git.ts` |
+| [Core Persistence (engine graduation)](key-files/core-persistence-graduation.md) | `engine-graduation*.ts`, `graduation-*.ts`, `src/commands/migrate-graduation.ts`, its doctor finding |
+| [Managed sync and persistence stalls](key-files/persistence-stalls.md) | `claim-phase.ts`, `pre-activation-release.ts`, `sync-concurrent-write.ts`, `worktree-manifest.ts`, `src/core/hardened-git.ts` |
 | [Core Search (1/2)](key-files/core-search-1.md) | `src/core/search/` through `src/core/search/rerank.ts` |
 | [Core Search (2/2)](key-files/core-search-2.md) | `src/core/search/return-policy.ts` through `src/core/search/vector-pool.ts`, the relational arm and multi-hop chain modules, `hub-dampening.ts` |
 | [Core Services (1/3)](key-files/core-services-1.md) | `src/core/advisor/{types,run,render,recommended-set,history,apply,collect-*}.ts` through `src/core/connectors/` |
@@ -65,11 +65,11 @@ boundary and add its link here rather than raising the cap.
 | [Mcp](key-files/mcp.md) | `src/mcp/dispatch.ts` through `src/mcp/validate-params.ts` |
 | [Providers](key-files/providers.md) | `src/core/anthropic-pricing.ts` through `src/core/transcription.ts` |
 | [Runtime](key-files/runtime.md) | `src/core/abort-check.ts` through `src/core/zombie-reap.ts` |
-| [Security](key-files/security.md) | `src/core/destructive-guard.ts` through `src/core/write-gate-scan.ts` |
+| [Security](key-files/security.md) | `src/core/destructive-guard.ts` through `src/core/write-gate-scan.ts`; [purge](key-files/memory-purge.md) |
 | [Shared brain skills](key-files/shared-skills.md) | Canonical catalog, enrollment, migration, publication and harness integration |
 | [Skills](key-files/skills.md) | `src/core/audit-skill-brain-first.ts` through `src/core/skills-integrity.ts` |
 | [Tooling And Tests](key-files/tooling-and-tests.md) | `.github/workflows/test.yml` through `test/remote-privacy-sweep.test.ts` |
-| [CI Health And Test Guards](key-files/ci-health-and-test-guards.md) | `.github/workflows/nightly-watch.yml` through `scripts/check-image-decoders-embedded.sh`, plus the contributor audit and the fix-wave gate |
+| [CI Health And Test Guards](key-files/ci-health-and-test-guards.md) | `.github/workflows/nightly-watch.yml` through `scripts/check-image-decoders-embedded.sh`, plus contributor audit, fix-wave gate |
 | [BrainBench — in a sibling repo](key-files/brainbench.md) | Cross-file subsystem contract |
 | [Hindsight calibration (key files cluster)](key-files/hindsight.md) | Cross-file subsystem contract |
 | [Schema packs: mutation surface (key files cluster)](key-files/schema-mutation.md) | Cross-file subsystem contract |
@@ -81,7 +81,6 @@ boundary and add its link here rather than raising the cap.
 | [Workspace push and backup coverage (key files cluster)](key-files/workspace-push-and-backup.md) | Workspace push, hook push backstops, backup verdicts |
 | [Ambient capture consent gate (key files cluster)](key-files/ambient-capture.md) | `memory.auto_writeback` capture lanes |
 | [Quarantine (cluster)](key-files/quarantine.md) | Gate-marker strip; quarantined pages in facts, reads, writes |
-| [Memory purge (cluster)](key-files/memory-purge.md) | `forget --purge`, purge ledgers and overlay, page purge tombstones, deletion inventory, purged intents |
 
 ## BrainBench — in a sibling repo
 

@@ -104,11 +104,11 @@ export async function runForgetPurge(engine: BrainEngine | (() => Promise<BrainE
   const out = (value: Record<string, unknown>, human: string) => process.stdout.write(json ? `${JSON.stringify(value, null, 2)}\n` : human);
   try {
     if (args.includes('--help') || args.includes('-h')) { process.stdout.write(USAGE); return; }
+    const idArg = args.find(a => /^\d+$/.test(a));
     if (!args.includes('--purge')) {
       throw opError('invalid_params', '--dry-run previews a purge only; a plain forget has no dry run, so nothing was forgotten.',
-        'Add --purge to preview a purge (gbrain forget <id> --purge --dry-run), or drop --dry-run to forget the fact.');
+        idArg ? `Run gbrain forget ${idArg} --purge --dry-run to preview a purge, or gbrain forget ${idArg} to forget the fact.` : 'Run gbrain forget --help for the forget and purge forms.');
     }
-    const idArg = args.find(a => /^\d+$/.test(a));
     const cfg = loadConfig();
     if (isThinClient(cfg)) throw purgeHostOnly(idArg);
     const requestId = parseWriteRequestId(flagValue(args, '--request-id'));
