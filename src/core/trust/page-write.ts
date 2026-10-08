@@ -9,9 +9,10 @@
  *   lower of the write's tier and the page's stored tier, so the tier survives
  *   the git round trip (sync honors it; an owner restamp needs the marker gone).
  * - ENG-1: gbrain-managed fence edits (remember / takes fence appends, proposal
- *   accept strikes, loop and relink maintenance) rewrite the page body without
- *   authoring it, so the page keeps its stored tier (withTrustKeep); the fence
- *   row carries the writer's tier.
+ *   accept strikes, loop and relink maintenance) and add_timeline_entry rewrite
+ *   the page body without authoring it, so the page keeps its stored tier
+ *   (withTrustKeep); the fence or timeline row carries the writer's tier and
+ *   is gated per row (CEO-27).
  * - CEO-12: an agent write that replaces the body of a higher-tier page lowers
  *   the page and files one `lower_page` trust proposal per page (later edits
  *   fold into it) with the prior owner version to revert to.
@@ -24,7 +25,7 @@ import { OWNER_TIER_FLOOR, compareTrust, effectiveWriteTrust, minTrust, storedTr
 
 /** Page writes that only edit a gbrain-managed fence (or strike a row) and keep the page's tier. */
 const FENCE_EDIT_OPERATIONS = ['remember', 'takes_add', 'takes_update', 'takes_supersede', 'takes_resolve', 'takes_remove',
-  'decide_proposal', 'loops_close', 'relink_facts'];
+  'decide_proposal', 'loops_close', 'relink_facts', 'add_timeline_entry'];
 /** Page writes whose caller supplies the page content: they stamp the marker and can lower the page (CEO-12). */
 const CONTENT_OPERATIONS = ['put_page', 'capture', 'edit_page', 'revert_version', 'restore_page'];
 
