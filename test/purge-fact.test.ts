@@ -233,3 +233,19 @@ describe('purge_fact', () => {
     }
   }), 60_000);
 });
+
+describe('purged claims and writers', () => {
+  test('remember of a purged claim refuses with typed purged_content before admission work; isFactWithdrawn covers it', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+    const { assertFactNotWithdrawn } = await import('../src/core/facts/single-prepare.ts');
+    const { isFactWithdrawn, isFactPurged } = await import('../src/core/facts/withdrawal.ts');
+    for (const engine of engines) {
+      const slug = 'people/gus-example';
+      const id = await seedPage(engine, slug);
+      await confirmedPurge(engine, id);
+      expect(await isFactPurged(engine, 'default', 'world', 'DOOR CODE IS 4417!', slug)).toBe(true);
+      expect(await isFactWithdrawn(engine, 'default', 'world', CLAIM, slug)).toBe(true);
+      expect(await isFactPurged(engine, 'default', 'world', CLAIM, 'people/other-example')).toBe(false);
+      expect(await codeOf(assertFactNotWithdrawn(engine, 'default', { fact: CLAIM, kind: 'fact', visibility: 'world', entity_slug: slug }))).toBe('purged_content');
+    }
+  }), 60_000);
+});

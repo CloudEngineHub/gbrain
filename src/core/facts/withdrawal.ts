@@ -1,6 +1,6 @@
 import type { BrainEngine } from '../engine.ts';
 import { renderFactsTable, type ParsedFact } from '../facts-fence.ts';
-import { OperationError } from '../ops/contract.ts';
+import { OperationError, opError } from '../ops/contract.ts';
 import { fenceOperationError } from '../fence-repair/refusal.ts';
 import { withdrawnFact, withdrawalFenceBlocks } from './withdrawal-overlay.ts';
 import { ambiguousFenceClaims, discoverWithdrawalTargets, withdrawalDiscoveryFailure } from './withdrawal-discovery.ts';
@@ -173,12 +173,28 @@ export async function assertPreparedFactWithdrawals(engine: BrainEngine, sourceI
   }
 }
 
-/** Explicit remember is not an implicit restore operation for that entity. */
+/** Explicit remember is not an implicit restore operation for that entity. A purged claim counts as withdrawn for every writer. */
 export async function isFactWithdrawn(
   engine: BrainEngine, sourceId: string, visibility: string, claim: string, entitySlug: string | null,
 ): Promise<boolean> {
   const rows = await engine.executeRaw(`SELECT 1 FROM fact_withdrawals
     WHERE source_id=$1 AND visibility=$2 AND fact_hash IN (gbrain_fact_fingerprint($3),gbrain_fact_fingerprint_v1($3))
-      AND (subject = '*' OR subject = $4::text)`, [sourceId,visibility,claim,entitySlug]);
+      AND (subject = '*' OR subject = $4::text)
+    UNION ALL SELECT 1 FROM fact_purges WHERE source_id=$1 AND visibility=$2 AND fact_hash=gbrain_fact_fingerprint($3)
+      AND (subject = '*' OR subject = $4::text) LIMIT 1`, [sourceId,visibility,claim,entitySlug]);
   return rows.length > 0;
+}
+
+/** #5575: the claim matches a purge tombstone (the facts guard raises the same typed code on insert). */
+export async function isFactPurged(engine: BrainEngine, sourceId: string, visibility: string, claim: string, entitySlug: string | null): Promise<boolean> {
+  const rows = await engine.executeRaw(`SELECT 1 FROM fact_purges WHERE source_id=$1 AND visibility=$2 AND fact_hash=gbrain_fact_fingerprint($3)
+    AND (subject = '*' OR subject = $4::text) LIMIT 1`, [sourceId, visibility, claim, entitySlug]);
+  return rows.length > 0;
+}
+
+/** Writers check this before isFactWithdrawn so a purged claim refuses with typed purged_content, before any provider work. */
+export async function assertFactNotPurged(engine: BrainEngine, sourceId: string, input: { visibility: string; fact: string; entity_slug: string | null }): Promise<void> {
+  if (!await isFactPurged(engine, sourceId, input.visibility, input.fact, input.entity_slug)) return;
+  throw opError('purged_content', 'purged_content: this claim was purged from this source and cannot be saved again.',
+    'Purged content stays out of the brain. If it is still true, remember it in new words; only the owner can clear a purge tombstone.');
 }
