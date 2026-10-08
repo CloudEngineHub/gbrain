@@ -182,3 +182,10 @@ export function writeTrustOfGate(input: { tier: TrustTier; origin?: { channel?: 
   return { tier: input.tier, origin: { channel: o?.channel ?? 'import', ...(o?.connector ? { connector: o.connector } : {}), ...(o?.source_uri ? { source_uri: o.source_uri } : {}),
     ...(input.requestId ? { request_id: input.requestId } : {}) } };
 }
+
+/** The write-gate input for an owner-source page import: `ownerImportTrust` as the gate sees it (ENG-18). */
+export async function ownerGateInput(engine: Pick<BrainEngine, 'executeRaw'>, row: Pick<WriteRequest, 'id' | 'source_id' | 'authority' | 'intent' | 'operation'>,
+  frontmatter: Record<string, unknown> | null | undefined, sourceUri?: string | null) {
+  const trust = await ownerImportTrust(engine, row, frontmatter, sourceUri);
+  return { tier: trust.tier, origin: { channel: trust.origin?.channel ?? null, source_uri: trust.origin?.source_uri ?? null }, requestId: row.id };
+}
