@@ -202,6 +202,7 @@
         "./commands/transcripts.ts"
       ],
       "trust": [
+        "./commands/trust-claim.ts",
         "./core/eligibility/explain.ts",
         "./core/eligibility/scan.ts",
         "./core/trust/backfill.ts"
