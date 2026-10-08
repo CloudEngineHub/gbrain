@@ -28,6 +28,7 @@ export type WriteGateHoldStatus = 'held' | 'released' | 'dropped';
 export const WRITE_GATE_RECEIPT_RETENTION_DAYS = 365;
 
 const RECORDED: ReadonlySet<string> = new Set(['flag', 'quarantine']);
+const recorded = (a: WriteGateAssessment): a is WriteGateAssessment & { contentHash: string } => RECORDED.has(a.verdict) && a.contentHash !== null;
 
 function reasonList(a: WriteGateAssessment): string[] {
   return a.hits.map(h => `${h.field}:${h.pattern}`);
@@ -47,7 +48,7 @@ function receiptParams(a: WriteGateAssessment, requestId: string | null | undefi
 export async function recordWriteGateReceipt(tx: Exec, input: {
   targetTable: WriteGateTargetTable; targetId: string | number; sourceId?: string | null; assessment: WriteGateAssessment; requestId?: string | null;
 }): Promise<number | null> {
-  if (!RECORDED.has(input.assessment.verdict)) return null;
+  if (!recorded(input.assessment)) return null;
   const rows = await tx.executeRaw<{ id: string }>(
     `INSERT INTO write_gate_receipts (${RECEIPT_COLUMNS})
      VALUES ($9, $10, $11, $1, $2, $3, $4, $5::text[], $6::text[], $7, $8) ${RECEIPT_UPSERT}`,
@@ -59,7 +60,7 @@ export async function recordWriteGateReceipt(tx: Exec, input: {
 export async function recordPageGateReceipt(tx: Exec, input: {
   slug: string; sourceId: string; assessment: WriteGateAssessment; requestId?: string | null;
 }): Promise<number | null> {
-  if (!RECORDED.has(input.assessment.verdict)) return null;
+  if (!recorded(input.assessment)) return null;
   const rows = await tx.executeRaw<{ id: string }>(
     `INSERT INTO write_gate_receipts (${RECEIPT_COLUMNS})
      SELECT 'pages', p.id::text, p.source_id, $1, $2, $3, $4, $5::text[], $6::text[], $7, $8

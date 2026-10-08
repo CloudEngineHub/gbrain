@@ -80,8 +80,8 @@ export interface WriteGateAssessment {
   /** The detector threw; the verdict is the tier's fail-closed / fail-open default. */
   detectorError: boolean;
   detectorVersion: number;
-  /** sha256 over the scanned fields; receipts dedupe on it. */
-  contentHash: string;
+  /** sha256 over the scanned fields (receipts dedupe on it); null for `allow`, which records nothing. */
+  contentHash: string | null;
 }
 
 /** DX-1: the one gate outcome shape `remember`, `put_page` and `capture` return as `gate`. */
@@ -135,7 +135,13 @@ const revealHidden = (ch: string) => ch.length === 2 ? String.fromCharCode(ch.ch
 // the patterns' \s already matches them.)
 const COMPAT_RE = /[\u2100-\u214f\u2460-\u24ff\u3300-\u33ff\ufb00-\ufb4f\uff00-\uffef]|\ud835/;
 
-const NEEDS_NORMALIZING_RE = new RegExp(`${HIDDEN_RE.source}|${COMPAT_RE.source}`);
+// UTF-16 code units that start something normalizeForGate changes: the hidden set, the compatibility
+// forms, and the high surrogates of tag characters (U+DB40) and mathematical alphanumerics (U+D835).
+const NEEDS_NORMALIZING = new Uint8Array(65536);
+for (const [lo, hi] of [[0xad, 0xad], [0x34f, 0x34f], [0x61c, 0x61c], [0x115f, 0x1160], [0x17b4, 0x17b5], [0x180b, 0x180f], [0x200b, 0x200f],
+  [0x202a, 0x202e], [0x2060, 0x206f], [0x2100, 0x214f], [0x2460, 0x24ff], [0x3164, 0x3164], [0x3300, 0x33ff], [0xd835, 0xd835],
+  [0xdb40, 0xdb40], [0xfb00, 0xfb4f], [0xfe00, 0xfe0f], [0xfeff, 0xfeff], [0xff00, 0xffef]] as const) NEEDS_NORMALIZING.fill(1, lo, hi + 1);
+const needsNormalizing = (text: string) => { for (let i = 0; i < text.length; i++) if (NEEDS_NORMALIZING[text.charCodeAt(i)]) return true; return false; };
 
 /**
  * The text the patterns see: Unicode tag characters decoded to the ASCII they
@@ -146,7 +152,7 @@ const NEEDS_NORMALIZING_RE = new RegExp(`${HIDDEN_RE.source}|${COMPAT_RE.source}
  * included) and lets a sentence gap cross a hard-wrapped line.
  */
 export function normalizeForGate(text: string): string {
-  if (!/[^\x00-\x7f]/.test(text) || !NEEDS_NORMALIZING_RE.test(text)) return text;
+  if (!/[^\x00-\x7f]/.test(text) || !needsNormalizing(text)) return text;
   const revealed = text.replace(HIDDEN_RE, revealHidden);
   return COMPAT_RE.test(revealed) ? revealed.normalize('NFKC') : revealed;
 }
@@ -179,7 +185,7 @@ export function stripManagedFenceRows(body: string): string {
 }
 
 /** Scan windows: wide enough to amortize the prefilter, overlapping by the longest possible match. */
-export const WRITE_GATE_WINDOW_CHARS = 16384;
+export const WRITE_GATE_WINDOW_CHARS = 4096;
 
 const NEGATED_BEFORE_RE = /\b(?:never|not|n't|no)\s{1,4}$/i;
 /** Global clones for walking every match of a context-checked pattern (the table's own regexes stay stateless). */
@@ -231,19 +237,25 @@ const ANCHOR_HASHES: ReadonlySet<number> = new Set([...ANCHOR_KEYS.values()].fil
 const WORD_CHAR = new Uint8Array(128);
 for (let c = 48; c <= 57; c++) WORD_CHAR[c] = c;
 for (let c = 97; c <= 122; c++) { WORD_CHAR[c] = c; WORD_CHAR[c - 32] = c; }
+// 16-bit filter over anchor hashes: most words miss it and skip the Set lookup.
+const ANCHOR_FILTER = new Uint8Array(65536);
+for (const h of ANCHOR_HASHES) ANCHOR_FILTER[h & 0xffff] = 1;
+const AT_HASH = -1;
 
 /**
- * One allocation-free pass over a window: the hashes of every anchor word it
- * contains as a whole word (ASCII letters and digits, case-folded), plus
- * whether it contains `@`.
+ * One allocation-light pass over the whole text: the end offset and hash of
+ * every anchor word (ASCII letters and digits, case-folded, whole words) and
+ * of every `@`, in text order, and whether normalizeForGate would change it.
  */
-function anchorsIn(window: string): { words: Set<number>; at: boolean } {
-  const words = new Set<number>();
-  let at = false;
+function anchorOccurrences(text: string): { at: number[]; key: number[]; needsNormalizing: boolean } {
+  const at: number[] = [];
+  const key: number[] = [];
+  let normalize = false;
   let h = 0x811c9dc5;
   let inWord = false;
-  for (let i = 0; i <= window.length; i++) {
-    const code = i < window.length ? window.charCodeAt(i) : 32;
+  const len = text.length;
+  for (let i = 0; i <= len; i++) {
+    const code = i < len ? text.charCodeAt(i) : 32;
     const c = code < 128 ? WORD_CHAR[code]! : 0;
     if (c) {
       h = Math.imul(h ^ c, 0x01000193);
@@ -251,18 +263,19 @@ function anchorsIn(window: string): { words: Set<number>; at: boolean } {
       continue;
     }
     if (inWord) {
-      const key = h >>> 0;
-      if (ANCHOR_HASHES.has(key)) words.add(key);
+      const word = h >>> 0;
+      if (ANCHOR_FILTER[word & 0xffff] && ANCHOR_HASHES.has(word)) { at.push(i); key.push(word); }
       h = 0x811c9dc5;
       inWord = false;
     }
-    if (code === 64) at = true;
+    if (code === 64) { at.push(i + 1); key.push(AT_HASH); }
+    else if (code >= 0xad && NEEDS_NORMALIZING[code]) normalize = true;
   }
-  return { words, at };
+  return { at, key, needsNormalizing: normalize };
 }
 
-function hasAnchor(anchors: readonly string[], present: { words: Set<number>; at: boolean }): boolean {
-  return anchors.some(a => { const k = ANCHOR_KEYS.get(a)!; return k === '@' ? present.at : present.words.has(k); });
+function hasAnchor(anchors: readonly string[], present: ReadonlySet<number>): boolean {
+  return anchors.some(a => { const k = ANCHOR_KEYS.get(a)!; return present.has(k === '@' ? AT_HASH : k); });
 }
 
 /** Pure detector: every (family, pattern, field) the pattern table finds in the fields. */
@@ -270,12 +283,18 @@ export function detectInstructionLike(fields: ReadonlyArray<readonly [WriteGateF
   const hits: WriteGateHit[] = [];
   for (const [field, raw] of fields) {
     if (!raw) continue;
-    const text = normalizeForGate(raw);
+    let text = raw;
+    let occ = anchorOccurrences(text);
+    if (occ.needsNormalizing) { text = normalizeForGate(raw); occ = anchorOccurrences(text); }
     const found = new Set<string>();
+    let first = 0;
     const step = WRITE_GATE_WINDOW_CHARS - MAX_MATCH_CHARS - MAX_PRECEDING_CHARS;
     for (let start = 0; start < text.length; start += step) {
-      const window = text.slice(start, start + WRITE_GATE_WINDOW_CHARS);
-      const present = anchorsIn(window);
+      const end = start + WRITE_GATE_WINDOW_CHARS;
+      const window = text.slice(start, end);
+      while (first < occ.at.length && occ.at[first]! <= start) first++;
+      const present = new Set<number>();
+      for (let k = first; k < occ.at.length && occ.at[k]! <= end; k++) present.add(occ.key[k]!);
       for (const p of WRITE_GATE_PATTERNS) {
         if (found.has(p.name) || !hasAnchor(p.anchors, present) || (p.requires && !hasAnchor(p.requires, present))) continue;
         if (!(p.negatable || p.preceded ? matchesInContext(p, window, start === 0) : p.rx.test(window))) continue;
@@ -305,18 +324,18 @@ function hashFields(fields: ReadonlyArray<readonly [WriteGateField, string]>): s
 export function assessWriteGate(fields: ReadonlyArray<readonly [WriteGateField, string | null | undefined]>, input: WriteGateInput, cfg: WriteGateConfig): WriteGateAssessment {
   const present = fields.filter((f): f is readonly [WriteGateField, string] => typeof f[1] === 'string' && f[1].length > 0);
   const scanned = [...present, ...originFields(input.origin)];
-  const base = { tier: input.tier, detectorVersion: WRITE_GATE_DETECTOR_VERSION, contentHash: hashFields(scanned) };
-  if (!writeGateApplies(input.tier, cfg)) return { ...base, verdict: 'allow', ran: false, families: [], hits: [], detectorError: false };
+  const base = { tier: input.tier, detectorVersion: WRITE_GATE_DETECTOR_VERSION };
+  if (!writeGateApplies(input.tier, cfg)) return { ...base, verdict: 'allow', ran: false, families: [], hits: [], detectorError: false, contentHash: null };
   const external = input.tier === 'external_untrusted';
   let hits: WriteGateHit[];
   try {
     hits = detector(scanned);
   } catch {
-    return { ...base, verdict: external ? 'quarantine' : 'allow', ran: true, families: [], hits: [], detectorError: true };
+    return { ...base, verdict: external ? 'quarantine' : 'allow', ran: true, families: [], hits: [], detectorError: true, contentHash: hashFields(scanned) };
   }
   const families = WRITE_GATE_REASON_FAMILIES.filter(f => hits.some(h => h.family === f));
   const verdict: WriteGateVerdict = !hits.length ? 'allow' : external ? cfg.externalMode as Exclude<WriteGateExternalMode, 'off'> : 'flag';
-  return { ...base, verdict, ran: true, families, hits, detectorError: false };
+  return { ...base, verdict, ran: true, families, hits, detectorError: false, contentHash: verdict === 'allow' ? null : hashFields(scanned) };
 }
 
 /** Origin strings, scanned as the `origin` field (labels and origins are rendered to models as data). */

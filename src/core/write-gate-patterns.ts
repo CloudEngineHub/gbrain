@@ -172,7 +172,7 @@ const OWN_PATTERNS: readonly WriteGatePattern[] = [
     ['always', 'never'], { preceded: '(?:[.!?:;\\n] ?|- )(?:please )?' }),
   own('when-asked-say', 'standing_instruction',
     `\\b(?:asks?|asked|asking|inquires?|wants to know)\\b${SENT}{0,80}\\b(?:say|tell|respond|reply|answer|claim|state|insist|deny|recommend)\\b`,
-    ['ask', 'asks', 'asked', 'asking', 'inquire', 'inquires', 'wants to know'], { preceded: `\\b(?:when|whenever|if)\\b${SENT}{0,60}` }),
+    ['ask', 'asks', 'asked', 'asking', 'inquire', 'inquires', 'wants to know'], { requires: ['say', 'tell', 'respond', 'reply', 'answer', 'claim', 'state', 'insist', 'deny', 'recommend'], preceded: `\\b(?:when|whenever|if)\\b${SENT}{0,60}` }),
   own('exfil-standing-lead', 'exfiltration', `\\bto ?${ADDRESS}`, STANDING_ANCHORS,
     { requires: ADDRESS_ANCHORS, preceded: `\\b${STANDING}\\b${SENT}{0,80}\\b${EXFIL_VERB}\\b${SENT}{0,80}` }),
   own('exfil-standing-trail', 'exfiltration', `\\bto ?${ADDRESS}${SENT}{0,80}\\b${STANDING}\\b`, STANDING_ANCHORS,
@@ -187,7 +187,7 @@ const OWN_PATTERNS: readonly WriteGatePattern[] = [
     ['http', 'https']),
   own('credential-request', 'credential',
     `\\b${CREDENTIAL}\\b`,
-    CREDENTIAL_ANCHORS, { preceded: "(?:(?<neg>\\bnever|\\bnot|n't|\\bno) )?\\b(?:send|email|e-mail|share|reveal|paste|give|forward|upload|disclose|leak|dump|exfiltrate|tell)\\b (?:me |us |them )?(?:all |any |a copy of )?(?:of )?(?:your|the|their|our|my|these|those|all|any) (?:[a-z0-9-]{1,20} )?" }),
+    CREDENTIAL_ANCHORS, { requires: ['send', 'email', 'e-mail', 'share', 'reveal', 'paste', 'give', 'forward', 'upload', 'disclose', 'leak', 'dump', 'exfiltrate', 'tell'], preceded: "(?:(?<neg>\\bnever|\\bnot|n't|\\bno) )?\\b(?:send|email|e-mail|share|reveal|paste|give|forward|upload|disclose|leak|dump|exfiltrate|tell)\\b (?:me |us |them )?(?:all |any |a copy of )?(?:of )?(?:your|the|their|our|my|these|those|all|any) (?:[a-z0-9-]{1,20} )?" }),
 ];
 
 /** The full detector table: bounded clones first, then the detector's own patterns. */
