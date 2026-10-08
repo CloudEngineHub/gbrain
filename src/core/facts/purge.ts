@@ -39,6 +39,7 @@ import { requestAttribution } from '../persistence/attribution.ts';
 import { isTerminal, principalKey, type WriteRequest } from '../persistence/model.ts';
 import { retryWriteAdmission } from '../persistence/admission-retry.ts';
 import { findRequestsCarrying, redactionCounterKeys, redactRequestIntents } from '../persistence/intent-redaction.ts';
+import { withPageTierKept } from '../trust/fence-append.ts';
 import { rebuildPendingPageProjections } from '../page-state/projections.ts';
 import { purgeCompletion, verifyFactPurge, type PurgeReceipt, type StoreCount } from './purge-verify.ts';
 
@@ -146,8 +147,9 @@ async function rewritePageBodies(tx: BrainEngine, sourceId: string, pages: Purge
     const timeline = await dropPurgedFenceRows(tx, sourceId, page.timeline ?? '', page.slug);
     if (compiled === page.compiled_truth && timeline === (page.timeline ?? '')) continue;
     const hash = contentHash({ ...page, compiled_truth: compiled, timeline, tags: row.purge_tags as string[] });
-    await tx.executeRaw(`UPDATE pages SET compiled_truth=$3,timeline=$4,content_hash=$5,updated_at=now(),text_projection_revision=NULL,embedding_signature=NULL
-      WHERE source_id=$1 AND id=$2`, [sourceId, page.id, compiled, timeline, hash]);
+    // #5575 ENG-1: dropping a fence row is a gbrain-managed fence edit, not authorship: the page keeps its tier and origin.
+    await withPageTierKept(tx, { sourceId, slug: page.slug }, () => tx.executeRaw(`UPDATE pages SET compiled_truth=$3,timeline=$4,content_hash=$5,updated_at=now(),text_projection_revision=NULL,embedding_signature=NULL
+      WHERE source_id=$1 AND id=$2`, [sourceId, page.id, compiled, timeline, hash]));
     rewritten.push(page.slug);
   }
   return rewritten;
