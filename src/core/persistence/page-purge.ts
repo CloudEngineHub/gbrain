@@ -23,6 +23,8 @@ import { opError } from '../ops/contract.ts';
 import type { PageSnapshot } from '../page-state/types.ts';
 import type { WriteRequest } from './model.ts';
 import { findRequestsForSlugs, redactRequestIntents } from './intent-redaction.ts';
+import { dropPurgedFenceRows } from '../facts/purge-overlay.ts';
+import { contentHash } from '../utils.ts';
 
 export const PURGE_RESIDUALS = 'Removed from live stores: the page row with its chunks, versions, takes, timeline, links and raw data, the facts filed on it (tombstoned), '
   + 'its take proposals, open loops and core notices, stored write intents for the slug and its attached file records. Still out of reach: the brain repository\'s '
@@ -39,14 +41,21 @@ export async function purgePageInTransaction(tx: BrainEngine, row: WriteRequest,
   const page = snapshot.page, sourceId = row.source_id, slug = page.slug;
   const actor = `${row.principal_kind}:${row.principal_id}`;
   const [stored] = await tx.executeRaw<{ content_hash: string | null }>('SELECT content_hash FROM pages WHERE id=$1', [page.id]);
-  const contentHash = stored?.content_hash ?? null;
-  if (contentHash) await tx.executeRaw(`INSERT INTO page_purges(source_id,content_hash,slug,request_id) VALUES ($1,$2,$3,$4::uuid)
-    ON CONFLICT (source_id,content_hash) DO UPDATE SET slug=EXCLUDED.slug,request_id=EXCLUDED.request_id,purged_at=now()`, [sourceId, contentHash, slug, row.id]);
+  const storedHash = stored?.content_hash ?? null;
+  if (storedHash) await tx.executeRaw(`INSERT INTO page_purges(source_id,content_hash,slug,request_id) VALUES ($1,$2,$3,$4::uuid)
+    ON CONFLICT (source_id,content_hash) DO UPDATE SET slug=EXCLUDED.slug,request_id=EXCLUDED.request_id,purged_at=now()`, [sourceId, storedHash, slug, row.id]);
   await tx.executeRaw(`INSERT INTO fact_purges(source_id,visibility,subject,fact_hash,request_id,actor,reason)
     SELECT DISTINCT source_id,visibility,COALESCE(entity_slug,'*'),gbrain_fact_fingerprint(fact),$3::uuid,$4,'page purge'
     FROM facts WHERE source_id=$1 AND source_markdown_slug=$2 ON CONFLICT DO NOTHING`, [sourceId, slug, row.id, actor]);
   await tx.executeRaw(`INSERT INTO take_purges(source_id,subject,claim_hash,request_id)
     SELECT DISTINCT $1,$2,gbrain_fact_fingerprint(claim),$4::uuid FROM takes WHERE page_id=$3 ON CONFLICT DO NOTHING`, [sourceId, slug, page.id, row.id]);
+  // A re-import passes through the purge overlay, which now drops this page's tombstoned fence rows;
+  // its content hash is tombstoned too, so the stale file is refused either way.
+  const overlaid = { ...page, compiled_truth: await dropPurgedFenceRows(tx, sourceId, page.compiled_truth, slug),
+    timeline: await dropPurgedFenceRows(tx, sourceId, page.timeline ?? '', slug), tags: snapshot.tags };
+  const overlaidHash = contentHash(overlaid);
+  if (storedHash && overlaidHash !== storedHash) await tx.executeRaw(`INSERT INTO page_purges(source_id,content_hash,slug,request_id) VALUES ($1,$2,$3,$4::uuid)
+    ON CONFLICT (source_id,content_hash) DO UPDATE SET slug=EXCLUDED.slug,request_id=EXCLUDED.request_id,purged_at=now()`, [sourceId, overlaidHash, slug, row.id]);
   const count = async (sql: string, params: unknown[]) => (await tx.executeRaw(sql, params)).length;
   const facts = await count('DELETE FROM facts WHERE source_id=$1 AND source_markdown_slug=$2 RETURNING 1', [sourceId, slug]);
   const takeProposals = await count('DELETE FROM take_proposals WHERE source_id=$1 AND page_slug=$2 RETURNING 1', [sourceId, slug]);
@@ -61,7 +70,7 @@ export async function purgePageInTransaction(tx: BrainEngine, row: WriteRequest,
     (SELECT count(*)::int FROM takes WHERE page_id=$1) AS takes, (SELECT count(*)::int FROM timeline_entries WHERE page_id=$1) AS timeline`, [page.id]);
   await tx.deletePage(slug, { sourceId });
   return { status: 'purged', slug, source_id: sourceId, residuals: PURGE_RESIDUALS,
-    purge: { content_hash8: contentHash?.slice(0, 8) ?? null, tombstoned: contentHash !== null,
+    purge: { content_hash8: storedHash?.slice(0, 8) ?? null, tombstoned: storedHash !== null,
       removed: { facts, take_proposals: takeProposals, open_loops: openLoops, core_edit_notices: notices, persistence_requests: intents,
         files: files.length, content_chunks: cascade?.chunks ?? 0, page_versions: cascade?.versions ?? 0, takes: cascade?.takes ?? 0, timeline_entries: cascade?.timeline ?? 0 },
       blobs: files.map(f => f.storage_path).filter(Boolean) } };

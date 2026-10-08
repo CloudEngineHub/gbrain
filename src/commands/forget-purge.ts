@@ -85,7 +85,10 @@ export function renderPurgeReceipt(r: Record<string, unknown>): string {
   return lines.join('\n') + '\n';
 }
 
-export async function runForgetPurge(engine: BrainEngine | (() => Promise<BrainEngine>), args: string[]): Promise<void> {
+/** Test seam: the terminal probe and the typed-token reader (defaults: isInteractive and a stderr prompt). */
+export interface PurgeCliIo { interactive?: () => boolean; readToken?: (prompt: string) => Promise<string | null> }
+
+export async function runForgetPurge(engine: BrainEngine | (() => Promise<BrainEngine>), args: string[], io: PurgeCliIo = {}): Promise<void> {
   const json = args.includes('--json');
   const { reportPersistenceCliError } = await import('./persistence-delegate.ts');
   const { parseWriteRequestId } = await import('../core/persistence/preconditions.ts');
@@ -118,10 +121,11 @@ export async function runForgetPurge(engine: BrainEngine | (() => Promise<BrainE
     const dry = await invoke({ ...base, dry_run: true });
     if (args.includes('--dry-run')) { out(dry, renderPurgeReceipt(dry)); return; }
     const token = String(dry.confirm_token);
-    if (isInteractive() && !args.includes('--yes')) {
+    if ((io.interactive ?? isInteractive)() && !args.includes('--yes')) {
       process.stdout.write(renderPurgeReceipt(dry));
-      const answer = await readLine({ prompt: `\nType ${token} to purge fact ${idArg} from live stores (anything else cancels): `, output: process.stderr });
-      if (answer.kind !== 'line' || answer.text.trim() !== token) {
+      const prompt = `\nType ${token} to purge fact ${idArg} from live stores (anything else cancels): `;
+      const answer = io.readToken ? await io.readToken(prompt) : await readLine({ prompt, output: process.stderr }).then(r => r.kind === 'line' ? r.text : null);
+      if (answer === null || answer.trim() !== token) {
         process.stderr.write('Not purged.\n');
         setCliExitVerdict(3);
         return;
@@ -137,7 +141,10 @@ export async function runForgetPurge(engine: BrainEngine | (() => Promise<BrainE
     out(done, renderPurgeReceipt(done));
     setCliExitVerdict(Number(done.exit_code ?? 0));
   } catch (error) {
-    if (await reportPersistenceCliError(error, json)) return;
-    throw error;
+    if (!await reportPersistenceCliError(error, json)) throw error;
+    // Not confirmed: 3 (ask the user). A pending write blocks the sweep: 75 (retry later with the same request id).
+    const code = (error as { canonical?: string; code?: string }).canonical ?? (error as { code?: string }).code;
+    if (code === 'confirmation_required') setCliExitVerdict(3);
+    else if (code === 'purge_blocked_pending_recovery') setCliExitVerdict(75);
   }
 }
