@@ -15,7 +15,8 @@ import type { BrainEngine } from '../engine.ts';
 import {
   applyProposalAction, registerPairProposalStore, type PairProposal, type PairProposalStore, type ProposalActionResult,
 } from '../facts/proposal-supersede.ts';
-import { withTrustPromotion, withWriteAttribution } from '../persistence/context.ts';
+import { currentWriteTrust, withTrustPromotion, withWriteAttribution } from '../persistence/context.ts';
+import { normalizeDimension } from '../chronicle/ontology.ts';
 import { verbError, type OperationError } from '../ops/contract.ts';
 import type { Principal } from '../persistence/model.ts';
 import {
@@ -23,7 +24,7 @@ import {
   type TrustDecision, type TrustDecisionContext, type TrustProposalAction, type TrustProposalRow,
 } from './proposals.ts';
 import { tierRaiseFix } from './confirm.ts';
-import { compareTrust, storedTrustTier, type TrustTier } from './tier.ts';
+import { compareTrust, effectiveWriteTrust, storedTrustTier, type TrustTier, type WriteTrust } from './tier.ts';
 
 /** I3: a write at `writer` may supersede, expire or forget a row at `target` only when it is at least as trusted. */
 export function supersessionGuarded(writer: TrustTier | null | undefined, target: unknown): boolean {
@@ -85,6 +86,29 @@ export function remoteForgetRaced(factId: number): OperationError {
     'Retry once to file the owner proposal, then tell the user it needs their decision.');
   error.canonical = 'forget_requires_owner';
   return error;
+}
+
+/** The declared tier of an `ontology_propose` observation: an agent write (remote or local CLI). */
+export function ontologyWriteTrust(ctx: { remote?: boolean }): WriteTrust {
+  return effectiveWriteTrust({ channel: 'agent_written', origin: { channel: `${ctx.remote === false ? 'cli' : 'mcp'}:ontology_propose` } });
+}
+
+/**
+ * After mergeOntologyFact inserted a new stint without closing the current one
+ * (the engines' ONTOLOGY_SUPERSEDE_GUARD refused because it is more trusted),
+ * files the supersede_fact proposal and returns the additive `contested` field.
+ */
+export async function contestOntologySupersession(tx: BrainEngine, sourceId: string, entitySlug: string, dimension: string,
+  result: { action: string; factId: number | null }): Promise<{ contested?: { proposal_ref: string } }> {
+  if (result.action !== 'inserted' || result.factId === null) return {};
+  const writer = (await currentWriteTrust(tx))?.tier ?? 'unknown';
+  const [current] = await tx.executeRaw<{ id: number; trust_tier: string }>(
+    `SELECT id, trust_tier FROM facts WHERE source_id = $1 AND entity_slug = $2 AND dimension = $3 AND id <> $4
+       AND expired_at IS NULL AND valid_until IS NULL AND (dim_status IS NULL OR dim_status = 'active')
+     ORDER BY valid_from DESC NULLS LAST, confidence DESC, id DESC LIMIT 1`, [sourceId, entitySlug, normalizeDimension(dimension), result.factId]);
+  if (!current || !supersessionGuarded(writer, current.trust_tier)) return {};
+  return { contested: await recordContestedFact(tx, { sourceId, oldId: Number(current.id), oldTier: storedTrustTier(current.trust_tier),
+    newId: result.factId, newTier: writer, guard: 'ontology' }) };
 }
 
 // ---------------------------------------------------------------------------

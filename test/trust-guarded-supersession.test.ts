@@ -247,3 +247,26 @@ describe('guarded takes supersession and the takes gate', () => {
     }
   }), 90_000);
 });
+
+describe('guarded ontology supersession (mergeOntologyFact, both engines)', () => {
+  test('an agent observation does not close a confirmed stint: it is inserted contested; an equal-tier observation closes as before', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+    for (const engine of engines) {
+      const b = await brain(engine);
+      await run(b.local, 'put_page', { slug: 'people/gina-example', content: page('Gina', 'Gina.') });
+      const first = await run(b.local, 'ontology_propose', { entity: 'people/gina-example', dimension: 'role', value: 'founder', visibility: 'world' });
+      expect(first.action).toBe('inserted');
+      await confirmFact(b, Number(first.factId));
+      const second = await run(b.remote, 'ontology_propose', { entity: 'people/gina-example', dimension: 'role', value: 'advisor', visibility: 'world', valid_from: '2030-01-01' });
+      expect(second.action).toBe('inserted');
+      expect(second.supersededId).toBeNull();
+      expect(second.contested?.proposal_ref).toMatch(/^tp\d+$/);
+      const [old] = await engine.executeRaw<{ valid_until: unknown; superseded_by: number | null }>('SELECT valid_until, superseded_by FROM facts WHERE id=$1', [Number(first.factId)]);
+      expect(old).toMatchObject({ valid_until: null, superseded_by: null });
+      await run(b.local, 'put_page', { slug: 'people/hank-example', content: page('Hank', 'Hank.') });
+      const third = await run(b.remote, 'ontology_propose', { entity: 'people/hank-example', dimension: 'role', value: 'engineer', visibility: 'world' });
+      const fourth = await run(b.remote, 'ontology_propose', { entity: 'people/hank-example', dimension: 'role', value: 'manager', visibility: 'world', valid_from: '2030-01-01' });
+      expect(fourth.supersededId).toBe(Number(third.factId));
+      expect(fourth.contested).toBeUndefined();
+    }
+  }), 90_000);
+});
