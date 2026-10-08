@@ -36,8 +36,9 @@ const BUDGET_MS = Number(process.env.GBRAIN_WRITE_GATE_P95_MS ?? '5');
 /**
  * Calibration (Capy cloud machine, 4 vCPU, Bun 1.4.2, quiet; 9 rounds of 60):
  * the reference workload's p95 was 1.90-1.98 ms (outliers to 4.4 ms came with
- * a gate p95 of 7.9 ms in the same round), the gate's p50 3.2-3.4 ms and p95
- * 3.4-3.9 ms, a gate/reference ratio of 1.76-1.99 at p95. The ratio limit is
+ * a gate p95 of 7.9 ms in the same round). The gate then measured p50 3.2-3.4
+ * ms, p95 3.4-3.9 ms (ratio 1.76-1.99); with the optimized detector it is p50
+ * 2.5-2.6 ms, p95 3.2-3.5 ms (ratio 1.26-1.42). The ratio limit is
  * the budget over the quiet reference p95, 5 / 1.95 = 2.56, so on a quiet
  * machine it is exactly the 5 ms budget, and under load (six busy loops on
  * four cores: both p95s 12-17 ms, ratio 1.10-1.25) contention cancels out.

@@ -235,56 +235,64 @@ function anchorKey(anchor: string): number | '@' {
 
 const ANCHOR_KEYS: ReadonlyMap<string, number | '@'> = new Map(
   [...new Set(WRITE_GATE_PATTERNS.flatMap(p => [...p.anchors, ...(p.requires ?? [])]))].map(a => [a, anchorKey(a)]));
-const ANCHOR_HASHES: ReadonlySet<number> = new Set([...ANCHOR_KEYS.values()].filter((k): k is number => k !== '@'));
+const ANCHOR_HASHES: readonly number[] = [...new Set([...ANCHOR_KEYS.values()].filter((k): k is number => k !== '@'))];
+/** Dense index per anchor hash; `@` takes the last slot. Presence per window is a count per index. */
+const ANCHOR_INDEX: ReadonlyMap<number, number> = new Map(ANCHOR_HASHES.map((h, i) => [h, i]));
+const AT_INDEX = ANCHOR_HASHES.length;
+const KEY_COUNT = AT_INDEX + 1;
 
-// Word characters for the anchor scan, case-folded: ASCII digits and letters map to their lowercase code, everything else to 0.
-const WORD_CHAR = new Uint8Array(128);
+// Word characters for the anchor scan, case-folded: ASCII digits and letters map to their lowercase code, every other UTF-16 unit to 0.
+const WORD_CHAR = new Uint8Array(65536);
 for (let c = 48; c <= 57; c++) WORD_CHAR[c] = c;
 for (let c = 97; c <= 122; c++) { WORD_CHAR[c] = c; WORD_CHAR[c - 32] = c; }
 // 16-bit filter over anchor hashes: most words miss it and skip the Set lookup.
 const ANCHOR_FILTER = new Uint8Array(65536);
 for (const h of ANCHOR_HASHES) ANCHOR_FILTER[h & 0xffff] = 1;
-const AT_HASH = -1;
 
 /**
- * One allocation-light pass over the whole text: the end offset and hash of
- * every anchor word (ASCII letters and digits, case-folded, whole words) and
- * of every `@`, in text order, and whether normalizeForGate would change it.
+ * One allocation-light pass over the whole text: the end offset and anchor
+ * index of every anchor word (ASCII letters and digits, case-folded, whole
+ * words) and of every `@`, in text order, and whether normalizeForGate would
+ * change it.
  */
 function anchorOccurrences(text: string): { at: number[]; key: number[]; needsNormalizing: boolean } {
   const at: number[] = [];
   const key: number[] = [];
   let normalize = false;
-  let h = 0x811c9dc5;
-  let inWord = false;
   const len = text.length;
-  for (let i = 0; i <= len; i++) {
-    const code = i < len ? text.charCodeAt(i) : 32;
-    const c = code < 128 ? WORD_CHAR[code]! : 0;
+  let i = 0;
+  while (i < len) {
+    let code = text.charCodeAt(i);
+    let c = WORD_CHAR[code]!;
     if (c) {
-      h = Math.imul(h ^ c, 0x01000193);
-      inWord = true;
-      continue;
-    }
-    if (inWord) {
+      // A whole word in one tight loop; the text end counts as a separator.
+      let h = 0x811c9dc5;
+      do {
+        h = Math.imul(h ^ c, 0x01000193);
+        code = ++i < len ? text.charCodeAt(i) : 32;
+        c = WORD_CHAR[code]!;
+      } while (c);
       const word = h >>> 0;
-      if (ANCHOR_FILTER[word & 0xffff] && ANCHOR_HASHES.has(word)) { at.push(i); key.push(word); }
-      h = 0x811c9dc5;
-      inWord = false;
+      if (ANCHOR_FILTER[word & 0xffff]) {
+        const index = ANCHOR_INDEX.get(word);
+        if (index !== undefined) { at.push(i); key.push(index); }
+      }
+      if (i >= len) break;
     }
-    if (code === 64) { at.push(i + 1); key.push(AT_HASH); }
+    if (code === 64) { at.push(i + 1); key.push(AT_INDEX); }
     else if (code >= 0xad && NEEDS_NORMALIZING[code]) normalize = true;
+    i++;
   }
   return { at, key, needsNormalizing: normalize };
 }
 
-const keysOf = (anchors: readonly string[]) => [...new Set(anchors.map(a => { const k = ANCHOR_KEYS.get(a)!; return k === '@' ? AT_HASH : k; }))];
-/** Per pattern (same order as WRITE_GATE_PATTERNS): the anchor keys, and the `requires` keys or null. */
+const keysOf = (anchors: readonly string[]) => [...new Set(anchors.map(a => { const k = ANCHOR_KEYS.get(a)!; return k === '@' ? AT_INDEX : ANCHOR_INDEX.get(k)!; }))];
+/** Per pattern (same order as WRITE_GATE_PATTERNS): the anchor indexes, and the `requires` indexes or null. */
 const PATTERN_KEYS: ReadonlyArray<{ anchors: number[]; requires: number[] | null }> =
   WRITE_GATE_PATTERNS.map(p => ({ anchors: keysOf(p.anchors), requires: p.requires ? keysOf(p.requires) : null }));
 
-function hasAny(keys: readonly number[], present: ReadonlySet<number>): boolean {
-  for (const k of keys) if (present.has(k)) return true;
+function hasAny(keys: readonly number[], present: Int32Array): boolean {
+  for (const k of keys) if (present[k]! > 0) return true;
   return false;
 }
 
@@ -297,14 +305,17 @@ export function detectInstructionLike(fields: ReadonlyArray<readonly [WriteGateF
     let occ = anchorOccurrences(text);
     if (occ.needsNormalizing) { text = normalizeForGate(raw); occ = anchorOccurrences(text); }
     const found = new Set<string>();
-    let first = 0;
+    // Anchor counts over the occurrences in (start, end]: windows only move forward, so each occurrence
+    // is added once and removed once instead of every overlapping window rebuilding its key set.
+    const present = new Int32Array(KEY_COUNT);
+    let entered = 0;
+    let left = 0;
     const step = WRITE_GATE_WINDOW_CHARS - MAX_MATCH_CHARS - MAX_PRECEDING_CHARS;
     for (let start = 0; start < text.length; start += step) {
       const end = start + WRITE_GATE_WINDOW_CHARS;
       const window = text.slice(start, end);
-      while (first < occ.at.length && occ.at[first]! <= start) first++;
-      const present = new Set<number>();
-      for (let k = first; k < occ.at.length && occ.at[k]! <= end; k++) present.add(occ.key[k]!);
+      while (entered < occ.at.length && occ.at[entered]! <= end) present[occ.key[entered++]!]!++;
+      while (left < occ.at.length && occ.at[left]! <= start) present[occ.key[left++]!]!--;
       for (let i = 0; i < WRITE_GATE_PATTERNS.length; i++) {
         const p = WRITE_GATE_PATTERNS[i]!;
         const keys = PATTERN_KEYS[i]!;
@@ -328,7 +339,8 @@ export function __setWriteGateDetectorForTests(fn: Detector | null): void {
 
 function hashFields(fields: ReadonlyArray<readonly [WriteGateField, string]>): string {
   const h = createHash('sha256');
-  for (const [field, value] of fields) h.update(`${field}\u0000${value}\u0001`);
+  // Same bytes as hashing `${field}\u0000${value}\u0001`, without copying the value into a new string.
+  for (const [field, value] of fields) h.update(`${field}\u0000`).update(value).update('\u0001');
   return h.digest('hex');
 }
 
