@@ -59,7 +59,8 @@ describe('TRUST_CONTENT_COLUMNS (ENG-2)', () => {
     const columns = [...tuple.matchAll(/NEW\.([a-z_]+)/g)].map(m => m[1]);
     expect(columns.length).toBeGreaterThan(5);
     expect([...TRUST_CONTENT_COLUMNS.pages]).toEqual(columns);
-    expect([...TRUST_EPHEMERAL_FRONTMATTER_KEYS].sort()).toEqual([...HASH_EPHEMERAL_FRONTMATTER_KEYS, QUARANTINE_OVERRIDE_KEY].sort());
+    expect([...TRUST_EPHEMERAL_FRONTMATTER_KEYS].sort()).toEqual([...HASH_EPHEMERAL_FRONTMATTER_KEYS.filter(key => key !== 'trust_tier'), QUARANTINE_OVERRIDE_KEY].sort());
+    expect(HASH_EPHEMERAL_FRONTMATTER_KEYS).toContain('trust_tier');
     expect(TRUST_EPHEMERAL_FRONTMATTER_KEYS).not.toContain('trust_tier');
   });
 });

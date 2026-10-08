@@ -49,7 +49,7 @@ export const TRUST_TABLES: readonly TrustTable[] = ['facts', 'takes', 'timeline_
  * `trust_tier` marker is content on purpose: deleting it by hand is the
  * owner act that lets the next owner sync restamp the page (CEO-21).
  */
-export const TRUST_EPHEMERAL_FRONTMATTER_KEYS: readonly string[] = [...HASH_EPHEMERAL_FRONTMATTER_KEYS, 'quarantine_override'];
+export const TRUST_EPHEMERAL_FRONTMATTER_KEYS: readonly string[] = [...HASH_EPHEMERAL_FRONTMATTER_KEYS.filter(key => key !== 'trust_tier'), 'quarantine_override'];
 
 /**
  * ENG-2: the columns whose change is a content rewrite. Lifecycle and
