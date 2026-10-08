@@ -52,7 +52,7 @@ import { isTerminal, type WriteRequest } from '../persistence/model.ts';
 import { maintenanceTransaction } from '../persistence/attribution.ts';
 import { withWriteTrust } from '../persistence/context.ts';
 import { deriveTrust, recordTaintEdges } from '../trust/taint.ts';
-import { applyGateDecision, derivedGateConfig, derivedGateInput, emptyGateTally, type GateTally } from '../trust/derived-gate.ts';
+import { applyGateDecision, derivedGateConfig, derivedGateInput, emptyGateTally, mergeGateTally, type GateTally } from '../trust/derived-gate.ts';
 import { decideFactWrite, recordFlaggedRow } from '../write-gate-store.ts';
 import { authorizeWrite } from '../persistence/authority.ts';
 import { digest } from '../persistence/digest.ts';
@@ -445,7 +445,8 @@ function reconcileWrites(plan: FenceReconcilePlan) {
 
 /** One page's reconcile writes, inside a transaction that holds the page key. */
 async function writeFenceReconcile(tx: BrainEngine, sourceId: string, slug: string, plan: FenceReconcilePlan,
-  writes: ReturnType<typeof reconcileWrites>, signal?: AbortSignal, tally: GateTally = emptyGateTally()): Promise<{ inserted: number; updated: number; warnings: string[] }> {
+  writes: ReturnType<typeof reconcileWrites>, signal?: AbortSignal): Promise<{ inserted: number; updated: number; warnings: string[]; write_gate?: GateTally }> {
+  const tally = emptyGateTally();
   // #5575 I2: the fence rows restate the page (no model), so every write here is at the page's tier, capped at operator_curated.
   const derivation = await deriveTrust(tx, [{ table: 'pages', sourceId, slug }], { channel: 'derive:facts_fence', projection: true });
   return withWriteTrust(tx, derivation.trust, async () => {
@@ -479,7 +480,7 @@ async function writeFenceReconcile(tx: BrainEngine, sourceId: string, slug: stri
   const linked = await syncSupersession(tx, sourceId, slug, plan.extracted, plan.chain, insertedRows);
   signal?.throwIfAborted();
   const updated = new Set([...plan.updates.map(f => f.row_num), ...linked.changed.filter(row => !insertedRows.has(row))]);
-  return { inserted: inserted.inserted, updated: updated.size, warnings: linked.warnings };
+  return { inserted: inserted.inserted, updated: updated.size, warnings: linked.warnings, ...(mergeGateTally(tally, undefined) ? { write_gate: tally } : {}) };
   });
 }
 
@@ -545,10 +546,8 @@ export async function prepareFenceFactsReconcile(engine: BrainEngine, row: Write
         if (vector) { fact.embedding = new Float32Array(vector.vector); fact.embedding_model = vector.model; }
       }
       const writes = reconcileWrites(plan);
-      const tally = emptyGateTally();
-      const written = await writeFenceReconcile(tx, row.source_id, row.slug, plan, writes, undefined, tally);
+      const written = await writeFenceReconcile(tx, row.source_id, row.slug, plan, writes);
       return { status: 'completed', ...written, deleted: writes.detach.length + writes.expireInPlace.length, deferred: writes.deferInserts,
-        ...(tally.flagged || tally.held || tally.rejected ? { write_gate: tally } : {}),
         warnings: [...warnings, ...written.warnings] };
     } };
 }
@@ -745,7 +744,6 @@ export async function runExtractFacts(
   // preflighted on the first page that needs a write, so a run with nothing
   // to change never needs one; an unacceptable caller still refuses first.
   const managed = await maintenanceCallerPreflight(engine, sourceId);
-  const gateTally = emptyGateTally();
   let authority: Promise<MaintenanceAuthority | null> | undefined;
   const managedAuthority = () => managed ? authority ??= maintenancePreflight(engine, sourceId) : Promise.resolve(null);
   const result: ExtractFactsResult = {
@@ -1021,7 +1019,7 @@ export async function runExtractFacts(
           if (watermark && !await lockReconcileRevision(tx, sourceId, slug, page.knowledge_revision ?? null)) return null;
           const current = await tx.getPage(slug, { sourceId });
           if (!current || current.compiled_truth !== page.compiled_truth || current.timeline !== page.timeline) return null;
-          const written = await writeFenceReconcile(tx, sourceId, slug, plan, writes, opts.signal, gateTally);
+          const written = await writeFenceReconcile(tx, sourceId, slug, plan, writes, opts.signal);
           if (watermark && !deferInserts) await settleFactsReconcile(tx, sourceId, slug, 'complete', page.knowledge_revision ?? null);
           return written;
         });
@@ -1046,7 +1044,7 @@ export async function runExtractFacts(
     result.factsDeleted += outcome.deleted ?? detach.length + expireInPlace.length;
     // resolveSupersededByRow prefixes each message with the slug + row.
     for (const w of outcome.warnings) result.warnings.push(w);
-    if (outcome.write_gate) { gateTally.flagged += outcome.write_gate.flagged; gateTally.held += outcome.write_gate.held; gateTally.rejected += outcome.write_gate.rejected; }
+    if (outcome.write_gate) result.writeGate = mergeGateTally(result.writeGate, outcome.write_gate);
     return (outcome.deferred ?? deferInserts) ? 'deferred' : 'complete';
   };
 
@@ -1115,7 +1113,6 @@ export async function runExtractFacts(
     });
   }
 
-  if (gateTally.flagged || gateTally.held || gateTally.rejected) result.writeGate = gateTally;
   return result;
 }
 

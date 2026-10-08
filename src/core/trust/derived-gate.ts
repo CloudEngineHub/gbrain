@@ -27,6 +27,11 @@ export function derivedGateInput(trust: WriteTrust, requestId?: string | null): 
 /** What one run's gate did, for the run result. */
 export interface GateTally { flagged: number; held: number; rejected: number }
 export const emptyGateTally = (): GateTally => ({ flagged: 0, held: 0, rejected: 0 });
+/** Sums two tallies; undefined while nothing was flagged, held or rejected (a run result shows the field only when the gate acted). */
+export function mergeGateTally(into: GateTally | undefined, from: GateTally | undefined): GateTally | undefined {
+  const sum = { flagged: (into?.flagged ?? 0) + (from?.flagged ?? 0), held: (into?.held ?? 0) + (from?.held ?? 0), rejected: (into?.rejected ?? 0) + (from?.rejected ?? 0) };
+  return sum.flagged || sum.held || sum.rejected ? sum : undefined;
+}
 
 /**
  * Applies one decision inside the writer's transaction: `insert` runs the
