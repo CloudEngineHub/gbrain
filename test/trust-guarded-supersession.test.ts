@@ -103,7 +103,7 @@ async function confirmFact(b: Brain, id: number) {
     tx.executeRaw(`UPDATE facts SET trust_tier='user_confirmed' WHERE id=$1`, [id])), TEST_WRITE_ATTRIBUTION));
 }
 const factRow = async (b: Brain, id: unknown) => (await b.engine.executeRaw<{ trust_tier: string; expired_at: unknown; superseded_by: number | null }>(
-  'SELECT trust_tier, expired_at, superseded_by FROM facts WHERE id=$1', [Number(id)]))[0]!;
+  'SELECT trust_tier, expired_at, superseded_by::int AS superseded_by FROM facts WHERE id=$1', [Number(id)]))[0]!;
 const owner = { confirmation: { via: 'tty' as const } };
 
 describe('guarded supersession', () => {
@@ -209,7 +209,7 @@ describe('guarded fence re-projection (A5, ENG-1)', () => {
       // Row 1 rewritten, row 2 removed, row 3 renumbered to 2 (behind a new row 1 order change).
       await run(b.remote, 'put_page', { slug, content: page('Erin', body([row(1, 'Erin lives in Bergen'), row(2, 'Erin speaks Norwegian')])), expected_revision: current.revision });
       const after = await engine.executeRaw<{ id: number; fact: string; row_num: number | null; expired_at: unknown; trust_tier: string }>(
-        'SELECT id, fact, row_num, expired_at, trust_tier FROM facts WHERE source_id=$1 AND source_markdown_slug=$2 ORDER BY id', [b.sourceId, slug]);
+        'SELECT id::int AS id, fact, row_num, expired_at, trust_tier FROM facts WHERE source_id=$1 AND source_markdown_slug=$2 ORDER BY id', [b.sourceId, slug]);
       const by = (fact: string) => after.find(r => r.fact === fact)!;
       expect(by('Erin lives in Oslo')).toMatchObject({ row_num: null, expired_at: null, trust_tier: 'user_confirmed' });
       expect(by('Erin owns a boat')).toMatchObject({ row_num: null, expired_at: null });
