@@ -504,8 +504,7 @@ export async function preparePageMutation(unbounded: BrainEngine, row: WriteRequ
     if (!noop) {
       const prior = snapshot ? await storedPageTier(tx, row.source_id, row.slug) : null;
       // ENG-1: a managed fence edit keeps the page's tier; CEO-12: an agent rewrite that lowers a page files a queue item.
-      const importApply = () => ready.apply(tx, lean ? preimage : undefined);
-      const applied = isFenceEditWrite(row) ? await withTrustKeep(tx, ['pages'], importApply) : await importApply();
+      const applied = await (isFenceEditWrite(row) ? withTrustKeep(tx, ['pages'], () => ready.apply(tx, lean ? preimage : undefined)) : ready.apply(tx, lean ? preimage : undefined));
       lowered = prior ? await recordAgentPageLowering(tx, row, { tier: prior, revision: snapshot!.revision }) : null;
       // Mandatory metadata shares publication rollback; exact no-ops never heal it. These, and the
       // projections (facts, takes, timeline rows of the page the import just wrote live), are independent and sent together.
@@ -517,12 +516,7 @@ export async function preparePageMutation(unbounded: BrainEngine, row: WriteRequ
         [row.source_id, pinMode]))[0] : undefined,
         async () => { if (provenance) await tx.executeRaw(`UPDATE pages SET source_kind=$3,ingested_via=$4,ingested_at=$5::timestamptz
           WHERE source_id=$1 AND slug=$2`, [row.source_id, row.slug, provenance.source_kind, provenance.ingested_via, provenance.ingested_at]); },
-        async () => {
-          if (!lean) return;
-          const projected = await project?.(tx, applied?.pageId);
-          removedTimeline = projected?.timelineRowsRemoved ?? null;
-          contested = projected?.contested ?? [];
-        },
+        async () => { if (lean) ({ removedTimeline, contested } = projectedRows(await project?.(tx, applied?.pageId))); },
       ]) as [unknown, { mode: string | null } | undefined, unknown, unknown];
       if (pinMode && pinned?.mode !== pinMode) throw pageRefusal('revision_conflict', 'The source slug-root mode changed during preparation.', row,
         `Another write pinned source ${row.source_id}'s slug-root mode while ${row.slug} was being prepared, so this publication rolled back. Once the request is final, submit the write again; it is prepared under the pinned mode.`);
@@ -532,11 +526,7 @@ export async function preparePageMutation(unbounded: BrainEngine, row: WriteRequ
         for (const tag of versionTags) await tx.addTag(row.slug, tag, source);
       }
       // #6007: the page the import just wrote live is the page the projections describe; no re-read.
-      if (!lean) {
-        const projected = await project?.(tx, row.operation === 'restore_page' ? undefined : applied?.pageId);
-        removedTimeline = projected?.timelineRowsRemoved ?? null;
-        contested = projected?.contested ?? [];
-      }
+      if (!lean) ({ removedTimeline, contested } = projectedRows(await project?.(tx, row.operation === 'restore_page' ? undefined : applied?.pageId)));
       autoLinks = await links?.apply(tx);
       if (lean) {
         const final = await tx.readPageSnapshot(row.slug, { ...source, includeDeleted: true });
@@ -570,6 +560,11 @@ export async function preparePageMutation(unbounded: BrainEngine, row: WriteRequ
       ...(contested.length ? { contested: { proposal_ref: contested[0], ...(contested.length > 1 ? { proposal_refs: contested } : {}) } } : {}) };
   } };
   return publication;
+}
+
+/** What a page's projections report back: removed timeline rows and the contested proposal refs (#5575 guarded supersession). */
+function projectedRows(projected: { timelineRowsRemoved?: TimelineRowsRemoved | null; contested?: string[] } | undefined): { removedTimeline: TimelineRowsRemoved | null; contested: string[] } {
+  return { removedTimeline: projected?.timelineRowsRemoved ?? null, contested: projected?.contested ?? [] };
 }
 
 function editLockedPage(row: WriteRequest, snapshot: PageSnapshot | null) {
