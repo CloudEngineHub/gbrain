@@ -3310,8 +3310,8 @@
         "idempotent": true,
         "name": "trust_generation",
         "sql": {
-          "length": 5506,
-          "sha256": "de551e44eb348850102571c46d3a6f63ed52335bb192b170d9e34b9e14c151f0"
+          "length": 6491,
+          "sha256": "db0d07c1c48437dae2729fe3a6db19d352edba7f7b7b3caf88de09c9a926cb8d"
         },
         "sqlFor": "absent",
         "transaction": "absent",
