@@ -3,7 +3,7 @@ import { suffixedFrontmatterSlugHold } from './persistence/suffixed-slug.ts';
 import { maintenanceTransaction } from './persistence/attribution.ts';
 import { assertImportBase, sameCanonicalImport, sameContentAnyKeyOrder } from './page-state/import-guard.ts';
 import { stabilizeSafetyAssessments } from './persistence/reconcile-safety.ts';
-import { carryStoredQuarantineOverride, settleGateOwnedMarkers } from './quarantine-override.ts';
+import { settleGateOwnedMarkers } from './quarantine-override.ts';
 import { decideImportIdentity, collidingSlugOwner, fileOriginUri } from './import-identity.ts';
 import { readSourceFileSync } from './minions/source-filesystem.ts';
 import { readFileSync, statSync, lstatSync } from 'fs';
@@ -11,7 +11,8 @@ import { basename, extname, resolve } from 'path';
 import { createHash } from 'crypto';
 import type { BrainEngine, FileSpec } from './engine.ts';
 import { classifyImportHold, parseMarkdown, resolveParsedSubtype, type ParseOpts, type ParsedMarkdown } from './markdown.ts';
-import { assessImportSanity, loadImportSanityConfig, MAX_FILE_SIZE, screenImportContent, type ContentRefusal, type FenceScreen } from './import-screen.ts';
+import { MAX_FILE_SIZE, screenImportContent, settleContentDisposition, type ContentRefusal, type FenceScreen } from './import-screen.ts';
+import type { WriteGateInput } from './write-gate.ts';
 import { applyImportFences } from './fence-repair/import-step.ts';
 import type { FenceIssueWire } from './fence-repair/tier1.ts';
 import type { FenceFix } from './fence-repair/types.ts';
@@ -40,15 +41,7 @@ import type { PageSnapshot } from './page-state/types.ts';
 import { computeEffectiveDate, fallbackCreatedAt, isValidTimeZone } from './effective-date.ts';
 import { MARKDOWN_CHUNKER_VERSION } from './chunkers/recursive.ts';
 import { logSlugFallback } from './audit-slug-fallback.ts';
-import { ContentSanityBlockError } from './content-sanity.ts';
-import { logContentSanityAssessment } from './audit/content-sanity-audit.ts';
-import { buildEmbedSkipMarker, EMBED_SKIP_KEY, isEmbedSkipped } from './embed-skip.ts';
-import {
-  QUARANTINE_KEY,
-  CONTENT_FLAG_KEY,
-  buildQuarantineMarker,
-  buildContentFlagMarker,
-} from './quarantine.ts';
+import { isEmbedSkipped } from './embed-skip.ts';
 import {
   buildContextualPrefix,
   modeRequiresSynopsis,
@@ -142,8 +135,8 @@ export interface ImportResult {
   /** True when the page landed with a `content_flag` marker (fuzzy
    *  markup-heavy or oversize — stays searchable, agent warned). */
   flagged?: boolean;
-  /** Which flag tier fired, when `flagged`. */
-  flag_reason?: 'markup_heavy' | 'oversized';
+  /** Which flag tier fired, when `flagged` (`instruction_like`: the #5575 write gate). */
+  flag_reason?: 'markup_heavy' | 'oversized' | 'instruction_like';
   /** #5050: unchanged content below the safe-chunk fence was re-sealed; chunks left to embed. */
   resealed?: { pendingChunks: number; pendingChars: number };
   /**
@@ -322,6 +315,8 @@ export async function importFromContent(
      * and reindex leave it unset so the guard stays armed.
      */
     allowEmptyOverwrite?: boolean;
+    /** #5575: the caller's trust tier and origin for this write; absent skips the write gate (owner paths). */
+    writeGate?: WriteGateInput;
     beforeCommit?: (tx: BrainEngine, slug: string) => Promise<void>;
     onPostCommitEmbedding?: (complete: () => Promise<ImportEmbeddingResult>) => void;
   } & ImportFenceOptions = {},
@@ -376,141 +371,9 @@ export async function importFromContent(
     },
   });
 
-  // v0.41 content-sanity gate. Runs AFTER parseMarkdown so the assessor
-  // sees the parsed body (compiled_truth + timeline), title, and
-  // frontmatter; runs BEFORE the hash compute so a soft-block that
-  // mutates frontmatter (sets `embed_skip`) reaches the existing hash
-  // calculation and the page write doesn't short-circuit on hash equality.
-  //
-  // Three outcomes:
-  //   - kill-switch active (`content_sanity.disabled === true` /
-  //     `GBRAIN_NO_SANITY=1`) → assess + audit with bypass flag, emit
-  //     loud stderr per offending ingest, but let everything through.
-  //   - hard-block (junk pattern OR operator literal) → THROW
-  //     ContentSanityBlockError. Existing exception flow at every
-  //     wrapper site (import.ts errors counter, put_page MCP envelope,
-  //     sync.ts:929 failure record) fires correctly through this single
-  //     throw point. classifyErrorCode picks up the PAGE_JUNK_PATTERN
-  //     prefix in the error message and groups in sync-failures.jsonl.
-  //   - soft-block (oversize WITHOUT junk-pattern hit) → mutate
-  //     frontmatter to embed `embed_skip` marker. Existing chunking
-  //     block guards on `isEmbedSkipped(frontmatter)` so chunks stays
-  //     empty; the existing `tx.deleteChunks` at the empty-chunks
-  //     branch fires to purge old chunks (D9 transition invariant).
-  //
-  // Effective config: env > file > DB > defaults. The DB-plane lift
-  // adds ~4 SQL round-trips per import (one per content_sanity.* key);
-  // acceptable for the per-page cost since the gate runs at most once
-  // per ingest. Power-users with 10K-file syncs who care about this
-  // overhead can set the keys via env vars instead and skip the DB read.
-  // Content-quality gate disposition flags (issue #1699), threaded onto
-  // the ImportResult so callers (sync reporting, tests) see what happened.
-  let pageQuarantined = false;
-  let pageFlagged = false;
-  let pageFlagReason: 'markup_heavy' | 'oversized' | undefined;
-  {
-    const sanityCfg = await loadImportSanityConfig(engine);
-    const sanityDisabled = sanityCfg.disabled;
-    // Disposition for the high-confidence junk path: quarantine (hide) by
-    // default, or reject (throw → sync-failure) when the operator opts in.
-    const junkDisposition = sanityCfg.junkDisposition;
-    const sanityResult = await carryStoredQuarantineOverride(engine, parsed, assessImportSanity(parsed, sanityCfg), { slug, sourceId, remote: opts.remote === true });
-    if (!sanityDisabled && !sanityResult.shouldQuarantine && sanityResult.flag_reason !== 'oversized' && (parsed.frontmatter[EMBED_SKIP_KEY] as { reason?: unknown } | undefined)?.reason === 'oversized') {
-      delete parsed.frontmatter[EMBED_SKIP_KEY];
-      if ((parsed.frontmatter[CONTENT_FLAG_KEY] as { reason?: unknown } | undefined)?.reason === 'oversized') delete parsed.frontmatter[CONTENT_FLAG_KEY];
-    }
-
-    if (sanityDisabled) {
-      // Kill-switch active: loud stderr per offending ingest. Operator
-      // explicitly opted into the bypass and gets noisy feedback every
-      // time it fires so they remember the gate is off. Audit as a
-      // bypass (page lands regardless).
-      logContentSanityAssessment(slug, sourceId ?? 'default', sanityResult, {
-        bypass: true,
-      });
-      if (sanityResult.shouldQuarantine || sanityResult.shouldFlag) {
-        process.stderr.write(
-          `[gbrain] content-sanity bypass (GBRAIN_NO_SANITY=1): ${slug} — ${sanityResult.reason_messages.join('; ')}\n`,
-        );
-      }
-    } else if (sanityResult.shouldQuarantine) {
-      // High-confidence junk (Cloudflare/CAPTCHA pattern or operator
-      // literal). The detail names which fired.
-      const detail = [
-        ...sanityResult.junk_pattern_matches,
-        ...sanityResult.literal_substring_matches,
-      ].join(', ');
-      const reason = sanityResult.junk_pattern_matches.length > 0
-        ? 'junk_pattern'
-        : 'literal_substring';
-      if (junkDisposition === 'reject') {
-        // Operator opted into hard-block. Throw with PAGE_QUARANTINE so
-        // classifyErrorCode bins it. Existing exception flow at every
-        // wrapper site (import errors counter, put_page MCP envelope,
-        // sync failure record) fires through this single throw point.
-        logContentSanityAssessment(slug, sourceId ?? 'default', sanityResult, {
-          disposition: 'reject',
-        });
-        throw new ContentSanityBlockError(sanityResult);
-      }
-      // Default: quarantine (hide). Page lands with the marker, writes
-      // zero chunks (chunking guard below widens to isQuarantined), is
-      // excluded from search via QUARANTINE_FILTER_FRAGMENT, reviewable
-      // via get_page / `gbrain quarantine list`.
-      parsed.frontmatter[QUARANTINE_KEY] = buildQuarantineMarker(reason, detail, {
-        bytes: sanityResult.bytes,
-      });
-      pageQuarantined = true;
-      logContentSanityAssessment(slug, sourceId ?? 'default', sanityResult, {
-        disposition: 'quarantine',
-      });
-      process.stderr.write(
-        `[gbrain] content-sanity quarantine: ${slug} — ${detail} (hidden from search, reviewable via 'gbrain quarantine list')\n`,
-      );
-    } else if (sanityResult.shouldFlag) {
-      // Fuzzy markup-heavy OR oversize. The page stays usable; the agent
-      // gets warned (Garry's paradigm — "this is odd, you decide").
-      const flagReason = sanityResult.flag_reason!; // non-null when shouldFlag
-      const flagDetail = sanityResult.reason_messages.join('; ');
-      parsed.frontmatter[CONTENT_FLAG_KEY] = buildContentFlagMarker(flagReason, flagDetail, {
-        ...(sanityResult.markup_ratio !== null ? { markup_ratio: sanityResult.markup_ratio } : {}),
-        bytes: sanityResult.bytes,
-      });
-      pageFlagged = true;
-      pageFlagReason = flagReason;
-      if (flagReason === 'oversized') {
-        // Oversize also skips embedding (existing embed_skip marker). The
-        // chunking guard below honors it; tx.deleteChunks purges old chunks.
-        parsed.frontmatter[EMBED_SKIP_KEY] = buildEmbedSkipMarker(sanityResult.bytes);
-        logContentSanityAssessment(slug, sourceId ?? 'default', sanityResult, {
-          disposition: 'soft_block',
-        });
-        // #3893 (reimplemented from @y2688): console.warn, not bare stderr —
-        // soft_block silently drops embedding, and console-level warns are
-        // what operator log hooks and collectors can observe.
-        console.warn(
-          `[gbrain] content-sanity flag (oversized): ${slug} (${sanityResult.bytes} bytes) — page lands, embedding skipped, agent warned`,
-        );
-      } else {
-        // markup_heavy: page ingests NORMALLY (keeps chunks, embeds). The
-        // content_flag marker rides along for the agent warning.
-        logContentSanityAssessment(slug, sourceId ?? 'default', sanityResult, {
-          disposition: 'flag',
-        });
-        process.stderr.write(
-          `[gbrain] content-sanity flag (markup_heavy): ${slug} (ratio ${sanityResult.markup_ratio?.toFixed(2)}) — stays searchable, agent warned\n`,
-        );
-      }
-    } else if (sanityResult.reasons.includes('oversize_warn')) {
-      // Warn tier: page lands normally; lint surface picks up too.
-      logContentSanityAssessment(slug, sourceId ?? 'default', sanityResult, {
-        disposition: 'warn',
-      });
-      process.stderr.write(
-        `[gbrain] content-sanity warn: ${slug} (${sanityResult.bytes} bytes) — exceeds warn threshold, consider splitting\n`,
-      );
-    }
-  }
+  // Content-sanity (#1699) and write-gate (#5575) disposition before the hash (import-screen.ts).
+  const disposition = await settleContentDisposition(engine, parsed, { slug, sourceId, remote: opts.remote === true, ...(opts.writeGate ? { writeGate: opts.writeGate } : {}) });
+  const { quarantined: pageQuarantined, flagged: pageFlagged, flagReason: pageFlagReason } = disposition;
 
   // v0.39.3.0 CV8 — DB content_hash excludes timestamp-bearing frontmatter
   // keys so identical body content from `gbrain capture` (which stamps
@@ -972,6 +835,7 @@ export async function importFromContent(
     await writePageAliases(tx, slug, sourceId ?? 'default', parsed, opts.activePack, mentionPolicy);
     if (!opts.coordinated) await verifyPageReadable(tx, slug, hash, sourceId, 'importFromContent');
     await opts.beforeCommit?.(tx, slug);
+    await disposition.persistReceipt(tx);
     if (opts.onPostCommitEmbedding && !opts.noEmbed && chunks.length > 0) {
       // Capture the complete installed projection before releasing the page
       // guard. Deferred provider results cannot replace newer text or chunks.

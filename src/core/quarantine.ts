@@ -56,8 +56,8 @@ export function quarantineFilterFragment(pageAlias: string): string {
 export const QUARANTINE_FILTER_FRAGMENT = quarantineFilterFragment('p');
 
 export interface QuarantineMarker {
-  /** Why the page was quarantined. The high-confidence junk reasons. */
-  reason: 'junk_pattern' | 'literal_substring';
+  /** Why the page was quarantined: high-confidence junk, or (#5575) instruction-like content the write gate held. */
+  reason: 'junk_pattern' | 'literal_substring' | 'instruction_like';
   /** Human-readable detail (which pattern/literal names fired). */
   detail: string;
   /** ISO 8601 timestamp at assessment time. */
@@ -113,8 +113,8 @@ export async function quarantinedSlugs(engine: Pick<BrainEngine, 'executeRaw'>, 
 export const CONTENT_FLAG_KEY = 'content_flag';
 
 export interface ContentFlagMarker {
-  /** Which fuzzy/oversize tier fired. */
-  reason: 'markup_heavy' | 'oversized';
+  /** Which fuzzy/oversize tier fired, or (#5575) the write gate flagged instruction-like content. */
+  reason: 'markup_heavy' | 'oversized' | 'instruction_like';
   /** Human-readable detail surfaced to the agent on retrieval. */
   detail: string;
   /** ISO 8601 timestamp at assessment time. */
