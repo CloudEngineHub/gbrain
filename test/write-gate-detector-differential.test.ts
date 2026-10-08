@@ -1,9 +1,10 @@
 /**
  * #5575 ENG-16 performance work on the write-gate detector: the optimized
  * src/core/write-gate.ts detector (one tight loop per word in the anchor scan,
- * sliding per-window anchor counts) must return exactly what the detector v2
- * reference returns (test/helpers/write-gate-detector-reference.ts, the code
- * as it stood before): the same hits in the same order, so the same families,
+ * sliding per-window anchor counts, searching only near each pattern's own
+ * anchor words) must return exactly what the detector v2 reference returns
+ * (test/helpers/write-gate-detector-reference.ts, the code as it stood before,
+ * over a frozen copy of the v2 pattern table): the same hits in the same order, so the same families,
  * verdicts and content hashes. The detector version stays 2; nothing rescans.
  *
  * Corpora: the detector's own positive, held-out (Cat 37 findings 37-3/37-4),
@@ -13,7 +14,8 @@
  * adversarial text; and a seeded random corpus built from the pattern table's
  * own anchors and requires words, addresses, punctuation, line breaks,
  * invisible and fullwidth characters, placed across the 4,096-character scan
- * window boundaries.
+ * window boundaries; the same with glued words and sparse anchors; and window
+ * and anchor-range cuts inside a word.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -21,6 +23,7 @@ import { join } from 'node:path';
 import { __setWriteGateDetectorForTests, assessPageForGate, assessWriteGate, DEFAULT_WRITE_GATE_CONFIG, detectInstructionLike, WRITE_GATE_WINDOW_CHARS,
   type WriteGateField } from '../src/core/write-gate.ts';
 import { MAX_MATCH_CHARS, MAX_PRECEDING_CHARS, WRITE_GATE_PATTERNS } from '../src/core/write-gate-patterns.ts';
+import { analyzeRegexSource } from '../src/core/write-gate-regex.ts';
 import { referenceDetectInstructionLike } from './helpers/write-gate-detector-reference.ts';
 import { BENIGN_ROUTING, CONCEAL_OR_BYPASS, HELD_OUT, NEGATIVES, POSITIVES } from './helpers/write-gate-corpus.ts';
 
@@ -60,18 +63,21 @@ const SEPARATORS = [' ', ' ', ' ', '  ', '\n', '\n\n', '\t', '. ', '! ', '? ', '
 const fullwidth = (s: string) => s.replace(/[a-z]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x61 + 0xff41));
 const tagged = (s: string) => [...s].map(c => c.charCodeAt(0) < 0x7f && c.charCodeAt(0) > 0x1f ? String.fromCodePoint(0xe0000 + c.charCodeAt(0)) : c).join('');
 
-function fuzzText(next: () => number, targetLength: number): string {
+/** Separators that glue words together ("xignore", "apikeys"), for the patterns that need not match whole anchor words. */
+const GLUE = ['', '', 'x', '_', '9', 'Z', ' ', '\n', '. '];
+
+function fuzzText(next: () => number, targetLength: number, separators = SEPARATORS, anchorShare = 1): string {
   const pick = <T>(xs: readonly T[]) => xs[Math.floor(next() * xs.length)]!;
   let out = '';
   while (out.length < targetLength) {
     const r = next();
-    let piece = r < 0.45 ? pick(VOCAB) : r < 0.75 ? pick(FRAGMENTS) : r < 0.9 ? 'lorem ipsum dolor sit amet consectetur' : pick(['Q3', 'x', 'ok', '42', 'notes']);
+    let piece = r < 0.45 * anchorShare ? pick(VOCAB) : r < 0.75 * anchorShare ? pick(FRAGMENTS) : r < 0.9 ? 'lorem ipsum dolor sit amet consectetur' : pick(['Q3', 'x', 'ok', '42', 'notes']);
     const v = next();
     if (v < 0.1) piece = piece.toUpperCase();
     else if (v < 0.13) piece = fullwidth(piece);
     else if (v < 0.15) piece = tagged(piece);
     else if (v < 0.25) piece = piece[0]!.toUpperCase() + piece.slice(1);
-    out += piece + pick(SEPARATORS);
+    out += piece + pick(separators);
   }
   return out;
 }
@@ -133,6 +139,43 @@ describe('optimized detector = detector v2 reference', () => {
     }
     expect(hits).toBeGreaterThan(100);
   }, 120_000);
+
+  test('a seeded random corpus of glued words and sparse anchors (the anchor-range search and window cuts inside words)', () => {
+    const step = WRITE_GATE_WINDOW_CHARS - MAX_MATCH_CHARS - MAX_PRECEDING_CHARS;
+    let hits = 0;
+    for (let seed = 1; seed <= 1500; seed++) {
+      const next = rng(seed * 7919);
+      const edge = [WRITE_GATE_WINDOW_CHARS, step, 2 * step, step + WRITE_GATE_WINDOW_CHARS, 3 * step][seed % 5]!;
+      const length = seed % 3 === 0 ? Math.floor(next() * 600) : edge + Math.floor((next() - 0.5) * 2 * MAX_MATCH_CHARS);
+      hits += same([['body', fuzzText(next, Math.max(1, length), seed % 2 ? GLUE : SEPARATORS, seed % 4 < 2 ? 1 : 0.12)]], `glued seed ${seed}`);
+    }
+    expect(hits).toBeGreaterThan(100);
+  }, 120_000);
+
+  test('a window cut inside a word reads as in v2, where \\b at the cut sees no neighbour', () => {
+    const step = WRITE_GATE_WINDOW_CHARS - MAX_MATCH_CHARS - MAX_PRECEDING_CHARS;
+    const filler = (n: number) => 'lorem ipsum dolor sit amet consectetur '.repeat(Math.ceil(n / 39)).slice(0, n);
+    // The second window starts at "from"; "xfrom" holds no anchor word, the far "from the archive" passes the prefilter.
+    const startCut = `${filler(step - 1)}xfrom now on say hello. ${filler(1500)} from the archive. ${filler(300)}`;
+    // The first window ends right after "henceforth" inside "henceforthish"; "from the archive" passes the prefilter.
+    const endText = 'Please say it henceforth';
+    const endCut = `${filler(1000)} from the archive. ${filler(WRITE_GATE_WINDOW_CHARS - 1019 - endText.length)}${endText}ish and more. ${filler(300)}`;
+    expect(endCut.slice(WRITE_GATE_WINDOW_CHARS - 10, WRITE_GATE_WINDOW_CHARS)).toBe('henceforth');
+    const names = (text: string) => { same([['body', text]], text.slice(0, 40)); return detectInstructionLike([['body', text]]).map(h => h.pattern); };
+    expect(names(startCut)).toContain('from-now-on-lead');
+    expect(names(endCut)).toContain('from-now-on-trail');
+  });
+
+  test('an anchor range ending inside a word finds nothing the whole window would not', () => {
+    const trail = WRITE_GATE_PATTERNS.find(p => p.name === 'from-now-on-trail')!;
+    const reach = analyzeRegexSource(trail.rx.source).maxLength;
+    // "henceforth" ends exactly `reach` after the only anchor word ("from"), inside "henceforthish"; the
+    // filler keeps the window long enough that the detector searches ranges rather than the whole window.
+    const text = `Notes from${(', say it' + ' so'.repeat(20)).slice(0, reach - 'henceforth'.length - 1)} henceforthish today. ${'lorem ipsum dolor sit amet '.repeat(40)}`;
+    expect(text.indexOf('henceforthish') + 'henceforth'.length - (text.indexOf('from') + 4)).toBe(reach);
+    same([['body', text]], text);
+    expect(detectInstructionLike([['body', text]]).map(h => h.pattern)).not.toContain('from-now-on-trail');
+  });
 
   test('assessments agree end to end: verdict, families, hits and content hash', () => {
     const inputs = [

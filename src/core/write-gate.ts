@@ -25,6 +25,7 @@ import type { Action } from './agent-output.ts';
 import { opError, type OperationError } from './ops/contract.ts';
 import { isTrustTier, type TrustTier } from './trust/tier.ts';
 import { MAX_MATCH_CHARS, MAX_PRECEDING_CHARS, WRITE_GATE_PATTERNS, WRITE_GATE_REASON_FAMILIES, type WriteGatePattern, type WriteGateReasonFamily } from './write-gate-patterns.ts';
+import { analyzeRegexSource } from './write-gate-regex.ts';
 
 export type { WriteGateReasonFamily } from './write-gate-patterns.ts';
 
@@ -191,19 +192,19 @@ export function stripManagedFenceRows(body: string): string {
 export const WRITE_GATE_WINDOW_CHARS = 4096;
 
 const NEGATED_BEFORE_RE = /\b(?:never|not|n't|no)\s{1,4}$/i;
-/** Global clones for walking every match of a context-checked pattern (the table's own regexes stay stateless). */
-const ITERATORS: ReadonlyMap<string, RegExp> = new Map(WRITE_GATE_PATTERNS.filter(p => p.negatable || p.preceded).map(p => [p.name, new RegExp(p.rx.source, `${p.rx.flags}g`)]));
+/** Global clones, for searching from an offset and walking every match (the table's own regexes stay stateless). */
+const ITERATORS: ReadonlyMap<string, RegExp> = new Map(WRITE_GATE_PATTERNS.map(p => [p.name, new RegExp(p.rx.source, `${p.rx.flags}g`)]));
 
 /**
  * True when `p.rx` matches somewhere its context rules hold: not directly
  * negated, and `preceded` matching the text before it without its `neg` group. Walks every match in
- * the window (bounded by its length), so padding with rejected matches cannot
- * hide a real one.
+ * `scan` (a prefix of the window) from offset `from` (bounded by its length), so padding with
+ * rejected matches cannot hide a real one; contexts read the whole window.
  */
-function matchesInContext(p: WriteGatePattern, window: string, atTextStart: boolean): boolean {
+function matchesInContext(p: WriteGatePattern, window: string, atTextStart: boolean, from: number, scan: string): boolean {
   const rx = ITERATORS.get(p.name)!;
-  rx.lastIndex = 0;
-  for (let m = rx.exec(window); m; m = rx.exec(window)) {
+  rx.lastIndex = from;
+  for (let m = rx.exec(scan); m; m = rx.exec(scan)) {
     const at = m.index;
     // Resume one character later, not at the match end: a rejected match can overlap the one that holds.
     rx.lastIndex = at + 1;
@@ -296,6 +297,74 @@ function hasAny(keys: readonly number[], present: Int32Array): boolean {
   return false;
 }
 
+/**
+ * Patterns whose matches need not contain one of their anchor words: the anchor can sit in the
+ * `preceded` context (the exfiltration rules), or a match can glue it to neighbouring letters
+ * ("xignore", "apikeys", "ecosystem:"). They scan whole windows. test/write-gate-anchor-ranges.test.ts
+ * samples every other pattern's matches and proves each contains an anchor word.
+ */
+export const WHOLE_WINDOW_PATTERNS: ReadonlySet<string> = new Set([
+  'ignore-prior', 'forget-everything', 'disregard', 'system-prompt', 'print-system', 'exfil-standing-lead', 'exfil-agent-addressed',
+  'exfil-private-data', 'exfil-passive-now', 'exfil-private-data-passive', 'exfil-templated-url', 'credential-request',
+]);
+/** Per pattern: its longest match, or 0 when it scans whole windows. */
+const REACH: readonly number[] = WRITE_GATE_PATTERNS.map(p => WHOLE_WINDOW_PATTERNS.has(p.name) ? 0 : analyzeRegexSource(p.rx.source).maxLength);
+/** Per pattern: 1 at each of its own anchor indexes. */
+const OWN_ANCHOR: readonly Uint8Array[] = PATTERN_KEYS.map(k => { const own = new Uint8Array(KEY_COUNT); for (const a of k.anchors) own[a] = 1; return own; });
+// Regex word characters (`\w`): `\b` at a window cut reads differently than in the whole text when the character beyond the cut is one.
+const REGEX_WORD = new Uint8Array(65536);
+for (let c = 48; c <= 57; c++) REGEX_WORD[c] = 1;
+for (let c = 65; c <= 90; c++) { REGEX_WORD[c] = 1; REGEX_WORD[c + 32] = 1; }
+REGEX_WORD[95] = 1;
+const ranges: number[] = [];
+
+/** One field's scan state at one window: anchor occurrences in (start, start + window length] are [left, entered). */
+interface WindowScan { text: string; window: string; start: number; at: number[]; key: number[]; present: Int32Array; left: number; entered: number }
+
+/**
+ * Whether pattern `i` matches in the scan's window, searching only where a match can lie. Every match
+ * contains one of the pattern's anchor words and is at most REACH long, so it sits within REACH of that
+ * word's end offset; a window cut where the character beyond it is a word character adds the cut edge,
+ * where `\b` reads differently than in the whole text. Each merged range is searched from its start in
+ * the window cut at its end, moved past word characters so the cut reads like the text there. Same
+ * result as searching the whole window, which it does when the ranges would cover most of it anyway.
+ */
+function matchesInWindow(p: WriteGatePattern, i: number, s: WindowScan): boolean {
+  const { window, start, text } = s;
+  const context = p.negatable || p.preceded;
+  const reach = REACH[i]!;
+  const len = window.length;
+  let anchors = 0;
+  if (reach) for (const k of PATTERN_KEYS[i]!.anchors) anchors += s.present[k]!;
+  if (!reach || anchors * 2 * reach >= len) return context ? matchesInContext(p, window, start === 0, 0, window) : p.rx.test(window);
+  const own = OWN_ANCHOR[i]!;
+  ranges.length = 0;
+  // The open range is [lo, hi); anchor ends come in order, so a range only ever grows to the right.
+  let lo = 0;
+  let hi = start > 0 && REGEX_WORD[text.charCodeAt(start - 1)] ? reach : -1;
+  for (let j = s.left; j < s.entered && hi < len; j++) {
+    if (!own[s.key[j]!]) continue;
+    const at = s.at[j]! - start;
+    if (at - reach > hi) { if (hi >= 0) ranges.push(lo, hi); lo = Math.max(0, at - reach); }
+    hi = Math.min(len, at + reach);
+  }
+  if (start + len < text.length && REGEX_WORD[text.charCodeAt(start + len)]) {
+    if (len - reach > hi) { if (hi >= 0) ranges.push(lo, hi); lo = Math.max(0, len - reach); }
+    hi = len;
+  }
+  if (hi >= 0) ranges.push(lo, hi);
+  const rx = ITERATORS.get(p.name)!;
+  for (let r = 0; r < ranges.length; r += 2) {
+    let to = ranges[r + 1]!;
+    while (to < len && REGEX_WORD[window.charCodeAt(to)]) to++;
+    const scan = to === len ? window : window.slice(0, to);
+    if (context) { if (matchesInContext(p, window, start === 0, ranges[r]!, scan)) return true; continue; }
+    rx.lastIndex = ranges[r]!;
+    if (rx.test(scan)) return true;
+  }
+  return false;
+}
+
 /** Pure detector: every (family, pattern, field) the pattern table finds in the fields. */
 export function detectInstructionLike(fields: ReadonlyArray<readonly [WriteGateField, string]>): WriteGateHit[] {
   const hits: WriteGateHit[] = [];
@@ -307,24 +376,29 @@ export function detectInstructionLike(fields: ReadonlyArray<readonly [WriteGateF
     const found = new Set<string>();
     // Anchor counts over the occurrences in (start, end]: windows only move forward, so each occurrence
     // is added once and removed once instead of every overlapping window rebuilding its key set.
+    const { at, key } = occ;
     const present = new Int32Array(KEY_COUNT);
     let entered = 0;
     let left = 0;
+    const s: WindowScan = { text, window: '', start: 0, at, key, present, left, entered };
     const step = WRITE_GATE_WINDOW_CHARS - MAX_MATCH_CHARS - MAX_PRECEDING_CHARS;
     for (let start = 0; start < text.length; start += step) {
       const end = start + WRITE_GATE_WINDOW_CHARS;
-      const window = text.slice(start, end);
-      while (entered < occ.at.length && occ.at[entered]! <= end) present[occ.key[entered++]!]!++;
-      while (left < occ.at.length && occ.at[left]! <= start) present[occ.key[left++]!]!--;
+      while (entered < at.length && at[entered]! <= end) present[key[entered++]!]!++;
+      while (left < at.length && at[left]! <= start) present[key[left++]!]!--;
+      s.start = start;
+      s.window = text.slice(start, end);
+      s.left = left;
+      s.entered = entered;
       for (let i = 0; i < WRITE_GATE_PATTERNS.length; i++) {
         const p = WRITE_GATE_PATTERNS[i]!;
         const keys = PATTERN_KEYS[i]!;
         if (found.has(p.name) || !hasAny(keys.anchors, present) || (keys.requires && !hasAny(keys.requires, present))) continue;
-        if (!(p.negatable || p.preceded ? matchesInContext(p, window, start === 0) : p.rx.test(window))) continue;
+        if (!matchesInWindow(p, i, s)) continue;
         found.add(p.name);
         hits.push({ family: p.family, pattern: p.name, field });
       }
-      if (start + WRITE_GATE_WINDOW_CHARS >= text.length) break;
+      if (end >= text.length) break;
     }
   }
   return hits;

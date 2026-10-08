@@ -22,7 +22,8 @@ import {
   type WriteGateConfig, type WriteGateTier,
 } from '../src/core/write-gate.ts';
 import { WRITE_GATE_PATTERNS, boundQuantifiers, spaced } from '../src/core/write-gate-patterns.ts';
-import { analyzeRegexSource, checkWriteGatePatterns } from '../scripts/check-write-gate-regex.ts';
+import { checkWriteGatePatterns } from '../scripts/check-write-gate-regex.ts';
+import { analyzeRegexSource } from '../src/core/write-gate-regex.ts';
 import { parseMarkdown } from '../src/core/markdown.ts';
 
 import { BENIGN_ROUTING, CONCEAL_OR_BYPASS, HELD_OUT, NEGATIVES, POSITIVES } from './helpers/write-gate-corpus.ts';

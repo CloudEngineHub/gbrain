@@ -5,7 +5,7 @@
  * outside src, only so test/write-gate-detector-differential.test.ts can prove
  * the optimized src/core/write-gate.ts detector returns identical hits.
  */
-import { MAX_MATCH_CHARS, MAX_PRECEDING_CHARS, WRITE_GATE_PATTERNS, type WriteGatePattern } from '../../src/core/write-gate-patterns.ts';
+import { MAX_MATCH_CHARS, MAX_PRECEDING_CHARS, WRITE_GATE_PATTERNS, type WriteGatePattern } from './write-gate-patterns-reference.ts';
 import { normalizeForGate, WRITE_GATE_WINDOW_CHARS, type WriteGateField, type WriteGateHit } from '../../src/core/write-gate.ts';
 
 // UTF-16 code units that start something normalizeForGate changes: the hidden set, the compatibility
