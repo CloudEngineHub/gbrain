@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 215402,
-    "stdoutSha256": "487e264396db1621aa14656412fd54f415548f6dbdc3eef4428810b8ee4b6b4f",
+    "stdoutBytes": 214315,
+    "stdoutSha256": "0908eef70c7e24cb988b9b7d30266622b2e136391050d30b3b0d8bddcb45875d",
     "toolNames": [
       "remember",
       "entity",
@@ -51,7 +51,6 @@
       "get_brain_identity",
       "quarantine_list",
       "get_write_attribution",
-      "confirm_memory",
       "list_skills",
       "get_skill",
       "list_brain_skillpack",
@@ -105,6 +104,7 @@
       "takes_resolve",
       "takes_supersede",
       "takes_remove",
+      "takes_rebuild",
       "whoami",
       "sources_add",
       "sources_list",
@@ -178,7 +178,6 @@
         "mutating": true,
         "name": "remember",
         "parameters": {
-          "content_origin": "string?",
           "entity": "string?",
           "expected_revision": "string?",
           "fact": "string?",
@@ -196,15 +195,6 @@
         "required_scopes": [],
         "schema": {
           "properties": {
-            "content_origin": {
-              "description": "Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
-              "enum": [
-                "user_said",
-                "tool_output",
-                "inferred"
-              ],
-              "type": "string"
-            },
             "entity": {
               "description": "Subject (name or slug).",
               "type": "string"
@@ -442,7 +432,6 @@
         "parameters": {
           "allow_empty": "boolean?",
           "content": "string",
-          "content_origin": "string?",
           "drop_timeline": "boolean?",
           "expected_revision": "string?",
           "force": "boolean?",
@@ -463,15 +452,6 @@
             },
             "content": {
               "description": "Complete markdown (get_page include_content:true).",
-              "type": "string"
-            },
-            "content_origin": {
-              "description": "Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
-              "enum": [
-                "user_said",
-                "tool_output",
-                "inferred"
-              ],
               "type": "string"
             },
             "drop_timeline": {
@@ -719,7 +699,6 @@
         "name": "capture",
         "parameters": {
           "content": "string",
-          "content_origin": "string?",
           "depth": "string?",
           "expected_revision": "string?",
           "force": "boolean?",
@@ -738,15 +717,6 @@
           "properties": {
             "content": {
               "description": "Markdown or text (not a file path).",
-              "type": "string"
-            },
-            "content_origin": {
-              "description": "Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
-              "enum": [
-                "user_said",
-                "tool_output",
-                "inferred"
-              ],
               "type": "string"
             },
             "depth": {
@@ -2335,30 +2305,6 @@
           "type": "object"
         },
         "scope": "admin"
-      },
-      {
-        "description": "Owner only: mark a fact, take or page as confirmed by the user (trust tier user_confirmed). Needs a connection the user granted memory_confirm on the brain host; agent connections are refused with a command for the user to run. Never call this on your own judgment: confirm only what the user explicitly confirmed.",
-        "idempotent": true,
-        "local_only": false,
-        "mutating": true,
-        "name": "confirm_memory",
-        "parameters": {
-          "ref": "string"
-        },
-        "required_scopes": [],
-        "schema": {
-          "properties": {
-            "ref": {
-              "description": "What to confirm: f<id> (fact), t<id> (take) or p:<source>/<slug> (page).",
-              "type": "string"
-            }
-          },
-          "required": [
-            "ref"
-          ],
-          "type": "object"
-        },
-        "scope": "write"
       },
       {
         "description": "Skills: prose instruction sets (NOT executable code) for tasks with this server's tools, with triggers, usable_tools and unavailable_tools. Use one via get_skill.",
@@ -4398,6 +4344,35 @@
           "required": [
             "slug",
             "row_num"
+          ],
+          "type": "object"
+        },
+        "scope": "write"
+      },
+      {
+        "description": "Rebuild one page's takes index from the takes fence the page holds. Local-only. Rows whose number and claim still match keep their resolution; rows the index and the fence disagree on are re-inserted from the fence. CLI: `gbrain takes rebuild <slug>`.",
+        "idempotent": true,
+        "local_only": true,
+        "mutating": true,
+        "name": "takes_rebuild",
+        "parameters": {
+          "request_id": "string?",
+          "slug": "string"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "request_id": {
+              "description": "UUID; retry with it on timeout.",
+              "type": "string"
+            },
+            "slug": {
+              "description": "Page slug.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "slug"
           ],
           "type": "object"
         },
