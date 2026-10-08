@@ -261,9 +261,10 @@ async function refuseDestructiveReconcileOnStaleCache(
  */
 type ReconcileRow = Parameters<BrainEngine['insertFacts']>[0][number];
 async function insertReconciledFacts<F extends ReconcileRow>(
-  tx: BrainEngine, sourceId: string, slug: string, inserts: F[], derivation: Awaited<ReturnType<typeof deriveTrust>>, cfg: WriteGateConfig, tally: GateTally,
+  tx: BrainEngine, sourceId: string, slug: string, inserts: F[], derivation: Awaited<ReturnType<typeof deriveTrust>>, gateConfig: () => Promise<WriteGateConfig>, tally: GateTally,
 ): Promise<{ inserted: { inserted: number; ids: number[] }; allowed: F[] }> {
-  const decisions = inserts.map(f => decideFactWrite(f, { sourceId, slug, payload: { ...(f as ReconcileRow), embedding: null }, input: derivedGateInput(derivation.trust), cfg }));
+  const cfg = inserts.length ? await gateConfig() : null;
+  const decisions = inserts.map(f => decideFactWrite(f, { sourceId, slug, payload: { ...(f as ReconcileRow), embedding: null }, input: derivedGateInput(derivation.trust), cfg: cfg! }));
   for (const d of decisions) if (d.action !== 'insert') await applyGateDecision(tx, d, { table: 'facts', sourceId }, async () => null, tally);
   const allowed = inserts.filter((_, i) => decisions[i].action === 'insert');
   const flags = decisions.filter(d => d.action === 'insert');
@@ -485,7 +486,8 @@ export async function runExtractFacts(
   // Managed brains reconcile the same way, but each database write commits
   // inside the coordinator's source capability under the page key.
   const managed = await managedDerivedFactsPreflight(engine, sourceId);
-  const gateCfg = await derivedGateConfig(engine);
+  let gateCfg: Promise<WriteGateConfig> | undefined;
+  const gateConfig = () => (gateCfg ??= derivedGateConfig(engine));
   const gateTally = emptyGateTally();
   const transact = <T>(slugs: string[], fn: (tx: BrainEngine) => Promise<T>, trust?: WriteTrust): Promise<T> =>
     managed ? withDerivedFactsWrite(engine, sourceId, slugs, tx => trust ? withWriteTrust(tx, trust, () => fn(tx)) : fn(tx)) : maintenanceTransaction(engine, fn, trust);
@@ -880,7 +882,7 @@ export async function runExtractFacts(
                 f.claim_metric ?? null, f.claim_value ?? null, f.claim_unit ?? null, f.claim_period ?? null],
             );
           }
-          const { inserted, allowed } = await insertReconciledFacts(tx, sourceId, slug, inserts, derivation, gateCfg, gateTally);
+          const { inserted, allowed } = await insertReconciledFacts(tx, sourceId, slug, inserts, derivation, gateConfig, gateTally);
           const insertedRows = new Set(allowed.map(f => f.row_num));
           const linked = await syncSupersession(tx, sourceId, slug, extracted, chain, insertedRows);
           opts.signal?.throwIfAborted();
