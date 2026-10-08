@@ -20,8 +20,7 @@ import { listReviewProposals, reviewProposalIdsFromSweep, runReviewLanes, REVIEW
 import { acceptReviewProposal, rejectReviewProposal, undoReviewProposal, type ReviewActionResult } from '../../core/facts/proposal-review.ts';
 import { flagValue } from '../decide.ts';
 import { isConsentRefusal, printConsentRefusal, requireConsent } from '../../core/consent.ts';
-import { confirmTierCrossingAccepts } from '../trust.ts';
-import { reportPersistenceCliError } from '../persistence-delegate.ts';
+import { confirmTierCrossingAccepts, reportTrustCliError } from '../trust.ts';
 
 function sweepLine(r: ConflictSweepResult): string {
   if (r.mode === 'off') return `${r.source_id}: the contradiction slot is off; nothing was swept (turn it on: gbrain decide enable conflict).`;
@@ -168,7 +167,7 @@ async function actionCommand(engine: BrainEngine, action: 'accept' | 'reject' | 
   if (action === 'accept') {
     // #5575 CEO-9/DX-7: a tier-crossing supersession needs the owner's typed confirmation; others are unchanged.
     try { await confirmTierCrossingAccepts(engine, ids, ['gbrain', 'decide', 'proposals', 'accept', ...args]); }
-    catch (error) { if (await reportPersistenceCliError(error, json)) return 1; throw error; }
+    catch (error) { if (await reportTrustCliError(error, json)) return 3; throw error; }
   }
   const results: ProposalActionResult[] = [];
   for (const id of ids) {

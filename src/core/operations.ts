@@ -155,10 +155,8 @@ export const operations: Operation[] = [
   // Timeline (add_timeline_entry, get_timeline) — ops/timeline.ts
   ...timelineOperations,
   // Admin (get_stats, get_health, run_doctor, get_versions, revert_version
-  // + get_brain_identity) — ops/admin.ts; get_write_attribution — ops/attribution.ts
-  ...adminOperations, ...attributionOperations,
-  // #5575 memory trust: confirm_memory (owner only) — ops/trust.ts
-  ...trustOperations,
+  // + get_brain_identity) — ops/admin.ts; get_write_attribution — ops/attribution.ts; confirm_memory — ops/trust.ts
+  ...adminOperations, ...attributionOperations, ...trustOperations,
   // PR1: skill catalog over MCP (list_skills, get_skill, list_brain_skillpack,
   // advisor) + v0.41.19.0 get_status_snapshot — ops/skills-catalog.ts
   ...skillsCatalogOperations,

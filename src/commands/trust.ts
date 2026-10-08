@@ -24,11 +24,12 @@ import {
   applyOwnerAction, previewOwnerAction, type OwnerActionInput, type OwnerActionPreview, type OwnerActionResult,
 } from '../core/trust/owner-actions.ts';
 import {
-  buildTrustReview, explainTrust, parseTrustReviewKind, parseTrustSince, renderArgv, renderTrustExplanation, renderTrustReview,
+  buildTrustReview, explainTrust, parseTrustReviewKind, parseTrustSince, renderTrustExplanation, renderTrustReview,
   type TrustExplanation, type TrustReview, type TrustReviewFilter,
 } from '../core/trust/review.ts';
 import { trustLabel } from '../core/trust/tier.ts';
 import { reportPersistenceCliError } from './persistence-delegate.ts';
+import { writeCliError } from '../cli/cli-error.ts';
 
 export const TRUST_OWNER_USAGE = [
   'Usage: gbrain trust <review|confirm|release|drop|revert|explain|allow|disable|backfill> [options]',
@@ -119,9 +120,9 @@ function actionInput(sub: string, args: string[]): OwnerActionInput {
     if (!args.includes('--all')) throw opError('invalid_params', 'trust disable needs --all.', 'Run gbrain trust disable --all (or --all --undo to turn the protections back on).');
     return { action: args.includes('--undo') ? 'enable' : 'disable' };
   }
-  if (!ref) throw opError('invalid_params', `trust ${sub} needs a ref.`, 'Pass a ref such as f12, h4, tp7 or p:<source>/<slug>; gbrain trust review lists them.');
+  if (!ref) throw opError('invalid_params', `trust ${sub} needs a ref.`, 'Pass a ref such as f12, h4, tp7 or p:default/notes/alice-example; gbrain trust review lists them.');
   const version = flag(args, '--version');
-  if (version !== undefined && !/^\d{1,18}$/.test(version)) throw opError('invalid_params', '--version takes a version id.', 'gbrain history <slug> lists version ids.');
+  if (version !== undefined && !/^\d{1,18}$/.test(version)) throw opError('invalid_params', '--version takes a version id.', 'gbrain history with the page slug lists its version ids.');
   return { action: sub as OwnerActionInput['action'], ref, source, ...(version ? { version: Number(version) } : {}) };
 }
 
@@ -171,6 +172,15 @@ async function acceptAll(backend: TrustBackend, args: string[], json: boolean): 
   if (failed.length) setCliExitVerdict(1);
 }
 
+/** Renders a refusal through the shared CLI envelope with its contract exit code (3 for consent refusals). */
+export async function reportTrustCliError(error: unknown, json: boolean): Promise<boolean> {
+  if (error instanceof OperationError && !error.writeRequest) {
+    setCliExitVerdict(writeCliError(error, 'trust', { json }));
+    return true;
+  }
+  return reportPersistenceCliError(error, json);
+}
+
 /** Runs one owner subcommand against `backend`. Errors render through the shared CLI error envelope. */
 export async function runTrustOwnerCommand(backend: TrustBackend, sub: string, args: string[]): Promise<void> {
   const json = jsonRequested(args);
@@ -183,7 +193,7 @@ export async function runTrustOwnerCommand(backend: TrustBackend, sub: string, a
     }
     if (sub === 'explain') {
       const query = positionals(args).join(' ');
-      if (!query) throw opError('invalid_params', 'trust explain needs a ref or a phrase.', 'Pass f<id>, t<id>, h<id>, tp<id>, p:<source>/<slug> or words from a page title or fact.');
+      if (!query) throw opError('invalid_params', 'trust explain needs a ref or a phrase.', 'Pass a ref such as f12, t3, h4, tp7 or p:default/notes/alice-example, or words from a page title or fact.');
       const items = await backend.explain(query, flag(args, '--source') ?? null);
       if (json) await writeStdoutFinal(`${JSON.stringify({ items }, null, 2)}\n`); else console.log(renderTrustExplanation(items));
       return;
@@ -192,11 +202,7 @@ export async function runTrustOwnerCommand(backend: TrustBackend, sub: string, a
     if (json) await writeStdoutFinal(`${JSON.stringify({ preview: { ...preview, binding: undefined }, result }, null, 2)}\n`);
     else console.log(resultLine(result));
   } catch (error) {
-    if (await reportPersistenceCliError(error, json)) {
-      const fix = error instanceof OperationError ? error.fix : undefined;
-      if (!json && fix?.argv?.length) console.error(`${fix.actor === 'user' ? 'The user runs' : 'Run'}: ${renderArgv(fix.argv)}`);
-      return;
-    }
+    if (await reportTrustCliError(error, json)) return;
     throw error;
   }
 }

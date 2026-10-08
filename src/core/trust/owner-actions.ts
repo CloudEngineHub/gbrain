@@ -94,7 +94,8 @@ export interface OwnerApplyOptions {
 }
 
 const hash8 = (value: string): string => createHash('sha256').update(value).digest('hex').slice(0, 8);
-const bindingOf = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const bindingOf = (value: unknown): string => createHash('sha256')
+  .update(JSON.stringify(value, (_key, v: unknown) => typeof v === 'bigint' ? v.toString() : v)).digest('hex');
 const snippet = (text: unknown, max = 80): string => {
   const flat = String(text ?? '').replace(/\s+/g, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max - 3)}...` : flat;
@@ -205,13 +206,13 @@ async function currentSwitchValues(engine: BrainEngine): Promise<Record<string, 
 // ---------------------------------------------------------------------------
 
 function requireRef(input: OwnerActionInput): TrustRef {
-  if (!input.ref) throw opError('invalid_params', `trust ${input.action} needs a ref.`, 'Pass a ref such as f12, t3, h4, tp7 or p:<source>/<slug>; gbrain trust review lists them.');
+  if (!input.ref) throw opError('invalid_params', `trust ${input.action} needs a ref.`, 'Pass a ref such as f12, t3, h4, tp7 or p:default/notes/alice-example; gbrain trust review lists them.');
   return parseTrustRef(input.ref);
 }
 
 function unsupported(action: OwnerActionName, ref: TrustRef): Error {
   return opError('invalid_params', `trust ${action} does not apply to ${formatTrustRef(ref)}.`,
-    'confirm takes f<id>, t<id>, p:<source>/<slug>, tp<id> or h<id>; drop takes tp<id> or h<id>; release takes h<id>; revert takes tp<id> (an agent-edit item) or a page; allow --remove takes a<id>.');
+    'confirm takes a fact (f12), take (t3), page (p:default/notes/alice-example), trust proposal (tp7) or held write (h4); drop takes a trust proposal or held write; release takes a held write; revert takes an agent-edit trust proposal or a page; allow --remove takes an allow rule (a2). gbrain trust review lists the refs.');
 }
 
 async function pendingProposal(engine: BrainEngine, id: number): Promise<TrustProposalRow> {

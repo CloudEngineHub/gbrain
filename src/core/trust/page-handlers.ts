@@ -214,7 +214,7 @@ export const versionTier = (version: { trust_tier?: string | null }): TrustTier 
 export async function revertPageToVersion(engine: BrainEngine, input: PageActionInput & { versionId: number }): Promise<PageActionResult> {
   const ref = pageRef(input.sourceId, input.slug);
   const state = await readPageTrustState(engine, input.sourceId, input.slug);
-  if (!state) throw opError('page_not_found', `No live page ${ref}.`, 'Check the ref; gbrain history <slug> lists its versions.');
+  if (!state) throw opError('page_not_found', `No live page ${ref}.`, `Check the ref; gbrain history ${input.slug} lists its versions.`);
   if (state.revision !== input.expectedRevision) throw changedSincePreview(ref, 'the revert');
   const version = await readPageVersion(engine, state.pageId, input.versionId);
   if (!version) throw opError('not_found', `Version ${input.versionId} is not in the history of ${ref}.`, `List the page's versions with gbrain history ${input.slug} and pass one of their ids to --version.`);

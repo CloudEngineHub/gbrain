@@ -41,7 +41,7 @@ export function parseTrustRef(raw: string): TrustRef {
     const sourceId = slash > 0 ? body.slice(0, slash) : '';
     const slug = slash > 0 ? body.slice(slash + 1) : '';
     if (!isValidSourceId(sourceId) || !slug) {
-      throw opError('invalid_params', `Page ref ${JSON.stringify(ref)} must be p:<source>/<slug>.`, `Write the page as p:<source>/<slug>, e.g. p:default/notes/alice-example. ${refHelp}`);
+      throw opError('invalid_params', `Page ref ${JSON.stringify(ref)} must be p:<source>/<slug>.`, `Write the page with its source, e.g. p:default/notes/alice-example. ${refHelp}`);
     }
     return { kind: 'page', sourceId, slug };
   }
@@ -80,7 +80,7 @@ export async function resolvePageRef(engine: Pick<BrainEngine, 'executeRaw'>, re
     'SELECT source_id FROM pages WHERE slug = $1 AND deleted_at IS NULL ORDER BY source_id', [ref.slug]);
   if (rows.length > 1) {
     throw opError('invalid_params', `Slug "${ref.slug}" exists in ${rows.length} sources: ${rows.map(r => r.source_id).join(', ')}.`,
-      `Pick one with --source <id>, or write the page as ${pageRef(rows[0]!.source_id, ref.slug)}.`);
+      `Pick one with --source ${rows[0]!.source_id} (or another listed source), or write the page as ${pageRef(rows[0]!.source_id, ref.slug)}.`);
   }
   if (rows.length === 0) throw opError('page_not_found', `No page "${ref.slug}" in any source.`, 'Check the slug; gbrain trust review lists pages waiting for you.');
   return { sourceId: rows[0]!.source_id, slug: ref.slug };

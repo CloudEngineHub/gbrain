@@ -36,7 +36,7 @@ const confirm_memory: Operation = {
     const ref = parseTrustRef(raw);
     if (ref.kind !== 'fact' && ref.kind !== 'take' && !(ref.kind === 'page' && ref.sourceId)) {
       throw opError('invalid_params', 'confirm_memory takes f<id>, t<id> or p:<source>/<slug>.',
-        'Pass the ref of one fact, take or page (pages as p:<source>/<slug>). Trust proposals and held writes are decided on the brain host with gbrain trust review.');
+        'Pass the ref of one fact, take or page (pages with their source, e.g. p:default/notes/alice-example). Trust proposals and held writes are decided on the brain host with gbrain trust review.');
     }
     const preview = await previewOwnerAction(ctx.engine, { action: 'confirm', ref: raw });
     if (ctx.remote !== false) {

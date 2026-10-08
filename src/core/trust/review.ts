@@ -333,7 +333,7 @@ export async function explainTrust(engine: BrainEngine, refOrQuery: string, opts
         activation: item.summary }];
     }
     default:
-      throw opError('invalid_params', `trust explain does not take ${formatTrustRef(ref)}.`, 'Pass f<id>, t<id>, h<id>, tp<id>, a page ref or a search phrase.');
+      throw opError('invalid_params', `trust explain does not take ${formatTrustRef(ref)}.`, 'Pass a fact (f12), take (t3), held write (h4), trust proposal (tp7), a page (p:default/notes/alice-example) or a search phrase.');
   }
 }
 
