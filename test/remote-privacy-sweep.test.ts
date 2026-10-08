@@ -339,6 +339,8 @@ const EXPECTED_OUTCOME: Record<string, Outcome> = {
   purge_fact: 'error',
   list_page_purges: 'error',
   unpurge_page: 'error',
+  // Owner confirmation needs a memory_confirm grant; the sweep's connection has none (refused before any read).
+  confirm_memory: 'error',
   // rate_answer with no answer_id is a validation error; a real answer id only
   // ever names pages that answer returned to the same client.
   rate_answer: 'error',
