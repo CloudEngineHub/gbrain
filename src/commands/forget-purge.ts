@@ -21,6 +21,7 @@ import { loadConfig, isThinClient } from '../core/config.ts';
 import { opError } from '../core/ops/contract.ts';
 import { isInteractive, readLine } from '../core/interaction.ts';
 import { setCliExitVerdict } from '../core/cli-force-exit.ts';
+import { CONFIRMATION_REQUIRED_EXIT_CODE } from '../core/exit-codes.ts';
 import { resolveSourceId } from '../core/source-resolver.ts';
 
 export const PURGE_FAMILY_HELP = `Purge family (remove content from live stores; never physical erasure):
@@ -138,7 +139,7 @@ export async function runForgetPurge(engine: BrainEngine | (() => Promise<BrainE
       const answer = io.readToken ? await io.readToken(prompt) : await readLine({ prompt, output: process.stderr }).then(r => r.kind === 'line' ? r.text : null);
       if (answer === null || answer.trim() !== token) {
         process.stderr.write('Not purged.\n');
-        setCliExitVerdict(3);
+        setCliExitVerdict(CONFIRMATION_REQUIRED_EXIT_CODE);
         return;
       }
     } else if (!args.includes('--yes') || !requestId) {
@@ -155,7 +156,7 @@ export async function runForgetPurge(engine: BrainEngine | (() => Promise<BrainE
     if (!await reportPersistenceCliError(error, json)) throw error;
     // Not confirmed: 3 (ask the user). A pending write blocks the sweep: 75 (retry later with the same request id).
     const code = (error as { canonical?: string; code?: string }).canonical ?? (error as { code?: string }).code;
-    if (code === 'confirmation_required') setCliExitVerdict(3);
+    if (code === 'confirmation_required') setCliExitVerdict(CONFIRMATION_REQUIRED_EXIT_CODE);
     else if (code === 'purge_blocked_pending_recovery') setCliExitVerdict(75);
   }
 }
