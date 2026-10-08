@@ -37,7 +37,7 @@ import { resolveExcludePrivatePages } from '../search/private-visibility.ts';
 import { deliverEvidence, effectivePlan, resolveEvidencePlan, EVIDENCE_BLOCK_CHAR_CAP, THINK_RETURN_UNIT_CONFIG_KEY, type DeliveryMeta } from '../search/evidence-delivery.ts';
 import { startThinkDecide, thinkAbstainResult, type ThinkAbstention } from './decide.ts';
 import { classifyIntent } from './intent.ts';
-import { maintenanceTransaction } from '../persistence/attribution.ts';
+import { deriveTrust, derivedMaintenanceTransaction, type TaintRef } from '../trust/taint.ts';
 
 /** Anthropic Messages client interface — same shape used by subagent.ts so test stubs can be shared. */
 export interface ThinkLLMClient {
@@ -219,6 +219,8 @@ export interface ThinkResult {
   evidence_delivery?: import('../search/evidence-delivery.ts').DeliveryMeta;
   /** Gathered pages with the revision retrieved, for retrieval-feedback recording; the op layer strips it. */
   feedback_evidence?: Array<{ source_id: string; slug: string; content_hash: string | null }>;
+  /** #5575 I2: every page, take and trajectory fact placed in the synthesis prompt; `persistSynthesis` taints from them. The op layer strips it. */
+  taint_refs?: TaintRef[];
   /** Only set when --save was true and the caller persisted a synthesis page. */
   savedSlug?: string;
   /**
@@ -673,6 +675,7 @@ export async function runThink(
   // is the kill switch. `withTrajectory: false` caller opt also bypasses.
   // `other` intent short-circuits before any SQL fires.
   let trajectoryBlock = '';
+  const trajectoryFactIds: number[] = [];
   let trajectoryPointsCount = 0;
   let trajectoryExcludedCount = 0;
   const trajectoryEnabledConfig = await readThinkTrajectoryEnabled(engine);
@@ -729,6 +732,7 @@ export async function runThink(
                   return !outside;
                 }) : points;
                 if (boundedPoints.length === 0) return null;
+                trajectoryFactIds.push(...boundedPoints.map(point => point.fact_id));
                 const fmt = formatTrajectoryBlock(boundedPoints, resolved.slug, {
                   intent: trajIntent,
                 });
@@ -989,6 +993,8 @@ export async function runThink(
     synthesisOk: synthesisOk && response.answer.trim().length > 0,
     synthesis_status: synthesisStatus,
     feedback_evidence: gather.pages.map(pg => ({ source_id: pg.source_id ?? 'default', slug: pg.slug, content_hash: pg.content_hash ?? null })),
+    taint_refs: [...gather.pages.map(pg => ({ table: 'pages' as const, sourceId: pg.source_id ?? 'default', slug: pg.slug })),
+      ...gather.takes.map(t => ({ table: 'takes' as const, id: t.take_id })), ...trajectoryFactIds.map(id => ({ table: 'facts' as const, id }))],
     ...(extractive ? { extractive } : {}),
     usage, ...(evidenceDelivery ? { evidence_delivery: evidenceDelivery } : {}),
     diagnostics: {
@@ -1080,7 +1086,9 @@ export async function persistSynthesis(
     result.gaps.length > 0 ? '## Gaps\n\n' + result.gaps.map(g => `- ${g}`).join('\n') : '',
   ].filter(Boolean).join('\n');
 
-  const page = await maintenanceTransaction(engine, tx => tx.putPage(slug, {
+  const derivation = await deriveTrust(engine, result.taint_refs ?? [], { channel: 'derive:think' });
+  const page = await derivedMaintenanceTransaction(engine, derivation, async tx => {
+    const written = await tx.putPage(slug, {
     title: result.question.slice(0, 200),
     type: 'synthesis',
     compiled_truth: body,
@@ -1093,7 +1101,9 @@ export async function persistSynthesis(
       takes_gathered: result.takesGathered,
       ...(result.persist?.unverified_claims.length ? { unverified_claims: result.persist.unverified_claims.map(c => ({ ...c, sources: ['think evidence'], detected_at: today })) } : {}),
     },
-  }, scope.sourceId ? { sourceId: scope.sourceId } : undefined));
+  }, scope.sourceId ? { sourceId: scope.sourceId } : undefined);
+    return { result: written, rows: [{ table: 'pages' as const, id: written.id, sourceId: scope.sourceId ?? 'default' }] };
+  });
 
   const persisted = await persistCitations(engine, page.id, result.citations, scope);
   return { slug, evidenceInserted: persisted.inserted, warnings: persisted.warnings };

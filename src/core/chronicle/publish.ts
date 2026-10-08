@@ -41,6 +41,7 @@ import { preparePageMutation } from '../persistence/page-prepare.ts';
 import { effectiveVisibility, type Visibility } from '../search/private-visibility.ts';
 import type { ChronicleEventProposal } from './extract-events.ts';
 import { resolveChronicleEventSlugs } from './event-identity.ts';
+import { declareDerivation, deriveTrust, derivedMaintenanceTransaction } from '../trust/taint.ts';
 
 export const CHRONICLE_RETIRED_BY = 'life-chronicle';
 export const CHRONICLE_EVENT_INTENT = 'managed_maintenance_chronicle_event';
@@ -175,6 +176,8 @@ export async function publishChronicleGeneration(engine: BrainEngine, opts: {
   const broken = await depthPinBroken(engine, sourceId, pin, opts.decisionRequestId);
   if (broken) return { ...result, superseded: broken };
   const events = await resolveChronicleEventSlugs(engine, sourceId, opts.events);
+  // #5575 I2: the judge read only the depth page, so its events carry that page's tier (capped at agent_written).
+  const derivation = await deriveTrust(engine, [{ table: 'pages', id: pin.pageId }], { channel: 'derive:chronicle' });
 
   for (const ev of events) {
     abort();
@@ -187,18 +190,19 @@ export async function publishChronicleGeneration(engine: BrainEngine, opts: {
       if (maintenance) {
         const intent = { kind: CHRONICLE_EVENT_INTENT, content, expected_revision: verdict.expectedRevision,
           restore_retired: verdict.restore, depth: pin, decision_request_id: opts.decisionRequestId,
-          owned_hashes: [...owned], event_projection: projection };
+          owned_hashes: [...owned], event_projection: projection, derivation: declareDerivation(derivation.trust, derivation.inputs) };
         await submitDatabaseMaintenanceIntent(engine, maintenance, ev.slug, intent,
           requestIdFor({ writer: maintenance.writer.principal, slug: ev.slug, intent }));
       } else {
-        await maintenanceTransaction(engine, async (tx) => {
+        await derivedMaintenanceTransaction(engine, derivation, async (tx) => {
           const reason = await depthPinBroken(tx, sourceId, pin, null);
           if (reason) throw supersededError(reason);
           const again = judgeTarget(await tx.readPageSnapshot(ev.slug, { sourceId, includeDeleted: true }), owned);
           if (!again.write) throw supersededError(again.reason);
-          await tx.putPage(ev.slug, { type: 'event', title: ev.title, compiled_truth: ev.compiledTruth,
+          const page = await tx.putPage(ev.slug, { type: 'event', title: ev.title, compiled_truth: ev.compiledTruth,
             frontmatter: { type: 'event', ...ev.frontmatter }, effective_date: safeDate(ev.when) }, { sourceId });
           await tx.upsertEventProjection({ depthSlug: pin.slug, eventSlug: ev.slug, date: ev.day, summary: ev.summary, sourceId });
+          return { result: undefined, rows: [{ table: 'pages', id: page.id, sourceId }] };
         });
       }
     } catch (error) {

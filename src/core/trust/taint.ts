@@ -149,6 +149,18 @@ export async function derivedMaintenanceTransaction<T>(engine: BrainEngine, deri
   }, derivation.trust);
 }
 
+/**
+ * A derived page written through a path that stamps by its own channel (an
+ * unmanaged importFromContent): lowers the live page to the derivation's
+ * taint and records its edges, in one attributed transaction.
+ */
+export async function lowerDerivedPage(engine: BrainEngine, derivation: { trust: WriteTrust; inputs: readonly TaintInput[] },
+  sourceId: string, slug: string): Promise<void> {
+  await derivedMaintenanceTransaction(engine, derivation, async tx => ({ result: undefined,
+    rows: (await tx.executeRaw<{ id: number }>('SELECT id FROM pages WHERE source_id=$1 AND slug=$2 AND deleted_at IS NULL', [sourceId, slug]))
+      .map(row => ({ table: 'pages' as const, id: Number(row.id), sourceId })) }));
+}
+
 // ---------------------------------------------------------------------------
 // Declarations carried in a journaled maintenance intent
 // ---------------------------------------------------------------------------

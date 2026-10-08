@@ -40,6 +40,7 @@ import { pricingSetCommand } from '../budget/no-pricing.ts';
 import { createHash } from 'node:crypto';
 import { slugifySegment } from '../sync.ts';
 import { validatePageSlug } from '../ops/context.ts';
+import { deriveTrust } from '../trust/taint.ts';
 import { privatePagesFilterFragment, strictestVisibility, type Visibility } from '../search/private-visibility.ts';
 import { maintenancePreflight } from '../persistence/prepared-maintenance.ts';
 import { derivedWriteThrough } from './derived-write-through.ts';
@@ -492,15 +493,18 @@ export async function runPhaseSynthesizeConcepts(
       // Unmanaged: the narrative the page held when synthesis started; a
       // different narrative under the page lock defers the concept (D-N3).
       let baseline = existing?.compiled_truth ?? '';
+      // #5575 I2: the narrative carries the tier of the member atoms in its prompt (capped at agent_written).
+      const derivation = await deriveTrust(engine, [...new Set(group.atomSlugs)].map(slug => ({ table: 'pages' as const, sourceId: opts.sourceId ?? 'default', slug })),
+        { channel: 'derive:concepts' });
       const publish = async (pageVisibility: Visibility): Promise<void> => {
         if (maintenance) {
           conceptRevision = await publishManagedConcept(engine, maintenance, conceptSlug, synthesized(pageVisibility), narrative,
-            conceptRevision, opts.brainDir);
+            conceptRevision, opts.brainDir, derivation);
           return;
         }
         // #4416: target the cycle's resolved source, not the 'default' literal.
         baseline = await publishClassicConcept(engine, conceptSlug, opts.sourceId ?? 'default', synthesized(pageVisibility), narrative,
-          baseline, { writeThrough: conceptFiles !== null, importPage: (markdown) => importFromContent(engine, conceptSlug, markdown, {
+          baseline, { writeThrough: conceptFiles !== null, derivation, importPage: (markdown) => importFromContent(engine, conceptSlug, markdown, {
             noEmbed: !isAvailable('embedding'), sourceId: opts.sourceId, preserveGateMarkers: true,
           }) });
       };
