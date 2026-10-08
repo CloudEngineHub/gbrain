@@ -33,6 +33,7 @@ const purge_fact: Operation = {
     const { submitPurgeFactMutation } = await import('../facts/purge.ts');
     return submitPurgeFactMutation(ctx, p);
   },
+  area: 'facts',
   cliHints: { name: 'purge-fact', hidden: true },
 };
 
@@ -52,6 +53,7 @@ const list_page_purges: Operation = {
     const { listPagePurges } = await import('../persistence/page-purge.ts');
     return listPagePurges(ctx, p);
   },
+  area: 'pages',
   cliHints: { name: 'list-page-purges', hidden: true },
 };
 
@@ -71,6 +73,7 @@ const unpurge_page: Operation = {
     const { unpurgePage } = await import('../persistence/page-purge.ts');
     return unpurgePage(ctx, p);
   },
+  area: 'pages',
   cliHints: { name: 'unpurge-page', hidden: true },
 };
 
