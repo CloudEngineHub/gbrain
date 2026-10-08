@@ -2465,6 +2465,7 @@ async function prepareConnectedDispatch(command: string, args: string[]): Promis
   if (command === 'reindex-code') {
     if (await (await import('./commands/reindex-code-delegate.ts')).maybeDelegateReindexCode(loadConfig(), args)) return null;
   }
+  if (command === 'trust' && await (await import('./commands/trust.ts')).maybeDelegateTrust(loadConfig(), args)) return null;
   if (command === 'extract' && args.includes('--stale') && !hasHelpFlag(args) && await (await import('./commands/extract-stale-delegate.ts')).maybeDelegateExtractStale(loadConfig(), args)) return null;
 
   if (command === 'embed' && args.includes('--facts')) {

@@ -61,8 +61,6 @@ const PERMITTED_TEST_ONLY = [
   { path: 'src/eval/shared/autocut-replay.ts', reason: 'script-reachable' },
   { path: 'src/mcp/http-transport.ts', reason: 'script-reachable' },
   { path: 'src/mcp/tool-catalog.ts', reason: 'script-reachable' },
-  { path: 'src/core/trust/decide.ts', reason: 'held: memory-trust owner decisions (#5575 lane L1a); confirm_memory and gbrain trust confirm/drop/revert (owner-ops sub-lane, same feature PR) are its runtime callers; drop this row when they land' },
-  { path: 'src/core/trust/page-handlers.ts', reason: 'held: memory-trust lower_page handler (#5575 CEO-12), loaded by trust/decide.ts; drop this row when the owner ops land' },
   { path: 'src/core/archive-crawler-config.ts', reason: "held: skills/archive-crawler/SKILL.md describes the scan_paths safety fence as code-enforced; wire-or-retract is a product decision" },
   { path: 'src/core/progressive-batch/orchestrator.ts', reason: 'held: TODOS.md keeps an open item to re-compose progressive-batch with --workers on the 3 reindex sites (callers dropped in the v0.41.17.0 merge)' },
   { path: 'src/core/progressive-batch/retrofit-wrap.ts', reason: 'held: progressive-batch re-compose item still open in TODOS.md' },

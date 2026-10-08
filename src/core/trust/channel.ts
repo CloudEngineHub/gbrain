@@ -36,8 +36,11 @@ export const AGENT_WRITE_OPERATIONS: readonly string[] = [
   'takes_remove', 'loops_close', 'relink_facts', 'decide_proposal',
 ];
 
-/** Intent kinds whose preparer computes the tier from the page (owner-source sync and import paths). */
-const OWNER_SOURCE_KINDS = ['canonical_reconcile', 'managed_file_import', 'managed_file_repair', 'managed_grandfather'];
+/**
+ * Intent kinds whose preparer computes the tier from the page (owner-source sync and import paths), and
+ * the owner's `quarantine clear`, which only removes a gate-owned marker and keeps the page's tier.
+ */
+const OWNER_SOURCE_KINDS = ['canonical_reconcile', 'managed_file_import', 'managed_file_repair', 'managed_grandfather', 'managed_quarantine_clear'];
 
 /** Page frontmatter `source_kind` / `ingested_via` / `captured_via` values written by an ingestion capture (external). */
 export const EXTERNAL_CAPTURE_KINDS: readonly string[] = ['webhook', 'file-watcher', 'inbox-folder', 'cron-scheduler', 'ingest_capture'];

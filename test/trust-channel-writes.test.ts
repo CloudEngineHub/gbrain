@@ -109,6 +109,8 @@ describe('channel tier rules (pure)', () => {
     expect(requestChannelTrust(row('submit_job', false, { kind: 'connector_v2_google' }))?.tier).toBe('external_untrusted');
     expect(requestChannelTrust(row('submit_job', false, { kind: 'managed_sync_batch' }))).toBeUndefined();
     expect(requestChannelTrust(row('put_page', false, { kind: 'managed_file_import' }))).toBeUndefined();
+    // The owner's quarantine clear only removes a gate-owned marker: it declares no tier, stamps no marker, keeps the page tier.
+    expect(requestChannelTrust(row('put_page', false, { kind: 'managed_quarantine_clear' }))).toBeUndefined();
     expect(requestChannelTrust(row('put_page', true))?.origin?.channel).toBe('mcp:put_page');
   });
   test('frontmatter markers only lower; sources set-trust never exceeds operator_curated; connector sources are external', () => {
