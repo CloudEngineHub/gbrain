@@ -50,7 +50,7 @@ import { resolveCycleDate } from './cycle-date.ts';
 import { clearPatternsSourceDeaths, patternsBreakerSkip } from './dream-breaker.ts';
 import { dedupePatternClaimSources, withClaimSources } from './pattern-claim-sources.ts';
 import { publishOrHold } from '../persistence/accepted-pending.ts';
-import { isExternalTier, type DerivationDeclaration } from '../trust/taint.ts';
+import { derivedMaintenanceTransaction, isExternalTier, type DerivationDeclaration } from '../trust/taint.ts';
 import { storedTrustTier, type TaintInput } from '../trust/tier.ts';
 import { patternsDerivation, type Derivation } from './dream-taint.ts';
 
@@ -680,7 +680,7 @@ async function stampPatternOutputs(engine: BrainEngine, maintenance: Maintenance
   reflections: ReflectionRef[], derivation: Derivation & { declaration: DerivationDeclaration }, config: { outputSlugPrefix: string; sourceSlugPrefix: string },
   sourceId: string, cycleDate: string, signal?: AbortSignal) {
   const heldSlugs = new Set<string>();
-  const quoteVerify = await groundPatternPages(engine, maintenance, written, reflections, config.outputSlugPrefix, sourceId, cycleDate, signal, heldSlugs, derivation.declaration);
+  const quoteVerify = await groundPatternPages(engine, maintenance, written, reflections, config.outputSlugPrefix, sourceId, cycleDate, signal, heldSlugs, derivation);
   await stampProvenance(engine, maintenance, written.filter(ref => ref.slug.startsWith(`${config.outputSlugPrefix}/`)), cycleDate, config.sourceSlugPrefix, sharedSeat(reflections), signal, heldSlugs, derivation);
   // Holds are recorded for this cycle's source only, so a ref in any other source is never excused from verification.
   const finalized = written.filter(ref => ref.source_id !== sourceId || !heldSlugs.has(ref.slug));
@@ -712,11 +712,11 @@ async function stampProvenance(engine: BrainEngine, maintenance: MaintenanceAuth
  * dream.quote_verify (default on). Returns null when disabled. With `heldSlugs`
  * a managed publish that is pending or contended (publicationHold) is recorded
  * there and the loop moves on; without it every publish error propagates.
- * `derivation` (#5575) is the pass's taint declaration; a managed publish of a page this run wrote carries it.
+ * `derivation` (#5575) is the pass's taint: a page this run wrote is written back at that tier.
  */
 export async function groundPatternPages(engine: BrainEngine, maintenance: MaintenanceAuthority | null, refs: Array<{ slug: string; source_id: string }>,
   reflections: ReflectionRef[], outputSlugPrefix: string, sourceId: string, cycleDate: string, signal?: AbortSignal, heldSlugs?: Set<string>,
-  derivation?: DerivationDeclaration):
+  derivation?: Derivation & { declaration: DerivationDeclaration }):
   Promise<{ pages: number; quarantined: number; repaired: number } | null> {
   const { dreamQuoteVerifyEnabled, groundSource, verifyBody } = await import('./synthesize-verify.ts');
   if (!await dreamQuoteVerifyEnabled(engine)) return null;
@@ -733,6 +733,7 @@ export async function groundPatternPages(engine: BrainEngine, maintenance: Maint
   const { serializePageToMarkdown } = await import('../markdown.ts');
   for (const slug of slugs) {
     throwIfAborted(signal, '[dream] patterns quote verify');
+    const derived = derivation && refs.some(r => r.slug === slug) ? derivation : undefined;
     const snapshot = await engine.readPageSnapshot(slug, { sourceId });
     if (!snapshot) continue;
     const ct = verifyBody(snapshot.page.compiled_truth, sources, { checks: 'quotes' });
@@ -751,12 +752,14 @@ export async function groundPatternPages(engine: BrainEngine, maintenance: Maint
     if (maintenance) {
       const { publishMaintenancePage } = await import('../persistence/prepared-maintenance.ts');
       const publish = () => publishMaintenancePage(engine, maintenance, slug, content, { expectedRevision: snapshot.revision,
-        ...(derivation && refs.some(r => r.slug === slug) ? { derivation } : {}) });
+        ...(derived ? { derivation: derived.declaration } : {}) });
       if (!heldSlugs) await publish();
       else if (await publishOrHold(publish)) heldSlugs.add(slug);
     } else {
       const [{ importFromContent }, { isAvailable }] = await Promise.all([import('../import-file.ts'), import('../ai/gateway.ts')]);
-      await importFromContent(engine, slug, content, { noEmbed: !isAvailable('embedding'), sourceId });
+      const write = (tx: BrainEngine) => importFromContent(tx, slug, content, { noEmbed: !isAvailable('embedding'), sourceId });
+      if (!derived) await write(engine);
+      else await derivedMaintenanceTransaction(engine, derived, async tx => ({ result: await write(tx), rows: [{ table: 'pages' as const, id: snapshot.page.id, sourceId }] }));
     }
   }
   return stats;

@@ -1162,7 +1162,7 @@ async function runPhaseSynthesizeInner(
       const transcriptsForVerify = new Map<string, TranscriptForVerify>(worthProcessing.map(t => [t.filePath, { content: t.content }]));
       try {
         quoteVerifyStats = await verifyAndRepairDreamPages(engine, writtenRefs, transcriptsForVerify,
-          { since: verifySince, sinceByTranscript, checkedAt: summaryDate, signal: opts.signal, grounding });
+          { since: verifySince, sinceByTranscript, checkedAt: summaryDate, signal: opts.signal, grounding, meetingTranscriptsDir: config.meetingTranscriptsDir });
       } catch (e) {
         throwIfAborted(opts.signal, '[dream] quote verify');
         process.stderr.write(`[dream] quote verify pass failed open: ${e instanceof Error ? e.message : String(e)}\n`);

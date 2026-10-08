@@ -40,6 +40,15 @@ export async function transcriptDerivation(engine: Pick<BrainEngine, 'executeRaw
   return { trust: derivedWriteTrust({ channel, inputs: [], lowerTo: [cap], sourceUri }), inputs: [] };
 }
 
+/** The derivation of a page written from several transcripts (the unmanaged quote-repair writeback): the least trusted of them. */
+export async function transcriptsDerivation(engine: Pick<BrainEngine, 'executeRaw'>, transcripts: Array<{ filePath: string; content?: string }>,
+  meetingTranscriptsDir?: string | null): Promise<Derivation> {
+  const each = await Promise.all(transcripts.map(t => transcriptDerivation(engine, t, meetingTranscriptsDir)));
+  if (each.length === 1) return each[0];
+  const inputs = each.flatMap(d => d.inputs);
+  return { inputs, trust: derivedWriteTrust({ channel: 'derive:synthesize', inputs, lowerTo: each.length ? each.map(d => d.trust.tier) : ['unknown'] }) };
+}
+
 /** Synthesis output refs with the derivation of the transcript each was written from (the unmanaged provenance stamp). */
 export async function withTranscriptTaint<R extends { raw_source?: string }>(engine: BrainEngine, refs: R[],
   transcripts: Array<{ filePath: string; content: string }>, meetingTranscriptsDir?: string | null): Promise<Array<R & { derivation: Derivation }>> {
