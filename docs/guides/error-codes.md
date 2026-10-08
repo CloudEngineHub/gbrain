@@ -1014,6 +1014,14 @@ More: [docs/guides/repair.md#fix-not-writable](../../docs/guides/repair.md#fix-n
 
 More: [docs/guides/shared-brain-skills.md#approve-publication-following-and-editing-separately](../../docs/guides/shared-brain-skills.md#approve-publication-following-and-editing-separately)
 
+### forget_requires_owner
+
+<a id="forget_requires_owner"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A remote caller asked to forget a fact more trusted than its own writes, so nothing was forgotten and the owner was asked instead. | Lower-trust writers cannot overwrite, supersede or forget what the owner confirmed or curated (#5575 guarded supersession). The request became a trust proposal the owner can accept on the brain host; forget's frozen expired meaning is unchanged because nothing expired. | Do not retry. Tell the user the fact needs their decision and give them the command in fix (gbrain trust confirm <proposal_ref> on the brain host). | user | `repeat the read that failed` | 3 | no |
+
 ### frontmatter_slug_conflict
 
 <a id="frontmatter_slug_conflict"></a>
@@ -2697,6 +2705,26 @@ More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-c
 | Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
 |---|---|---|---|---|---|---|
 | Execution claim changed before publication. | A temporary condition (a lock, a pending write, a rate limit); the same request can succeed later. | Wait briefly, then retry the same request (writes: reuse the same request_id). | agent | `repeat the read that failed` | 1 | yes |
+
+### write_gate_rejected
+
+<a id="write_gate_rejected"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The write gate refused external instruction-like content because the operator set `write_gate.external_mode` to `reject`. | Text from an untrusted source that reads like an instruction to an agent (an override, a standing rule, an exfiltration or credential request) is refused instead of held under that setting, so nothing was written. The same content refuses on every retry. | Tell the user the content was refused; whether to accept it or switch `write_gate.external_mode` back to `quarantine` is their decision. | agent | `repeat the read that failed` | 1 | no |
+
+Reasons: `override`, `standing_instruction`, `exfiltration`, `credential`, `detector_error`.
+
+### write_held
+
+<a id="write_held"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The write gate held this content for the owner's review instead of saving it as memory. | Content from an untrusted source read like an instruction to an agent, so it was quarantined in the write-gate holding table. It is not searchable or recalled until the owner releases it; retrying the same write only re-opens the same hold. | Do not retry. Tell the user what was held and give them the release command from the fix; releasing is their decision. | user | `repeat the read that failed` | 3 | no |
+
+Reasons: `override`, `standing_instruction`, `exfiltration`, `credential`, `detector_error`.
 
 ### write_pending
 

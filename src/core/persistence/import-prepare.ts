@@ -3,6 +3,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { BrainEngine } from '../engine.ts';
 import type { GBrainConfig } from '../config.ts';
 import type { Page } from '../types.ts';
+import { ownerImportTrust } from '../trust/channel.ts';
 import { importCodeFile, importFromContent, importImageFile, isImageFilePath, MAX_FILE_SIZE, MAX_IMAGE_BYTES } from '../import-file.ts';
 import { parseMarkdown, serializePageToMarkdown } from '../markdown.ts';
 import { applyInference } from '../frontmatter-inference.ts';
@@ -62,6 +63,7 @@ function managedImportRefusal(refusal: ContentRefusal, sourcePath: string): Oper
     ? `In ${sourcePath}, remove the frontmatter slug or set it to the path-derived slug (the path decides the slug), or move the file to the path that matches its slug, then import again.`
     : refusal.code === 'file_too_large' ? `${sourcePath} is over the import size limit and was not imported. Split it into smaller files or leave it out of the import.`
     : refusal.code === 'content_rejected' ? `Remove the matched junk from ${sourcePath}, then import it again.`
+    : refusal.code === 'write_gate_rejected' ? `The write gate refuses ${sourcePath} (external instruction-like content under write_gate.external_mode=reject); tell the user, the decision is theirs.`
     : `Fix line ${refusal.line ?? '?'} of ${sourcePath}${refusal.key ? ` (key "${refusal.key}")` : ''}: one line per key with its whole value quoted. Run gbrain frontmatter validate on the file to see every problem, then import it again.`;
   return contentRefusalError(refusal, suggestion, { legacy_error: 'invalid_params' });
 }
@@ -200,7 +202,7 @@ export async function prepareManagedImportMutation(engine: BrainEngine, row: Wri
   } as Page, tags));
   const project = code || image ? undefined : await prepareCanonicalProjections(engine, ready.parsedPage!, row.slug, row.source_id, snapshot, 'file');
   return { observedRevision: ready.observedRevision, noop: ready.noop && p.targetHash === sha256(rendered),
-    deferEmbedding: image || p.noEmbed, validate: async tx => { await checkPaths(tx); await ready.validate(tx); },
+    trust: await ownerImportTrust(engine, row, ready.parsedPage?.frontmatter, p.sourcePath), deferEmbedding: image || p.noEmbed, validate: async tx => { await checkPaths(tx); await ready.validate(tx); },
     file: { root, path, content: rendered, expectedBeforeHash: p.targetHash },
     apply: async tx => {
       await ready.apply(tx);

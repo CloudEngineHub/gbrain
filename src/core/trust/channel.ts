@@ -21,6 +21,7 @@
  * publication (persistence/coordinator.ts, group-publish.ts); preparers that
  * know more (sync markers, derivation inputs) declare their own.
  */
+import type { BrainEngine } from '../engine.ts';
 import type { WriteRequest } from '../persistence/model.ts';
 import { CONNECTOR_SOURCE_KINDS } from '../persistence/connector-identity.ts';
 import {
@@ -159,4 +160,17 @@ export function stampTrustMarker(frontmatter: Record<string, unknown>, tier: Tru
   const marker = isTrustTier(prior) ? minTrust(prior, tier) : tier;
   if (prior === marker) return frontmatter;
   return { ...frontmatter, trust_tier: marker };
+}
+
+/**
+ * The tier of a journaled owner-source write of one page (managed sync,
+ * import, reconcile, file repair, grandfather): `ownerPageTrust` from the
+ * source's config, capped at agent_written when a remote caller admitted it.
+ */
+export async function ownerImportTrust(engine: Pick<BrainEngine, 'executeRaw'>, row: Pick<WriteRequest, 'id' | 'source_id' | 'authority' | 'intent' | 'operation'>,
+  frontmatter: Record<string, unknown> | null | undefined, sourceUri?: string | null): Promise<WriteTrust> {
+  const [source] = await engine.executeRaw<{ config: Record<string, unknown> | string | null }>('SELECT config FROM sources WHERE id = $1', [row.source_id]);
+  const config = typeof source?.config === 'string' ? JSON.parse(source.config) as Record<string, unknown> : source?.config ?? null;
+  const trust = ownerPageTrust({ frontmatter, sourceConfig: config, channel: requestChannel(row), requestId: row.id, sourceUri });
+  return row.authority?.remote === true ? { ...trust, tier: minTrust(trust.tier, 'agent_written') } : trust;
 }

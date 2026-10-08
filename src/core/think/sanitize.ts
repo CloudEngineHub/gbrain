@@ -57,6 +57,22 @@ export const INJECTION_PATTERNS: Array<{ name: string; rx: RegExp; replacement: 
 ];
 
 /**
+ * #5575 write gate: non-global clones of the detection-grade subset
+ * (instruction overrides and output exfiltration), so `.test()` keeps no
+ * `lastIndex` state. Tag breakouts, the case-sensitive acronym, `verbatim` and
+ * `eval-shell` are render safety or too broad for a detector and stay
+ * rewrite-only. `src/core/write-gate-patterns.ts` bounds their quantifiers.
+ */
+const DETECTION_FAMILY: Readonly<Record<string, 'override' | 'exfiltration'>> = {
+  'ignore-prior': 'override', 'forget-everything': 'override', disregard: 'override', 'new-instructions': 'override',
+  'system-prompt': 'override', 'role-jailbreak': 'override', 'do-anything-now-phrase': 'override', 'dan-mode': 'override',
+  'print-system': 'exfiltration',
+};
+export const INJECTION_DETECTION_PATTERNS: ReadonlyArray<{ name: string; family: 'override' | 'exfiltration'; rx: RegExp }> = INJECTION_PATTERNS
+  .filter(p => DETECTION_FAMILY[p.name])
+  .map(p => ({ name: p.name, family: DETECTION_FAMILY[p.name], rx: new RegExp(p.rx.source, p.rx.flags.replace('g', '')) }));
+
+/**
  * Sanitize a single take claim before embedding into a model prompt.
  * Returns the cleaned text + a list of patterns that matched (for telemetry).
  */

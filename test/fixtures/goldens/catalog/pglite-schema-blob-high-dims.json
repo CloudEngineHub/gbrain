@@ -289,7 +289,13 @@
       "wanted_links.wanted_links_producer_check": "c CHECK ((producer = ANY (ARRAY['body'::text, 'frontmatter'::text])))",
       "wanted_links.wanted_links_ref_kind_check": "c CHECK ((ref_kind = ANY (ARRAY['slug'::text, 'name'::text])))",
       "wanted_links.wanted_links_reference_unique": "u UNIQUE (origin_page_id, producer, ref_kind, target_source_id, target_ref)",
-      "wanted_links.wanted_links_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE"
+      "wanted_links.wanted_links_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
+      "write_gate_holds.write_gate_holds_kind_check": "c CHECK ((kind = ANY (ARRAY['fact'::text, 'take'::text])))",
+      "write_gate_holds.write_gate_holds_pkey": "p PRIMARY KEY (id)",
+      "write_gate_holds.write_gate_holds_status_check": "c CHECK ((status = ANY (ARRAY['held'::text, 'released'::text, 'dropped'::text])))",
+      "write_gate_receipts.write_gate_receipts_pkey": "p PRIMARY KEY (id)",
+      "write_gate_receipts.write_gate_receipts_target_table_check": "c CHECK ((target_table = ANY (ARRAY['pages'::text, 'facts'::text, 'takes'::text, 'timeline_entries'::text, 'write_gate_holds'::text])))",
+      "write_gate_receipts.write_gate_receipts_verdict_check": "c CHECK ((verdict = ANY (ARRAY['flag'::text, 'quarantine'::text])))"
     },
     "extensions": [
       "pg_trgm",
@@ -609,6 +615,12 @@
       ],
       "wanted_links": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "write_gate_holds": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "write_gate_receipts": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ]
     },
     "indexes": {
@@ -876,7 +888,13 @@
       "wanted_links_pkey": "CREATE UNIQUE INDEX wanted_links_pkey ON public.wanted_links USING btree (id)",
       "wanted_links_reference_unique": "CREATE UNIQUE INDEX wanted_links_reference_unique ON public.wanted_links USING btree (origin_page_id, producer, ref_kind, target_source_id, target_ref)",
       "wanted_links_source_idx": "CREATE INDEX wanted_links_source_idx ON public.wanted_links USING btree (source_id)",
-      "wanted_links_target_idx": "CREATE INDEX wanted_links_target_idx ON public.wanted_links USING btree (target_source_id, target_ref)"
+      "wanted_links_target_idx": "CREATE INDEX wanted_links_target_idx ON public.wanted_links USING btree (target_source_id, target_ref)",
+      "write_gate_holds_dedupe_idx": "CREATE UNIQUE INDEX write_gate_holds_dedupe_idx ON public.write_gate_holds USING btree (source_id, slug, fingerprint, detector_version)",
+      "write_gate_holds_pkey": "CREATE UNIQUE INDEX write_gate_holds_pkey ON public.write_gate_holds USING btree (id)",
+      "write_gate_holds_status_idx": "CREATE INDEX write_gate_holds_status_idx ON public.write_gate_holds USING btree (status, source_id, id)",
+      "write_gate_receipts_pkey": "CREATE UNIQUE INDEX write_gate_receipts_pkey ON public.write_gate_receipts USING btree (id)",
+      "write_gate_receipts_seen_idx": "CREATE INDEX write_gate_receipts_seen_idx ON public.write_gate_receipts USING btree (last_seen_at)",
+      "write_gate_receipts_target_idx": "CREATE UNIQUE INDEX write_gate_receipts_target_idx ON public.write_gate_receipts USING btree (target_table, target_id, content_hash, detector_version)"
     },
     "policies": {},
     "sequences": {
@@ -923,7 +941,9 @@
       "take_proposals_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=take_proposals.id",
       "think_ab_results_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=think_ab_results.id",
       "timeline_entries_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=timeline_entries.id",
-      "wanted_links_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=wanted_links.id"
+      "wanted_links_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=wanted_links.id",
+      "write_gate_holds_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=write_gate_holds.id",
+      "write_gate_receipts_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=write_gate_receipts.id"
     },
     "tables": {
       "access_tokens": {
@@ -2454,6 +2474,49 @@
           "11 first_seen_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
         "flags": "relkind=r rls=false force_rls=false"
+      },
+      "write_gate_holds": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('write_gate_holds_id_seq'::regclass)",
+          "2 kind text/text NOT NULL",
+          "3 source_id text/text NOT NULL",
+          "4 slug text/text NOT NULL DEFAULT ''::text",
+          "5 fingerprint text/text NOT NULL",
+          "6 detector_version integer/int4 NOT NULL",
+          "7 tier text/text NOT NULL",
+          "8 reason_families ARRAY/_text NOT NULL DEFAULT '{}'::text[]",
+          "9 reasons ARRAY/_text NOT NULL DEFAULT '{}'::text[]",
+          "10 detector_error boolean/bool NOT NULL DEFAULT false",
+          "11 payload jsonb/jsonb NOT NULL",
+          "12 write_origin jsonb/jsonb NULL",
+          "13 request_id text/text NULL",
+          "14 status text/text NOT NULL DEFAULT 'held'::text",
+          "15 seen_count integer/int4 NOT NULL DEFAULT 1",
+          "16 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "17 last_seen_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "18 decided_at timestamp with time zone/timestamptz NULL",
+          "19 decided_by text/text NULL"
+        ],
+        "flags": "relkind=r rls=true force_rls=false"
+      },
+      "write_gate_receipts": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('write_gate_receipts_id_seq'::regclass)",
+          "2 target_table text/text NOT NULL",
+          "3 target_id text/text NOT NULL",
+          "4 source_id text/text NULL",
+          "5 content_hash text/text NOT NULL",
+          "6 tier text/text NOT NULL",
+          "7 detector_version integer/int4 NOT NULL",
+          "8 verdict text/text NOT NULL",
+          "9 reason_families ARRAY/_text NOT NULL DEFAULT '{}'::text[]",
+          "10 reasons ARRAY/_text NOT NULL DEFAULT '{}'::text[]",
+          "11 detector_error boolean/bool NOT NULL DEFAULT false",
+          "12 request_id text/text NULL",
+          "13 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "14 last_seen_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=true force_rls=false"
       }
     },
     "triggers": {

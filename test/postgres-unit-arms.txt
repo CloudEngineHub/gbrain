@@ -102,5 +102,7 @@ test/sync-frontmatter-slug-conflict.test.ts
 test/sync-group-member-order.test.ts
 test/sync-legacy-holds.test.ts
 test/takes-vector-lifecycle-5885.serial.test.ts
+test/trust-channel-writes.test.ts
+test/trust-guarded-supersession.test.ts
 test/withdrawal-overlay-concurrency.test.ts
 test/withdrawal-publication-file.test.ts
