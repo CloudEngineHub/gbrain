@@ -1911,6 +1911,13 @@
         "thinClient": "refuse",
         "thinClientRoutedSubcommands": []
       },
+      "trust": {
+        "hasSwitchCase": true,
+        "phase": "post-connect",
+        "preConnectRules": [],
+        "thinClient": "refuse",
+        "thinClientRoutedSubcommands": []
+      },
       "upgrade": {
         "hasSwitchCase": false,
         "phase": "pre-connect",

@@ -200,6 +200,11 @@
       "transcripts": [
         "./commands/transcripts.ts"
       ],
+      "trust": [
+        "./core/eligibility/explain.ts",
+        "./core/eligibility/scan.ts",
+        "./core/trust/backfill.ts"
+      ],
       "waiting": [
         "./commands/loops.ts"
       ],
