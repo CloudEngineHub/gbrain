@@ -167,12 +167,23 @@ export function parseBaseline(raw: string, file: string): BrainBenchBaseline {
   return b as BrainBenchBaseline;
 }
 
-function configsMatch(a: BrainBenchBaseline['config'], b: BrainBenchBaseline['config']): boolean {
+/**
+ * `current` is comparable to `main` when holdout, llm and harnesses match and
+ * the suites match exactly. In corpus-bless mode (the fixtures changed) a run
+ * may ADD suites: every suite main gates is still present and compared cell by
+ * cell, and the new suites' cells enter through the committed baseline the
+ * run must reproduce, its justification and the absolute floors. Dropping a
+ * suite stays incomparable.
+ */
+function configsMatch(current: BrainBenchBaseline['config'], main: BrainBenchBaseline['config'], allowAddedSuites: boolean): boolean {
+  const suitesOk = allowAddedSuites
+    ? main.suites.every(s => current.suites.includes(s))
+    : JSON.stringify(current.suites) === JSON.stringify(main.suites);
   return (
-    a.include_holdout === b.include_holdout &&
-    a.llm === b.llm &&
-    JSON.stringify(a.harnesses) === JSON.stringify(b.harnesses) &&
-    JSON.stringify(a.suites) === JSON.stringify(b.suites)
+    current.include_holdout === main.include_holdout &&
+    current.llm === main.llm &&
+    JSON.stringify(current.harnesses) === JSON.stringify(main.harnesses) &&
+    suitesOk
   );
 }
 
@@ -218,7 +229,7 @@ export function compareBaselines(
 
   // Run-config binding (red-team finding: fixtures_hash covers files only —
   // a holdout-inclusive or --llm baseline is incomparable under the same hash).
-  if (!configsMatch(current.config, main.config)) {
+  if (!configsMatch(current.config, main.config, !sameHash)) {
     return {
       verdict: 'inconclusive',
       mode,

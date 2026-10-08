@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "fixtures_hash": "509fd20d7cda693350030393b6d54154e2685516d30f017ca219bd25e92c0e57",
+  "fixtures_hash": "57e72893e5e24283cf19f43c087f8fa459f60be6361d885b9bc75526918a5737",
   "config": {
     "include_holdout": false,
     "llm": false,
@@ -11,71 +11,156 @@
     ],
     "suites": [
       "continuity",
+      "deletion",
       "know-to-ask",
+      "poisoning",
       "push",
+      "state-resolution",
+      "trust",
       "write-back"
     ]
   },
-  "justification": "2026-08 eval fix wave: openclaw volunteer-arm fusion (Arm 2 via shared volunteerStage primitive, parity with the claude-code turn-context lane) — push_recall 0.9063→1.0 (9 budget-crowded 4-entity turns flipped; itemization receipt in wave PR) at precision 1.0; kta/false-fire/isolation hold at 0 on all seams; codex+claude-code rows byte-unchanged (adapter arm is additive, E3 non-regression)",
+  "justification": "#5575 memory trust, lane I1 (GBRA-58): adds the trust, state-resolution, poisoning and deletion suites (42 generated fixtures, 36 gated, real tiered write paths, hermetic). The 12 existing cells are byte-identical on every gated metric and gold count; only avg_injected_tokens moves (+3.0 to +7.7 per cell) because proactive pointers now carry the compact trust label (A6, DX-17 declared envelope field; e.g. openclaw/push 58.42 -> 66.09, claude-code/push 50.20 -> 57.82, codex/push 54.64 -> 58.51). On this lane branch the trust, state-resolution and poisoning cells start red: they need lane L1a write-side wiring (channel tiers on MCP writes, the gate on remember/put_page/capture, guarded supersession, confirm_memory), which is not merged yet; deletion is green. Re-blessed when L1a lands.",
   "cells": {
     "claude-code/continuity": {
-      "avg_injected_tokens": 59.9167,
+      "avg_injected_tokens": 67.25,
       "continuity_rate": 1,
       "source_isolation_violations": 0
     },
+    "claude-code/deletion": {
+      "receipt_completeness": 1,
+      "residual_after_purge": 0,
+      "resurrection_after_resync": 0
+    },
     "claude-code/know-to-ask": {
-      "avg_injected_tokens": 37.8389,
+      "avg_injected_tokens": 43.5638,
       "false_fire_rate": 0,
       "know_to_ask_failure_rate": 0,
       "source_isolation_violations": 0
     },
+    "claude-code/poisoning": {
+      "agent_relayed_activation_rate": 1,
+      "avg_injected_tokens": 70.4,
+      "benign_retention": 1,
+      "false_quarantine_rate": 0,
+      "flagged_and_labeled_rate": 0,
+      "poison_activation_rate": 0.6863,
+      "poison_persist_rate": 1,
+      "source_isolation_violations": 0,
+      "unconfirmed_preference_activation_rate": 1
+    },
     "claude-code/push": {
-      "avg_injected_tokens": 50.1963,
+      "avg_injected_tokens": 57.8224,
       "push_precision": 1,
       "push_recall": 1,
       "source_isolation_violations": 0
+    },
+    "claude-code/state-resolution": {
+      "current_fact_accuracy": 0.2857,
+      "history_preserved": 1,
+      "lower_tier_supersede_violations": 5,
+      "stale_surfaced_as_current": 0
+    },
+    "claude-code/trust": {
+      "laundering_violations": 2,
+      "self_promotion_violations": 6,
+      "trust_label_accuracy": 0
     },
     "claude-code/write-back": {
       "provenance_accuracy": 1,
       "write_back_fidelity": 1
     },
     "codex/continuity": {
-      "avg_injected_tokens": 150.9167,
+      "avg_injected_tokens": 158.0833,
       "continuity_rate": 1,
       "source_isolation_violations": 0
     },
+    "codex/deletion": {
+      "receipt_completeness": 1,
+      "residual_after_purge": 0,
+      "resurrection_after_resync": 0
+    },
     "codex/know-to-ask": {
-      "avg_injected_tokens": 45.2215,
+      "avg_injected_tokens": 48.2416,
       "false_fire_rate": 0,
       "know_to_ask_failure_rate": 0,
       "source_isolation_violations": 0
     },
+    "codex/poisoning": {
+      "agent_relayed_activation_rate": 1,
+      "avg_injected_tokens": 66.58,
+      "benign_retention": 1,
+      "false_quarantine_rate": 0,
+      "flagged_and_labeled_rate": 0,
+      "poison_activation_rate": 0.6863,
+      "poison_persist_rate": 1,
+      "source_isolation_violations": 0,
+      "unconfirmed_preference_activation_rate": 1
+    },
     "codex/push": {
-      "avg_injected_tokens": 54.6449,
+      "avg_injected_tokens": 58.514,
       "push_precision": 1,
       "push_recall": 0.5521,
       "source_isolation_violations": 0
+    },
+    "codex/state-resolution": {
+      "current_fact_accuracy": 0.2857,
+      "history_preserved": 1,
+      "lower_tier_supersede_violations": 5,
+      "stale_surfaced_as_current": 0
+    },
+    "codex/trust": {
+      "laundering_violations": 2,
+      "self_promotion_violations": 6,
+      "trust_label_accuracy": 0
     },
     "codex/write-back": {
       "provenance_accuracy": 1,
       "write_back_fidelity": 1
     },
     "openclaw/continuity": {
-      "avg_injected_tokens": 75.3333,
+      "avg_injected_tokens": 82.5,
       "continuity_rate": 1,
       "source_isolation_violations": 0
     },
+    "openclaw/deletion": {
+      "receipt_completeness": 1,
+      "residual_after_purge": 0,
+      "resurrection_after_resync": 0
+    },
     "openclaw/know-to-ask": {
-      "avg_injected_tokens": 44.2617,
+      "avg_injected_tokens": 50.0134,
       "false_fire_rate": 0,
       "know_to_ask_failure_rate": 0,
       "source_isolation_violations": 0
     },
+    "openclaw/poisoning": {
+      "agent_relayed_activation_rate": 1,
+      "avg_injected_tokens": 46.28,
+      "benign_retention": 1,
+      "false_quarantine_rate": 0,
+      "flagged_and_labeled_rate": 0,
+      "poison_activation_rate": 0.6863,
+      "poison_persist_rate": 1,
+      "source_isolation_violations": 0,
+      "unconfirmed_preference_activation_rate": 1
+    },
     "openclaw/push": {
-      "avg_injected_tokens": 58.4206,
+      "avg_injected_tokens": 66.0935,
       "push_precision": 1,
       "push_recall": 1,
       "source_isolation_violations": 0
+    },
+    "openclaw/state-resolution": {
+      "current_fact_accuracy": 0.2857,
+      "history_preserved": 1,
+      "lower_tier_supersede_violations": 5,
+      "stale_surfaced_as_current": 0
+    },
+    "openclaw/trust": {
+      "laundering_violations": 2,
+      "self_promotion_violations": 6,
+      "trust_label_accuracy": 0
     },
     "openclaw/write-back": {
       "provenance_accuracy": 1,
@@ -87,13 +172,29 @@
       "gold_total": 12,
       "gold_failed": 0
     },
+    "claude-code/deletion": {
+      "gold_total": 5,
+      "gold_failed": 0
+    },
     "claude-code/know-to-ask": {
       "gold_total": 149,
       "gold_failed": 0
     },
+    "claude-code/poisoning": {
+      "gold_total": 85,
+      "gold_failed": 51
+    },
     "claude-code/push": {
       "gold_total": 96,
       "gold_failed": 0
+    },
+    "claude-code/state-resolution": {
+      "gold_total": 16,
+      "gold_failed": 10
+    },
+    "claude-code/trust": {
+      "gold_total": 35,
+      "gold_failed": 25
     },
     "claude-code/write-back": {
       "gold_total": 58,
@@ -103,13 +204,29 @@
       "gold_total": 12,
       "gold_failed": 0
     },
+    "codex/deletion": {
+      "gold_total": 5,
+      "gold_failed": 0
+    },
     "codex/know-to-ask": {
       "gold_total": 149,
       "gold_failed": 0
     },
+    "codex/poisoning": {
+      "gold_total": 85,
+      "gold_failed": 51
+    },
     "codex/push": {
       "gold_total": 96,
       "gold_failed": 43
+    },
+    "codex/state-resolution": {
+      "gold_total": 16,
+      "gold_failed": 10
+    },
+    "codex/trust": {
+      "gold_total": 35,
+      "gold_failed": 25
     },
     "codex/write-back": {
       "gold_total": 58,
@@ -119,13 +236,29 @@
       "gold_total": 12,
       "gold_failed": 0
     },
+    "openclaw/deletion": {
+      "gold_total": 5,
+      "gold_failed": 0
+    },
     "openclaw/know-to-ask": {
       "gold_total": 149,
       "gold_failed": 0
     },
+    "openclaw/poisoning": {
+      "gold_total": 85,
+      "gold_failed": 51
+    },
     "openclaw/push": {
       "gold_total": 96,
       "gold_failed": 0
+    },
+    "openclaw/state-resolution": {
+      "gold_total": 16,
+      "gold_failed": 10
+    },
+    "openclaw/trust": {
+      "gold_total": 35,
+      "gold_failed": 25
     },
     "openclaw/write-back": {
       "gold_total": 58,

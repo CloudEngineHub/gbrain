@@ -498,10 +498,16 @@ async function settleEffects(run: TrustFixtureRun): Promise<boolean> {
   }
 }
 
+export interface RunTrustStepsOpts {
+  /** Runs before each step (mutation probes break one protection here). */
+  beforeStep?: (run: TrustFixtureRun, step: TrustStep) => Promise<void>;
+}
+
 /** Runs every step of one trust fixture on its own source. Steps never throw; refusals are recorded. */
-export async function runTrustSteps(brain: TrustBrain, fixture: BrainBenchFixture): Promise<TrustFixtureRun> {
+export async function runTrustSteps(brain: TrustBrain, fixture: BrainBenchFixture, opts: RunTrustStepsOpts = {}): Promise<TrustFixtureRun> {
   const run = await setupFixtureSource(brain, fixture);
   for (const step of fixture.trust_steps ?? []) {
+    await opts.beforeStep?.(run, step);
     const rec = await executeStep(run, step);
     if (!await settleEffects(run)) rec.unsettled = true;
     if (rec.purgedClaim) await recordPostPurge(run, rec);
