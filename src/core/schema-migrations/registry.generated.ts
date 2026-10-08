@@ -222,6 +222,7 @@ import { v218 } from './v218-purge-legacy-worktree-manifest-files.ts';
 import { v219 } from './v219-pages-reconcile-name-indexes.ts';
 import { v230 } from './v230-trust-tiers.ts';
 import { v232 } from './v232-memory-purge.ts';
+import { v234 } from './v234-trust-generation.ts';
 
 // Array order is historical (see HISTORICAL_ARRAY_ORDER in the generator); the
 // runner sorts by version before applying.
@@ -442,4 +443,5 @@ export const MIGRATIONS: Migration[] = [
   v219,
   v230,
   v232,
+  v234,
 ];
