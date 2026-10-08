@@ -76,7 +76,7 @@ import { buildManifestContext, buildLinkManifest, type ManifestContext } from '.
 import { resolveCycleDate, utcDate } from './cycle-date.ts';
 import { throwIfAborted } from '../abort-check.ts';
 import { stampDreamProvenance } from './dream-provenance.ts';
-import { maintenanceTransaction } from '../persistence/attribution.ts';
+import { putDerivedPage, summaryDerivation, withTranscriptTaint } from './dream-taint.ts';
 import { findLegacyCompletion, findSynthV2Completion, partitionCompletedSynthesis } from './synthesize-completion.ts';
 
 // Re-exports: the drain was peeled to inline-drain.ts (dream-wave C7), the
@@ -1153,7 +1153,7 @@ async function runPhaseSynthesizeInner(
     const grounding = config.quoteVerify ? await resolveGroundingDecide(engine) : undefined;
     if (maintenance) {
       const processed = await postprocessManagedSynthesis(engine, maintenance, writtenRefs, childIds, jobRawSource,
-        worthProcessing, { cycleDate: summaryDate, quoteVerify: config.quoteVerify, sinceByTranscript, signal: opts.signal, grounding });
+        worthProcessing, { cycleDate: summaryDate, quoteVerify: config.quoteVerify, sinceByTranscript, signal: opts.signal, grounding, meetingTranscriptsDir: config.meetingTranscriptsDir });
       writtenRefs = processed.writtenRefs;
       finalizedRefs = processed.finalizedRefs;
       publishPending = processed.pending;
@@ -1169,7 +1169,7 @@ async function runPhaseSynthesizeInner(
       }
     }
 
-    if (!maintenance) await stampDreamProvenance(engine, writtenRefs, summaryDate, opts.signal);
+    if (!maintenance) await stampDreamProvenance(engine, await withTranscriptTaint(engine, writtenRefs, worthProcessing, config.meetingTranscriptsDir), summaryDate, opts.signal);
 
     // Dual-write: reverse-render each DB row → markdown file.
     const reverseWriteCount = maintenance ? (maintenance.binding ? writtenRefs.length : 0)
@@ -3121,15 +3121,15 @@ async function writeSummaryPage(
     { type: 'note' as string, title: `Dream cycle ${summaryDate}`, tags: ['dream-cycle'] },
   );
 
-  const { parseMarkdown } = await import('../markdown.ts');
+  const [{ parseMarkdown }, derivation] = await Promise.all([import('../markdown.ts'), summaryDerivation(engine, sourceId, writtenSlugs)]);
   const parsed = parseMarkdown(fullMarkdown);
-  if (!maintenance) await maintenanceTransaction(engine, tx => tx.putPage(summarySlug, {
+  if (!maintenance) await putDerivedPage(engine, derivation, summarySlug, {
     type: parsed.type,
     title: parsed.title,
     compiled_truth: parsed.compiled_truth,
     timeline: parsed.timeline,
     frontmatter: parsed.frontmatter,
-  }, { sourceId }));
+  }, { sourceId });
 
   const fileWriteRaw = (await engine.getConfig('dream.synthesize.summary_file_write'))?.trim().toLowerCase();
   const fileWriteEnabled = !(fileWriteRaw === 'false' || fileWriteRaw === '0' || fileWriteRaw === 'off');
@@ -3146,7 +3146,7 @@ async function writeSummaryPage(
   if (!fileWriteEnabled || dbOnlyTier) {
     if (maintenance) {
       const snapshot = await engine.readPageSnapshot(summarySlug, { sourceId, includeDeleted: true });
-      await publishMaintenancePage(engine, maintenance, summarySlug, fullMarkdown, { expectedRevision: snapshot?.revision ?? null, file: false });
+      await publishMaintenancePage(engine, maintenance, summarySlug, fullMarkdown, { expectedRevision: snapshot?.revision ?? null, file: false, derivation: derivation.declaration });
     }
     const why = !fileWriteEnabled ? 'dream.synthesize.summary_file_write=off' : 'db_only storage tier';
     process.stderr.write(`[dream] summary file-write skipped (${why}): ${summarySlug} lives in the DB only\n`);
@@ -3155,7 +3155,7 @@ async function writeSummaryPage(
 
   if (maintenance) {
     const snapshot = await engine.readPageSnapshot(summarySlug, { sourceId, includeDeleted: true });
-    await publishMaintenancePage(engine, maintenance, summarySlug, fullMarkdown, { expectedRevision: snapshot?.revision ?? null });
+    await publishMaintenancePage(engine, maintenance, summarySlug, fullMarkdown, { expectedRevision: snapshot?.revision ?? null, derivation: derivation.declaration });
     return;
   }
   try {
