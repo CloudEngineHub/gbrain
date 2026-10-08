@@ -228,7 +228,7 @@ describe('guarded fence re-projection (A5, ENG-1)', () => {
 });
 
 describe('guarded takes supersession and the takes gate', () => {
-  test('a lower-tier takes_supersede of a confirmed take adds the claim contested; the old take stays active', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+  test('a lower-tier takes_supersede of a confirmed take adds the claim contested (old take stays active); the owner accept supersedes and confirms', async () => withEnv({ GBRAIN_HOME: home }, async () => {
     for (const engine of engines) {
       const b = await brain(engine);
       const slug = 'people/frank-example';
@@ -244,6 +244,10 @@ describe('guarded takes supersession and the takes gate', () => {
       expect(rows.find(r => r.claim === 'Frank will not join acme-example')).toMatchObject({ active: true, trust_tier: 'agent_written' });
       const [proposal] = await listTrustProposals(engine, { sourceId: b.sourceId, action: 'supersede_take' });
       expect(proposal).toMatchObject({ target_table: 'takes', target_id: Number(take!.id) });
+      expect((await decideTrustProposal(engine, proposal!.id, 'accept', owner)).status).toBe('accepted');
+      const settled = await engine.executeRaw<{ id: number; claim: string; active: boolean; trust_tier: string }>('SELECT id::int AS id, claim, active, trust_tier FROM takes WHERE page_id=$1 ORDER BY row_num', [take!.page_id]);
+      expect(settled.find(r => r.id === Number(take!.id))).toMatchObject({ active: false });
+      expect(settled.find(r => r.claim === 'Frank will not join acme-example')).toMatchObject({ active: true, trust_tier: 'user_confirmed' });
     }
   }), 90_000);
 });
