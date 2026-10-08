@@ -1,5 +1,165 @@
 /**
- * Checked handlers for guarded-supersession trust proposals (#5575 A5/I3,
- * ENG-4): supersede_fact, supersede_take and forget.
+ * Guarded supersession (#5575 A5/I3, ENG-4): a write whose tier is lower than
+ * the fact or take it would supersede (or forget) does not change it. The new
+ * row is inserted active and contested, and a `trust_proposals` row links the
+ * higher-tier target to it; the owner's accept applies the supersession
+ * through the checked decide_proposals primitives (facts/proposal-supersede.ts,
+ * managed and unmanaged paths) and confirms the new row (CEO-9). Writers make
+ * the decision in prepare and re-check it in validate(tx) under lock.
+ *
+ * before_state records the guard: `{ guard, old: {id, tier}, new: {id, tier} }`
+ * (ids and tiers only, never claim text). The checked supersede's own
+ * before/after record lives in after_state.supersede.
  */
-export {};
+import type { BrainEngine } from '../engine.ts';
+import {
+  applyProposalAction, registerPairProposalStore, type PairProposal, type PairProposalStore, type ProposalActionResult,
+} from '../facts/proposal-supersede.ts';
+import { withTrustPromotion, withWriteAttribution } from '../persistence/context.ts';
+import { verbError, type OperationError } from '../ops/contract.ts';
+import type { Principal } from '../persistence/model.ts';
+import {
+  decisionResult, getTrustProposal, insertTrustProposal, registerTrustProposalHandler, transitionTrustProposal, trustProposalRef,
+  type TrustDecision, type TrustDecisionContext, type TrustProposalAction, type TrustProposalRow,
+} from './proposals.ts';
+import { tierRaiseFix } from './confirm.ts';
+import { compareTrust, storedTrustTier, type TrustTier } from './tier.ts';
+
+/** I3: a write at `writer` may supersede, expire or forget a row at `target` only when it is at least as trusted. */
+export function supersessionGuarded(writer: TrustTier | null | undefined, target: unknown): boolean {
+  return compareTrust(writer ?? 'unknown', storedTrustTier(target)) < 0;
+}
+
+/** The pending supersede_fact proposal for a contested write, inside its publication transaction. */
+export async function recordContestedFact(tx: BrainEngine, input: { sourceId: string; oldId: number; oldTier: TrustTier; newId: number; newTier: TrustTier; guard: string }): Promise<{ proposal_ref: string }> {
+  const { id } = await insertTrustProposal(tx, {
+    action: 'supersede_fact', sourceId: input.sourceId, target: { table: 'facts', id: input.oldId }, related: { table: 'facts', id: input.newId },
+    proposer: input.guard, before: { guard: input.guard, old: { id: input.oldId, tier: input.oldTier }, new: { id: input.newId, tier: input.newTier } },
+  });
+  return { proposal_ref: trustProposalRef(id) };
+}
+
+/** The pending supersede_take proposal for a contested take write. */
+export async function recordContestedTake(tx: BrainEngine, input: { sourceId: string; oldId: number; oldTier: TrustTier; newId: number; newTier: TrustTier; guard: string }): Promise<{ proposal_ref: string }> {
+  const { id } = await insertTrustProposal(tx, {
+    action: 'supersede_take', sourceId: input.sourceId, target: { table: 'takes', id: input.oldId }, related: { table: 'takes', id: input.newId },
+    proposer: input.guard, before: { guard: input.guard, old: { id: input.oldId, tier: input.oldTier }, new: { id: input.newId, tier: input.newTier } },
+  });
+  return { proposal_ref: trustProposalRef(id) };
+}
+
+/**
+ * A remote `forget` of a higher-tier fact (DX-1): files a `forget` proposal in
+ * its own transaction (attributed to the caller) and returns the verb error
+ * `forget_requires_owner` carrying its ref. The frozen `forget.expired`
+ * meaning is untouched: nothing was expired. A retry reuses the same proposal.
+ */
+export async function forgetRequiresOwner(engine: BrainEngine, input: { sourceId: string; factId: number; factTier: TrustTier; writerTier: TrustTier; principal: Principal; reason: string | null }): Promise<OperationError> {
+  const { id } = await engine.transaction(tx => withWriteAttribution(tx, { requestId: null, principal: input.principal }, () => insertTrustProposal(tx, {
+    action: 'forget', sourceId: input.sourceId, target: { table: 'facts', id: input.factId }, proposer: 'remote_forget',
+    before: { guard: 'remote_forget', fact: { id: input.factId, tier: input.factTier }, writer_tier: input.writerTier, ...(input.reason ? { has_reason: true } : {}) },
+  })));
+  const ref = trustProposalRef(id);
+  // Frozen MEMORY_VERBS v1 pair: `error` stays scope_denied, `code` is the canonical forget_requires_owner.
+  const error = verbError('scope_denied',
+    `forget_requires_owner: fact #${input.factId} is ${input.factTier}; an agent cannot forget it. Proposal ${ref} asks the owner.`,
+    `Do not retry. Tell the user fact #${input.factId} needs their decision: they can forget it with gbrain trust confirm ${ref} on the brain host.`,
+    JSON.stringify({ proposal_ref: ref, fact_id: String(input.factId) }));
+  error.canonical = 'forget_requires_owner';
+  error.fix = tierRaiseFix(['gbrain', 'trust', 'confirm', ref],
+    'Forgetting a fact the owner confirmed or curated is their decision; the confirm prompt applies the forget.',
+    `Run on the brain host, in a terminal: gbrain trust confirm ${ref}`);
+  return error;
+}
+
+/** Pre-admission check for a remote forget: a guarded target becomes a `forget` proposal and the verb error. */
+export async function guardRemoteForget(engine: BrainEngine, input: { sourceId: string; factId: number; principal: Principal; reason: string | null }): Promise<void> {
+  const [fact] = await engine.executeRaw<{ trust_tier: string }>(`SELECT trust_tier FROM facts WHERE id = $1 AND source_id = $2 AND visibility = 'world'`, [input.factId, input.sourceId]);
+  if (!fact || !supersessionGuarded('agent_written', fact.trust_tier)) return;
+  throw await forgetRequiresOwner(engine, { ...input, factTier: storedTrustTier(fact.trust_tier), writerTier: 'agent_written' });
+}
+
+/** The target's tier rose between the pre-check and the locked read: refuse without changing anything; a retry files the proposal. */
+export function remoteForgetRaced(factId: number): OperationError {
+  const error = verbError('scope_denied', `forget_requires_owner: fact #${factId} became more trusted while this forget was prepared; nothing was forgotten.`,
+    'Retry once to file the owner proposal, then tell the user it needs their decision.');
+  error.canonical = 'forget_requires_owner';
+  return error;
+}
+
+// ---------------------------------------------------------------------------
+// trust_proposals as a checked-supersede store
+// ---------------------------------------------------------------------------
+
+/** decide_proposals says `stale` where trust_proposals says `superseded` (the proposal no longer applies). */
+const toPair = (status: string) => (status === 'superseded' ? 'stale' : status);
+const fromPair = (status: string) => (status === 'stale' ? 'superseded' : status);
+
+function pairOf(row: TrustProposalRow): PairProposal | null {
+  if ((row.action !== 'supersede_fact') || row.related_id === null) return null;
+  const supersede = row.after_state.supersede as { before?: unknown; after?: unknown } | undefined;
+  return {
+    id: row.id, source_id: row.source_id, old_fact_id: row.target_id, new_fact_id: row.related_id, status: toPair(row.status) as PairProposal['status'],
+    before_state: supersede?.before ? JSON.stringify(supersede.before) : null, after_state: supersede?.after ? JSON.stringify(supersede.after) : null,
+  };
+}
+
+export const TRUST_PAIR_STORE: PairProposalStore = {
+  name: 'trust',
+  async get(engine, id, lock) {
+    const row = await getTrustProposal(engine, id, lock);
+    return row ? pairOf(row) : null;
+  },
+  async transition(engine, id, from, to, state) {
+    const row = await getTrustProposal(engine, id, true);
+    if (!row) return false;
+    const after = state?.before || state?.after
+      ? { ...row.after_state, supersede: { before: state.before ? JSON.parse(state.before) : null, after: state.after ? JSON.parse(state.after) : null } }
+      : undefined;
+    return transitionTrustProposal(engine, id, fromPair(from) as TrustProposalRow['status'], fromPair(to) as TrustProposalRow['status'], after ? { after } : {});
+  },
+  /** CEO-9: the owner's accept also confirms the new fact. */
+  async onAccept(tx, proposal) {
+    await withTrustPromotion(tx, 'user_confirmed', () => tx.executeRaw(
+      `UPDATE facts SET trust_tier = 'user_confirmed' WHERE id = $1 AND source_id = $2`, [proposal.new_fact_id, proposal.source_id]));
+  },
+  /** Undo returns the new fact to the tier it had before the accept confirmed it (lowering needs no promotion). */
+  async onUndo(tx, proposal) {
+    const row = await getTrustProposal(tx, proposal.id);
+    const prior = storedTrustTier((row?.before_state.new as { tier?: unknown } | undefined)?.tier);
+    await tx.executeRaw(`UPDATE facts SET trust_tier = $3 WHERE id = $1 AND source_id = $2`, [proposal.new_fact_id, proposal.source_id, prior]);
+  },
+};
+registerPairProposalStore(TRUST_PAIR_STORE);
+
+function fromPairResult(proposal: TrustProposalRow, decision: TrustDecision, result: ProposalActionResult) {
+  const status = result.status === 'stale' ? 'superseded' : result.status;
+  return decisionResult(proposal, decision, status as never, result.reason ? { reason: result.reason } : {});
+}
+
+/** The actions this module registers handlers for (supersede_take joins when the takes guard lands). */
+export const SUPERSEDE_HANDLER_ACTIONS: readonly TrustProposalAction[] = ['supersede_fact', 'forget'];
+
+registerTrustProposalHandler('supersede_fact', {
+  async accept(engine, proposal, ctx: TrustDecisionContext) {
+    return fromPairResult(proposal, 'accept', await applyProposalAction(engine, proposal.id, 'accept', ctx.config, TRUST_PAIR_STORE));
+  },
+  async undo(engine, proposal, ctx: TrustDecisionContext) {
+    return fromPairResult(proposal, 'undo', await applyProposalAction(engine, proposal.id, 'undo', ctx.config, TRUST_PAIR_STORE));
+  },
+});
+
+/** The owner applies the forget a remote caller asked for, as a trusted local forget. */
+registerTrustProposalHandler('forget', {
+  async accept(engine, proposal, ctx: TrustDecisionContext) {
+    const { submitForgetMutation } = await import('../persistence/memory-mutations.ts');
+    const local = { engine, sourceId: proposal.source_id, remote: false as const, dryRun: false,
+      config: ctx.config ?? ({ engine: engine.kind } as never), logger: { info() {}, warn() {}, error() {} } };
+    const outcome = await submitForgetMutation(local as never, 'forget', { id: String(proposal.target_id), request_id: crypto.randomUUID(),
+      reason: `owner accepted ${trustProposalRef(proposal.id)}` });
+    if (!await transitionTrustProposal(engine, proposal.id, 'pending', 'accepted', { decidedBy: ctx.decidedBy, after: { forget: { expired: (outcome as { expired?: unknown }).expired ?? null } } })) {
+      return decisionResult(proposal, 'accept', 'refused', { reason: (await getTrustProposal(engine, proposal.id))?.status ?? 'not_found' });
+    }
+    return decisionResult(proposal, 'accept', 'accepted', { detail: { fact_id: String(proposal.target_id) } });
+  },
+});

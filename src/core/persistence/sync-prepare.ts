@@ -462,8 +462,7 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
     `The canonical correction for ${row.slug} would overwrite newer working-tree bytes; preserve the local edit and commit it.`);
   // A rename projects against the moved page (same id), so its pinned timeline rows carry over.
   const project = await prepareCanonicalProjections(engine, ready.parsedPage, row.slug, row.source_id, base, p.companyApproval ? 'immutable' : 'file');
-  const preparedImport: PreparedMutation = { observedRevision: snapshot?.revision ?? null,
-    trust: await ownerImportTrust(engine, row, ready.parsedPage.frontmatter, p.sourcePath),
+  const preparedImport: PreparedMutation = { observedRevision: snapshot?.revision ?? null, trust: await ownerImportTrust(engine, row, ready.parsedPage.frontmatter, p.sourcePath),
     // Tells the #5470 screen the content is unchanged; publication still queues its effects.
     contentUnchanged: ready.noop && !moved && !writeback,
     ...(renamed ? { additionalPageKeys: [{ sourceId: row.source_id, slug: renamed.slug }] } : {}),
