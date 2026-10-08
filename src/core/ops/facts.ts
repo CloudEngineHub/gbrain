@@ -38,6 +38,10 @@ import { parseTtlShorthand } from '../facts/ttl-parse.ts';
 import { MEMORY_VERBS_VERSION } from '../verbs.ts';
 import type { SearchResult } from '../types.ts';
 import type { BrainEngine, FactRow } from '../engine.ts';
+import { MIN_TRUST_PARAM, resolveReadEligibility } from '../eligibility/policy.ts';
+import { stampPageTrust } from '../eligibility/stamp.ts';
+import { trustFields } from '../eligibility/labels.ts';
+import type { TrustTier } from '../trust/tier.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 
 // ============================================================
@@ -225,6 +229,7 @@ const recall: Operation = {
     include_pending: { type: 'boolean', description: 'Add pending count.' },
     return_unit: { type: 'string', enum: ['chunk', 'window', 'section', 'page', 'auto'], description: 'Evidence unit for results[] (see search).' },
     return_window: { type: 'number', description: 'Window size 1-3.' },
+    min_trust: MIN_TRUST_PARAM,
   },
   scope: 'read',
   verb: true,
@@ -275,6 +280,9 @@ const recall: Operation = {
       ctx.remote === false
         ? undefined
         : ['world'] as ('private' | 'world')[];
+    // #5575: read floor (token floor, min_trust, read policy) plus the
+    // quarantined-page and needs_rederive hiding, applied in each arm's SQL.
+    const eligibility = await resolveReadEligibility(ctx, { minTrust: p.min_trust });
 
     type FactRows = Awaited<ReturnType<typeof ctx.engine.listFactsByEntity>>;
     type FactRowItem = FactRows[number];
@@ -330,6 +338,7 @@ const recall: Operation = {
       visibility,
       grep: grep ?? undefined,
       excludeAuditRows: true,
+      eligibility,
     };
 
     if (p.supersessions === true) {
@@ -338,7 +347,7 @@ const recall: Operation = {
       // private newest row consume a limit slot and hide an older world row.
       rows = mergeNewest(
         await Promise.all(factSources.map(src =>
-          ctx.engine.listSupersessions(src, { since: since ?? undefined, limit, visibility }),
+          ctx.engine.listSupersessions(src, { since: since ?? undefined, limit, visibility, eligibility }),
         )),
         // v0.46 (#3014): matches the engine's ORDER BY COALESCE(expired_at,
         // valid_until) — ontology supersessions carry valid_until only.
@@ -440,7 +449,7 @@ const recall: Operation = {
       // like search/query/get_page/list_pages/resolve_slugs. sourceScopeOpts
       // alone pinned this arm to the scalar source, so a `federated: true`
       // source was invisible to recall while visible to every sibling read op.
-      const searchScope = federatedSearchScope(ctx, sourceIdParam);
+      const searchScope = { ...federatedSearchScope(ctx, sourceIdParam), ...(eligibility.floor ? { minTrust: eligibility.floor } : {}) };
       // #4352 — recall's page-search arm enforces `visibility: private` for
       // untrusted callers (matches the facts arms' world-only filter above).
       const { resolveExcludePrivatePages } = await import('../search/private-visibility.ts');
@@ -462,6 +471,7 @@ const recall: Operation = {
       bumpLastRetrievedAt(ctx.engine, searchResults.map(r => r.page_id));
       const applied = effectivePlan(evidencePlan, searchResults);
       if (applied) ({ results: searchResults, delivery } = await deliverEvidence(ctx.engine, searchResults, applied, { ...searchScope, excludePrivate, requireSafeChunks: ctx.remote !== false }));
+      searchResults = await stampPageTrust(ctx.engine, searchResults, eligibility.floor);
     }
 
     // Pack what is delivered: results redacted for all; facts for remote only (localVerbatim).
@@ -545,6 +555,7 @@ const recall: Operation = {
         // is the protocol name for the stored source attribution.
         fact_id: String(r.id),
         provenance: r.source, ...(r.attributed_to ? { attributed_to: r.attributed_to } : {}),
+        ...trustFields(r.trust_tier, r.write_origin),
       })),
       total: packedFacts.length,
       ...(ambiguousEntity ? { ambiguous_entity: { candidates: ambiguousEntity, suggestion: AMBIGUOUS_ENTITY_SUGGESTION } } : {}),
@@ -562,6 +573,7 @@ const recall: Operation = {
               provenance: r.slug,
               ...(r.delivered ? { delivered: r.delivered } : {}),
               ...(r.relational ? { relational: r.relational } : {}),
+              ...(r.trust_tier ? { trust_tier: r.trust_tier, origin: r.origin } : {}),
             })),
             ...(searchDegraded ? { search_degraded: searchDegraded } : {}),
             ...(searchDegraded ? {} : await searchAnswerFeedback(ctx, 'recall', packedResults)),
@@ -1266,7 +1278,7 @@ async function recallKeywordOnlyReason(ctx: OperationContext): Promise<string | 
  */
 async function keylessRecallRows(
   ctx: OperationContext, queryText: string, limit: number, excludePrivate: boolean,
-  searchScope: { sourceId?: string; sourceIds?: string[] },
+  searchScope: { sourceId?: string; sourceIds?: string[]; minTrust?: TrustTier },
 ): Promise<SearchResult[]> {
   if (await keylessChainQuestion(ctx, queryText)) {
     return hybridSearchCached(ctx.engine, queryText, {

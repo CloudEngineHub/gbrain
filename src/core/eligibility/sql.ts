@@ -59,9 +59,24 @@ export function activationSuppressedSql(table: EligibilityTable, alias: string):
       AND elig_r.verdict = 'flag' AND elig_r.reason_families && ARRAY[${ACTIVATION_REASON_FAMILIES.map(f => `'${f}'`).join(',')}]::text[]))`;
 }
 
-/** The whole row predicate for one projection table under a policy. Always hides quarantined-page projections. */
+/**
+ * A row a purge hid because one of its derivation inputs was purged
+ * (`needs_rederive`, written by facts/derivation-inputs.ts) never surfaces,
+ * even on reads that include expired or inactive rows, until a deriver
+ * regenerates it.
+ */
+export function rederiveHiddenSql(table: EligibilityTable, alias: string): string {
+  return `NOT EXISTS (SELECT 1 FROM needs_rederive elig_nr WHERE elig_nr.derived_table = '${table}' AND elig_nr.derived_id = ${alias}.id::text)`;
+}
+
+/**
+ * The whole row predicate for one projection table under a policy. Always
+ * hides quarantined-page projections and rows awaiting re-derivation.
+ * Gate holds never reach these tables (write_gate_holds) and purged rows are
+ * deleted, so neither needs a clause here.
+ */
 export function projectionEligibleSql(table: Exclude<EligibilityTable, 'pages'>, alias: string, policy: ReadEligibility | undefined): string {
-  const clauses = [quarantinedProjectionHiddenSql(table, alias)];
+  const clauses = [quarantinedProjectionHiddenSql(table, alias), rederiveHiddenSql(table, alias)];
   if (policy?.floor) clauses.push(trustFloorSql(alias, policy.floor));
   if (policy?.suppressFlagged) clauses.push(`NOT ${activationSuppressedSql(table, alias)}`);
   return clauses.join(' AND ');
