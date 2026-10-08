@@ -3261,8 +3261,8 @@
         "idempotent": true,
         "name": "trust_tiers",
         "sql": {
-          "length": 20422,
-          "sha256": "b3e7750c08d970c587250a270434dc4e2ac54e3568240b58b9ecc2c4d0168cd9"
+          "length": 20758,
+          "sha256": "4acbed408cd5f53dca48ef5381d98176b5979719dc988fe59d265af542bf333b"
         },
         "sqlFor": "absent",
         "transaction": "absent",
@@ -3274,8 +3274,8 @@
         "idempotent": true,
         "name": "write_gate",
         "sql": {
-          "length": 2385,
-          "sha256": "0cc73b39636c3ed0345fc7fffbc886f9d7cc5bcab58bd4b7d99a1a4aef102d26"
+          "length": 2797,
+          "sha256": "d6fc495e2d5aa3ae42a3048fec344af6845d7833fc3c3a1c66610ae2312876bb"
         },
         "sqlFor": "absent",
         "transaction": "absent",
