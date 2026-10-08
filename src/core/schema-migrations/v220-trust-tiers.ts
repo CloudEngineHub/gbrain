@@ -17,8 +17,8 @@ import { MANAGED_WRITER_GUARD_FUNCTION_SQL } from '../persistence/writer-guard-s
 // The managed-writer guard function is re-created (no table lock) so a page
 // tier change is guarded content like the page body. No schema.sql mirror:
 // like write attribution, these columns exist only through migrations.
-export const v230: Migration = {
-  version: 230,
+export const v220: Migration = {
+  version: 220,
   name: 'trust_tiers',
   idempotent: true,
   sql: `${TRUST_SCHEMA_SQL}
