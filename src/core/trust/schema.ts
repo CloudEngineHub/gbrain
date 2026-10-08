@@ -35,6 +35,8 @@ import { OWNER_TIER_FLOOR, TRUST_TIERS, trustRankSql } from './tier.ts';
 
 export type TrustTable = 'facts' | 'takes' | 'timeline_entries' | 'pages';
 export const TRUST_TABLES: readonly TrustTable[] = ['facts', 'takes', 'timeline_entries', 'pages'];
+/** Config key: when the last complete backfill apply finished (doctor `trust_tiers` stops recommending the backfill). */
+export const TRUST_BACKFILL_COMPLETED_KEY = 'trust.backfill_completed_at';
 
 /**
  * Frontmatter keys whose change is not a content change for the tier rule:

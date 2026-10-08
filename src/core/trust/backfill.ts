@@ -40,12 +40,11 @@ import { opError } from '../ops/contract.ts';
 import { CONNECTOR_SOURCE_KINDS } from '../persistence/connector-identity.ts';
 import { withCoordinatedWrite, withTrustBackfill } from '../persistence/context.ts';
 import { maintenanceAttribution } from '../persistence/attribution.ts';
-import type { TrustTable } from './schema.ts';
+import { TRUST_BACKFILL_COMPLETED_KEY, type TrustTable } from './schema.ts';
 import { TRUST_TIER_RANK, TRUST_TIERS, isTrustTier, trustRankSql, trustTierFromRankSql, type TrustTier } from './tier.ts';
 
+export { TRUST_BACKFILL_COMPLETED_KEY };
 export const TRUST_BACKFILL_COMMAND = 'gbrain trust backfill --resume';
-/** Config key: when the last complete apply finished (doctor `trust_tiers` stops recommending the backfill). */
-export const TRUST_BACKFILL_COMPLETED_KEY = 'trust.backfill_completed_at';
 const CHECKPOINT_OP = 'trust-backfill';
 const CHECKPOINT_KEY = 'v1';
 const DEFAULT_BATCH = 2000;

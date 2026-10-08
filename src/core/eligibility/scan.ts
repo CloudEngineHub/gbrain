@@ -12,8 +12,9 @@
  *
  * Bounded and resumable: keyset batches by id per table, with the cursor
  * (the detector version it was taken under and the id ceiling it covers:
- * rows written after the scan began are gated by their writers) in
- * `op_checkpoints`. A
+ * the max ids the write gate went live at (`write_gate.scan_baseline`), or,
+ * without a baseline for the current detector, the max ids when the scan
+ * began; rows above it are gated by their writers) in `op_checkpoints`. A
  * detector-version bump restarts the scan from the beginning; stored
  * verdicts from the older version stay until the rescan re-assesses
  * (ENG-21). Doctor `trust_scan` reports the unscanned count.
@@ -62,10 +63,24 @@ async function saveCursor(engine: Pick<BrainEngine, 'executeRaw'>, cursor: Curso
   [CHECKPOINT_OP, CHECKPOINT_KEY, JSON.stringify([cursor])]);
 }
 
-/** The cursor that applies to the current detector; an older detector's cursor starts over. */
+/**
+ * Each table's max id when the write gate went live (migration v221, detector
+ * v1): rows above it were assessed by their writers. Only a baseline taken
+ * under the current detector bounds the scan; a detector bump rescans all.
+ */
+async function readBaseline(engine: Pick<BrainEngine, 'executeRaw'>): Promise<Cursor['until'] | null> {
+  const [row] = await engine.executeRaw<{ value: string }>(`SELECT value FROM config WHERE key = 'write_gate.scan_baseline'`);
+  const parsed = row ? JSON.parse(row.value) as { detector_version?: unknown; until?: unknown } : null;
+  return parsed?.detector_version === WRITE_GATE_DETECTOR_VERSION && parsed.until && typeof parsed.until === 'object'
+    ? parsed.until as Cursor['until'] : null;
+}
+
+/** The cursor that applies to the current detector; an older detector's cursor starts over from the gate's baseline, if any. */
 async function currentCursor(engine: Pick<BrainEngine, 'executeRaw'>): Promise<Cursor> {
   const stored = await readCursor(engine).catch(() => null);
-  return stored && stored.detector_version === WRITE_GATE_DETECTOR_VERSION ? stored : { detector_version: WRITE_GATE_DETECTOR_VERSION, ids: {} };
+  if (stored && stored.detector_version === WRITE_GATE_DETECTOR_VERSION) return stored;
+  const until = await readBaseline(engine).catch(() => null);
+  return { detector_version: WRITE_GATE_DETECTOR_VERSION, ids: {}, ...(until ? { until } : {}) };
 }
 
 interface Row { id: number | string; source_id: string | null; trust_tier: string; write_origin: unknown; [k: string]: unknown }

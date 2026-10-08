@@ -1,5 +1,5 @@
 import type { Migration } from './types.ts';
-import { TRUST_SCHEMA_SQL } from '../trust/schema.ts';
+import { TRUST_BACKFILL_COMPLETED_KEY, TRUST_SCHEMA_SQL } from '../trust/schema.ts';
 import { MANAGED_WRITER_GUARD_FUNCTION_SQL } from '../persistence/writer-guard-schema.ts';
 
 // Applied by src/core/migrate.ts on the next initSchema(); see docs/ENGINES.md
@@ -17,10 +17,21 @@ import { MANAGED_WRITER_GUARD_FUNCTION_SQL } from '../persistence/writer-guard-s
 // The managed-writer guard function is re-created (no table lock) so a page
 // tier change is guarded content like the page body. No schema.sql mirror:
 // like write attribution, these columns exist only through migrations.
+// A brain with no facts, takes, timeline entries or pages has no legacy rows
+// for `gbrain trust backfill` to classify, so its backfill is recorded as
+// complete here (fresh installs replay this migration on empty tables);
+// doctor trust_tiers then never asks a new brain to backfill. Graduation
+// replaces the target's config rows with the source's, so a copy carries the
+// source's own backfill state.
 export const v220: Migration = {
   version: 220,
   name: 'trust_tiers',
   idempotent: true,
   sql: `${TRUST_SCHEMA_SQL}
-${MANAGED_WRITER_GUARD_FUNCTION_SQL}`,
+${MANAGED_WRITER_GUARD_FUNCTION_SQL}
+INSERT INTO config (key, value)
+  SELECT '${TRUST_BACKFILL_COMPLETED_KEY}', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+  WHERE NOT EXISTS (SELECT 1 FROM pages) AND NOT EXISTS (SELECT 1 FROM facts)
+    AND NOT EXISTS (SELECT 1 FROM takes) AND NOT EXISTS (SELECT 1 FROM timeline_entries)
+ON CONFLICT (key) DO NOTHING;`,
 };
