@@ -866,7 +866,7 @@ async function runPipelineBodyInner(
   if (localPath === null) {
     // All went through legacy bucket; nothing left to fence — DB-only
     // inserts have no fence-written page, so entity_slugs stays empty.
-    return { inserted, duplicate, superseded, fact_ids, entity_slugs: [] };
+    return { inserted, duplicate, superseded, fact_ids, entity_slugs: [], write_gate };
   }
 
   // Phase 5: fence-write per entity. writeFactsToFence handles the
