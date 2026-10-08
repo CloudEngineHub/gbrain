@@ -8,6 +8,8 @@ import { WRITE_REQUEST_PARAM } from '../persistence/params.ts';
  */
 
 import { opError, type Operation, type OperationContext } from './contract.ts';
+import { MIN_TRUST_PARAM, resolveReadEligibility } from '../eligibility/policy.ts';
+import { stampRowTrust } from '../eligibility/stamp.ts';
 import { opTransport, paramUse } from './op-fix.ts';
 import {
   readPolicyOpts,
@@ -38,9 +40,11 @@ const takes_list: Operation = {
     sort_by: { type: 'string', description: 'weight | since_date | created_at (default created_at)' },
     limit: { type: 'number', description: 'Max rows (default 100, cap 500)' },
     offset: { type: 'number', description: 'Skip first N rows' },
+    min_trust: MIN_TRUST_PARAM,
   },
   handler: async (ctx, p) => {
-    return ctx.engine.listTakes({
+    const eligibility = await resolveReadEligibility(ctx, { minTrust: p.min_trust });
+    const rows = await ctx.engine.listTakes({
       // #2200-class: honor federated/source scope (via the take's page.source_id).
       ...await readPolicyOpts(ctx),
       page_slug: p.page_slug as string | undefined,
@@ -54,7 +58,9 @@ const takes_list: Operation = {
       // Per-token allow-list — server-side filter for MCP-bound calls.
       // Local CLI callers leave takesHoldersAllowList unset and see all holders.
       takesHoldersAllowList: readHolders(ctx),
+      eligibility,
     });
+    return stampRowTrust(ctx.engine, 'takes', rows, r => r.id);
   },
   cliHints: { name: 'takes-list' },
 };
@@ -69,13 +75,17 @@ const takes_search: Operation = {
   params: {
     query: { type: 'string', required: true, description: "Search text matched against take claim text via trigram similarity, e.g. 'valuation cap'. This is the search text param — there is no `text` param." },
     limit: { type: 'number', description: 'Max results (default 30, cap 100)' },
+    min_trust: MIN_TRUST_PARAM,
   },
   handler: async (ctx, p) => {
-    return ctx.engine.searchTakes(p.query as string, {
+    const eligibility = await resolveReadEligibility(ctx, { minTrust: p.min_trust });
+    const hits = await ctx.engine.searchTakes(p.query as string, {
       ...await readPolicyOpts(ctx),
       limit: p.limit as number | undefined,
       takesHoldersAllowList: readHolders(ctx),
+      eligibility,
     });
+    return stampRowTrust(ctx.engine, 'takes', hits, h => h.take_id);
   },
   cliHints: { name: 'takes-search', positional: ['query'] },
 };
@@ -516,11 +526,45 @@ const takes_remove: Operation = {
   },
 };
 
+/**
+ * W9F item 8: `gbrain takes rebuild <slug>` as an operation, so the CLI can
+ * delegate it to a resident owner (`gbrain serve` holding PGLite) instead of
+ * waiting on the owner's lock. Same work as the local rebuild: the page's
+ * takes index is rebuilt from its canonical fence (`extractTakes` rebuild;
+ * on a managed brain `reextractCoordinated` publishes it, the integration
+ * point for Lane R's receipted takes intent).
+ */
+const takes_rebuild: Operation = {
+  name: 'takes_rebuild',
+  idempotent: true,
+  outputRedaction: { exempt: 'local-only: rebuild warnings quote malformed takes fence rows to the trusted local CLI owner, as the local rebuild always printed them' },
+  description:
+    'Rebuild one page\'s takes index from the takes fence the page holds. Local-only. ' +
+    'Rows whose number and claim still match keep their resolution; rows the index and the fence disagree on are re-inserted from the fence. ' +
+    'CLI: `gbrain takes rebuild <slug>`.',
+  params: {
+    request_id: WRITE_REQUEST_PARAM,
+    slug: { type: 'string', required: true, description: 'Page slug.' },
+  },
+  scope: 'write',
+  mutating: true,
+  localOnly: true,
+  area: 'takes',
+  handler: async (ctx, p) => {
+    const slug = p.slug as string;
+    validatePageSlug(slug);
+    const sourceId = ctx.sourceId ?? 'default';
+    if (ctx.dryRun) return { dry_run: true, action: 'takes_rebuild', slug, source_id: sourceId };
+    const { extractTakes } = await import('../cycle/extract-takes.ts');
+    return { slug, source_id: sourceId, ...await extractTakes(ctx.engine, { source: 'db', slugs: [slug], sourceId, rebuild: true }) };
+  },
+};
+
 // Ops in EXACTLY the canonical `operations` array order: the v0.28 trio
 // (takes_list, takes_search, think), the v0.30 calibration aggregates, then
 // the gap-closure write verbs.
 export const takesOperations: Operation[] = [
   takes_list, takes_search, think,
   takes_scorecard, takes_calibration,
-  takes_add, takes_update, takes_resolve, takes_supersede, takes_remove,
+  takes_add, takes_update, takes_resolve, takes_supersede, takes_remove, takes_rebuild,
 ];

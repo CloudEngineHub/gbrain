@@ -23,6 +23,8 @@ import { writeGateRejectedError } from '../write-gate.ts';
 import { recordContestedFact, supersessionGuarded } from '../trust/supersede-handlers.ts';
 import { storedTrustTier } from '../trust/tier.ts';
 import { pageFencesNormalized } from '../fence-repair/report.ts';
+import { fenceAppendPendingTier, withPendingFenceRows } from '../eligibility/fence-overlay.ts';
+import { withPageTierKept } from '../trust/fence-append.ts';
 
 function receiptFix(row: WriteRequest): Action {
   return row.principal_kind === 'local_cli'
@@ -131,11 +133,13 @@ export async function prepareMemoryMutation(engine: BrainEngine, row: WriteReque
     const content = serializePageToMarkdown({ ...snapshot.page, compiled_truth: body, timeline: target.page.timeline }, snapshot.tags);
     // Reuse the canonical parser/chunker and durable filesystem publication.
     // The original caller revision was checked above; this CAS binds this render.
-    page = await preparePageMutation(engine, { ...row, intent: { ...p, content, expected_revision: observedRevision, force: false } }, config, undefined, signal);
+    // #5575 ENG-1: the new row has no facts row yet; its chunks are cut at the append's tier.
+    page = await withPendingFenceRows({ sourceId: row.source_id, slug: row.slug, rowNums: [appended.rowNum], tier: fenceAppendPendingTier(writerTier) },
+      () => preparePageMutation(engine, { ...row, intent: { ...p, content, expected_revision: observedRevision, force: false } }, config, undefined, signal));
     if (page.observedRevision !== observedRevision) conflict(row);
   }
   return { observedRevision, file: page?.file, ...(page?.exclusiveSources ? { exclusiveSources: page.exclusiveSources } : {}), validate: async tx => { await validate(tx); await page?.validate?.(tx); }, apply: async tx => {
-    await page?.apply(tx);
+    if (page) await withPageTierKept(tx, { sourceId: row.source_id, slug: row.slug }, () => page!.apply(tx));
     let id: number;
     if (rowNum !== undefined) {
       const inserted = await tx.insertFacts([{ ...fact, row_num: rowNum, source_markdown_slug: row.slug }], { source_id: row.source_id }); // gbrain-allow-direct-insert: coordinator atomically publishes the prepared canonical fact fence and its new indexed row

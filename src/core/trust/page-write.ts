@@ -9,14 +9,16 @@
  *   lower of the write's tier and the page's stored tier, so the tier survives
  *   the git round trip (sync honors it; an owner restamp needs the marker gone).
  * - ENG-1: gbrain-managed fence edits (remember / takes fence appends, proposal
- *   accept strikes, loop and relink maintenance) rewrite the page body without
- *   authoring it, so the page keeps its stored tier (withTrustKeep); the fence
- *   row carries the writer's tier.
+ *   accept strikes, loop and relink maintenance) and add_timeline_entry rewrite
+ *   the page body without authoring it, so the page keeps its stored tier
+ *   (withTrustKeep); the fence or timeline row carries the writer's tier and
+ *   is gated per row (CEO-27).
  * - CEO-12: an agent write that replaces the body of a higher-tier page lowers
  *   the page and files one `lower_page` trust proposal per page (later edits
  *   fold into it) with the prior owner version to revert to.
  */
 import type { BrainEngine } from '../engine.ts';
+import { queuePageProjection } from '../page-state/projections.ts';
 import type { WriteRequest } from '../persistence/model.ts';
 import { frontmatterTrustCaps, requestChannelTrust, stampTrustMarker } from './channel.ts';
 import { insertTrustProposal, updatePendingTrustProposalAfter } from './proposals.ts';
@@ -24,7 +26,7 @@ import { OWNER_TIER_FLOOR, compareTrust, effectiveWriteTrust, minTrust, storedTr
 
 /** Page writes that only edit a gbrain-managed fence (or strike a row) and keep the page's tier. */
 const FENCE_EDIT_OPERATIONS = ['remember', 'takes_add', 'takes_update', 'takes_supersede', 'takes_resolve', 'takes_remove',
-  'decide_proposal', 'loops_close', 'relink_facts'];
+  'decide_proposal', 'loops_close', 'relink_facts', 'add_timeline_entry'];
 /** Page writes whose caller supplies the page content: they stamp the marker and can lower the page (CEO-12). */
 const CONTENT_OPERATIONS = ['put_page', 'capture', 'edit_page', 'revert_version', 'restore_page'];
 
@@ -92,4 +94,17 @@ export async function recordAgentPageLowering(tx: BrainEngine, row: Pick<WriteRe
   });
   if (!proposal.created) await updatePendingTrustProposalAfter(tx, proposal.id, after);
   return { proposal_ref: `tp${proposal.id}` };
+}
+
+/**
+ * L1b contract: chunks render fence rows by their tier relative to the page's
+ * (eligibility/fence-overlay.ts), so any tier change of a fact, take or page
+ * queues the page's projection rebuild (re-chunk) in the same transaction.
+ */
+export async function queueTierProjection(tx: BrainEngine, table: 'facts' | 'takes' | 'pages', id: number): Promise<void> {
+  const sql = table === 'facts' ? 'SELECT source_id, source_markdown_slug AS slug FROM facts WHERE id = $1 AND source_markdown_slug IS NOT NULL'
+    : table === 'takes' ? 'SELECT p.source_id, p.slug FROM takes t JOIN pages p ON p.id = t.page_id WHERE t.id = $1'
+      : 'SELECT source_id, slug FROM pages WHERE id = $1';
+  const [page] = await tx.executeRaw<{ source_id: string; slug: string }>(sql, [id]);
+  if (page) await queuePageProjection(tx, page.source_id, page.slug, 'trust_tier_changed');
 }

@@ -32,6 +32,7 @@ import { resolveExcludePrivatePages } from './private-visibility.ts';
 import { safeSplitIndex } from '../text-safe.ts';
 import { sanitizeRemoteBody } from '../remote-body.ts';
 import { credentialSafeProjection } from '../credential-projection.ts';
+import { loadFenceChunkOverlay, markFenceChunk, splitFenceOverlay, type FenceChunkOverlay } from '../eligibility/fence-overlay.ts';
 import { stripChunkHeader } from '../chunkers/code.ts';
 import { OperationError } from '../ops/contract.ts';
 
@@ -522,9 +523,14 @@ function fallbackBlock(hit: SearchResult, hits: SearchResult[], reason: string):
  * newline-padded tokens), and joined the way serializeMarkdown joins them.
  * Frontmatter is not part of it.
  */
-export function pageEvidenceText(page: { compiled_truth: string; timeline: string }, includeTimeline: boolean): { text: string; timelineAt: number } {
-  const truth = credentialSafeProjection(sanitizeRemoteBody(page.compiled_truth ?? ''));
-  const timeline = includeTimeline ? credentialSafeProjection(sanitizeRemoteBody(page.timeline ?? '')) : '';
+export function pageEvidenceText(page: { compiled_truth: string; timeline: string; fenceOverlay?: FenceChunkOverlay }, includeTimeline: boolean): { text: string; timelineAt: number } {
+  // #5575 ENG-1: the page's chunks were cut through its fence overlay; the document is too (held and purged rows
+  // out, rows below the page tier after the truth under their trust marker, the way the marked chunks hold them).
+  const ownTruth = splitFenceOverlay(page.compiled_truth ?? '', page.fenceOverlay);
+  const ownTimeline = splitFenceOverlay(page.timeline ?? '', page.fenceOverlay);
+  const truth = [credentialSafeProjection(sanitizeRemoteBody(ownTruth.main)), ...[...ownTruth.lowTier, ...(includeTimeline ? ownTimeline.lowTier : [])]
+    .map(({ tier, body }) => markFenceChunk(tier, credentialSafeProjection(sanitizeRemoteBody(body))))].join('\n\n');
+  const timeline = includeTimeline ? credentialSafeProjection(sanitizeRemoteBody(ownTimeline.main)) : '';
   if (!timeline.trim()) return { text: truth, timelineAt: -1 };
   return { text: truth + TIMELINE_SEPARATOR + timeline, timelineAt: truth.length + TIMELINE_SEPARATOR.length };
 }
@@ -866,6 +872,7 @@ export async function deliverEvidence(
         chunkSources: scope.detail === 'low' ? ['compiled_truth'] : ['compiled_truth', 'timeline'],
         maxRows,
       }), opts.timeoutMs ?? EVIDENCE_FETCH_TIMEOUT_MS);
+      for (const p of rows) p.fenceOverlay = await loadFenceChunkOverlay(engine, { sourceId: p.source_id, slug: p.slug, compiled_truth: p.compiled_truth, timeline: p.timeline });
       pages = new Map(rows.map(p => [p.page_id, p]));
     } catch (e) {
       fetchFailure = e instanceof EvidenceTimeout ? 'fetch_timeout' : 'fetch_failed';
@@ -1050,7 +1057,7 @@ export interface AssembleEvidenceInput {
   return_window?: number;
   budget_tokens?: number;
   detail?: 'low' | 'medium' | 'high';
-  caller?: { remote?: boolean; sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean };
+  caller?: { remote?: boolean; sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean; minTrust?: import('../trust/tier.ts').TrustTier };
 }
 
 export interface AssembleEvidenceOutput {
@@ -1133,6 +1140,7 @@ export async function assembleEvidenceForHits(engine: BrainEngine, input: Assemb
     ...(input.caller?.sourceIds && input.caller.sourceIds.length > 0 ? { sourceIds: input.caller.sourceIds } : input.caller?.sourceId ? { sourceId: input.caller.sourceId } : {}),
     excludePrivate,
     requireSafeChunks: remote,
+    ...(input.caller?.minTrust ? { minTrust: input.caller.minTrust } : {}),
     ...(input.detail ? { detail: input.detail } : {}),
   };
   const plan = await resolveEvidencePlan(engine, {

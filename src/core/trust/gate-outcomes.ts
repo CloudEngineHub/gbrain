@@ -9,7 +9,7 @@
  * of the same request id returns the same answer.
  */
 import type { BrainEngine } from '../engine.ts';
-import { verbError, type OperationError } from '../ops/contract.ts';
+import { opError, verbError, type OperationError } from '../ops/contract.ts';
 import { loadImportSanityConfig } from '../import-screen.ts';
 import { DEFAULT_WRITE_GATE_CONFIG, writeGateOutcome, type WriteGateAssessment, type WriteGateConfig, type WriteGateInput, type WriteGateOutcome } from '../write-gate.ts';
 import type { WriteTrust } from './tier.ts';
@@ -51,16 +51,17 @@ export function heldOutcome(assessment: WriteGateAssessment, holdId: number): Re
  * error `write_held` (frozen MEMORY_VERBS v1 pair: `error` scope_denied,
  * `code` write_held), on first delivery and on every replay.
  */
-export function throwIfHeld<T extends Record<string, unknown>>(response: T): T {
+export function throwIfHeld<T extends Record<string, unknown>>(response: T, verb = true): T {
   if (response.status !== 'held') return response;
   const gate = response.gate as WriteGateOutcome | undefined;
   const ref = String(response.hold_ref ?? gate?.receipt_ref ?? '');
   const families = gate?.reason_families ?? [];
-  const error: OperationError = verbError('scope_denied',
-    `write_held: held for owner review as ${ref} (reads like an instruction: ${families.join(', ') || 'detector error'}). Nothing was saved as memory.`,
-    'Do not retry: the same content re-opens the same hold. Tell the user it was held and relay the release command; releasing it is their decision.',
-    JSON.stringify({ hold_ref: ref, reason_families: families, ...(response.write_request ? { write_request: response.write_request } : {}) }));
-  error.canonical = 'write_held';
+  const message = `write_held: held for owner review as ${ref} (reads like an instruction: ${families.join(', ') || 'detector error'}). Nothing was saved as memory.`;
+  const suggestion = 'Do not retry: the same content re-opens the same hold. Tell the user it was held and relay the release command; releasing it is their decision.';
+  const detail = JSON.stringify({ hold_ref: ref, reason_families: families, ...(response.write_request ? { write_request: response.write_request } : {}) });
+  // Memory verbs keep the frozen v1 pair (`error` scope_denied, `code` write_held); other ops report write_held directly.
+  const error: OperationError = verb ? verbError('scope_denied', message, suggestion, detail) : opError('write_held', message, suggestion, { detail });
+  if (verb) error.canonical = 'write_held';
   error.reason = families[0] ?? 'detector_error';
   if (gate?.next) error.fix = gate.next;
   throw error;

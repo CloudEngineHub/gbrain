@@ -50,6 +50,21 @@ afterAll(async () => {
 });
 
 describe('scanWriteGateExposure', () => {
+  test('a pre-attribution schema (no request ids) scans without request joins', async () => {
+    const issued: string[] = [];
+    const exec = {
+      executeRaw: async <T,>(sql: string, params?: unknown[]): Promise<T[]> => {
+        issued.push(sql);
+        const rows = await engine.executeRaw<T>(sql, params as never);
+        if (!sql.includes('information_schema.columns')) return rows;
+        return (rows as Array<{ c: string }>).filter(r => r.c !== 'revision_write_request_id' && r.c !== 'write_request_id') as T[];
+      },
+    };
+    const report = await scanWriteGateExposure(exec as never);
+    expect(report.totals.rows).toBeGreaterThan(0);
+    expect(issued.filter(q => !q.includes('information_schema')).some(q => q.includes('write_request_id'))).toBe(false);
+  });
+
   test('lowest deterministic signal wins; no signal is unknown', () => {
     expect(projectTier([null, undefined])).toBe('unknown');
     expect(projectTier(['operator_curated', 'agent_written'])).toBe('agent_written');

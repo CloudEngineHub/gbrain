@@ -15,7 +15,8 @@ import type { BrainEngine } from '../engine.ts';
 import {
   applyProposalAction, registerPairProposalStore, type PairProposal, type PairProposalStore, type ProposalActionResult,
 } from '../facts/proposal-supersede.ts';
-import { withTrustPromotion, withWriteAttribution } from '../persistence/context.ts';
+import { currentWriteTrust, withTrustPromotion, withWriteAttribution } from '../persistence/context.ts';
+import { normalizeDimension } from '../chronicle/ontology.ts';
 import { verbError, type OperationError } from '../ops/contract.ts';
 import type { Principal } from '../persistence/model.ts';
 import {
@@ -23,7 +24,8 @@ import {
   type TrustDecision, type TrustDecisionContext, type TrustProposalAction, type TrustProposalRow,
 } from './proposals.ts';
 import { tierRaiseFix } from './confirm.ts';
-import { compareTrust, storedTrustTier, type TrustTier } from './tier.ts';
+import { queueTierProjection } from './page-write.ts';
+import { compareTrust, effectiveWriteTrust, storedTrustTier, type TrustTier, type WriteTrust } from './tier.ts';
 
 /** I3: a write at `writer` may supersede, expire or forget a row at `target` only when it is at least as trusted. */
 export function supersessionGuarded(writer: TrustTier | null | undefined, target: unknown): boolean {
@@ -87,6 +89,29 @@ export function remoteForgetRaced(factId: number): OperationError {
   return error;
 }
 
+/** The declared tier of an `ontology_propose` observation: an agent write (remote or local CLI). */
+export function ontologyWriteTrust(ctx: { remote?: boolean }): WriteTrust {
+  return effectiveWriteTrust({ channel: 'agent_written', origin: { channel: `${ctx.remote === false ? 'cli' : 'mcp'}:ontology_propose` } });
+}
+
+/**
+ * After mergeOntologyFact inserted a new stint without closing the current one
+ * (the engines' ONTOLOGY_SUPERSEDE_GUARD refused because it is more trusted),
+ * files the supersede_fact proposal and returns the additive `contested` field.
+ */
+export async function contestOntologySupersession(tx: BrainEngine, sourceId: string, entitySlug: string, dimension: string,
+  result: { action: string; factId: number | null }): Promise<{ contested?: { proposal_ref: string } }> {
+  if (result.action !== 'inserted' || result.factId === null) return {};
+  const writer = (await currentWriteTrust(tx))?.tier ?? 'unknown';
+  const [current] = await tx.executeRaw<{ id: number; trust_tier: string }>(
+    `SELECT id, trust_tier FROM facts WHERE source_id = $1 AND entity_slug = $2 AND dimension = $3 AND id <> $4
+       AND expired_at IS NULL AND valid_until IS NULL AND (dim_status IS NULL OR dim_status = 'active')
+     ORDER BY valid_from DESC NULLS LAST, confidence DESC, id DESC LIMIT 1`, [sourceId, entitySlug, normalizeDimension(dimension), result.factId]);
+  if (!current || !supersessionGuarded(writer, current.trust_tier)) return {};
+  return { contested: await recordContestedFact(tx, { sourceId, oldId: Number(current.id), oldTier: storedTrustTier(current.trust_tier),
+    newId: result.factId, newTier: writer, guard: 'ontology' }) };
+}
+
 // ---------------------------------------------------------------------------
 // trust_proposals as a checked-supersede store
 // ---------------------------------------------------------------------------
@@ -122,12 +147,14 @@ export const TRUST_PAIR_STORE: PairProposalStore = {
   async onAccept(tx, proposal) {
     await withTrustPromotion(tx, 'user_confirmed', () => tx.executeRaw(
       `UPDATE facts SET trust_tier = 'user_confirmed' WHERE id = $1 AND source_id = $2`, [proposal.new_fact_id, proposal.source_id]));
+    for (const id of [proposal.old_fact_id, proposal.new_fact_id]) await queueTierProjection(tx, 'facts', id);
   },
   /** Undo returns the new fact to the tier it had before the accept confirmed it (lowering needs no promotion). */
   async onUndo(tx, proposal) {
     const row = await getTrustProposal(tx, proposal.id);
     const prior = storedTrustTier((row?.before_state.new as { tier?: unknown } | undefined)?.tier);
     await tx.executeRaw(`UPDATE facts SET trust_tier = $3 WHERE id = $1 AND source_id = $2`, [proposal.new_fact_id, proposal.source_id, prior]);
+    for (const id of [proposal.old_fact_id, proposal.new_fact_id]) await queueTierProjection(tx, 'facts', id);
   },
 };
 registerPairProposalStore(TRUST_PAIR_STORE);

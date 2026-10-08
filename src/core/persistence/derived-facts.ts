@@ -1,61 +1,10 @@
 import type { BrainEngine, NewFact } from '../engine.ts';
-import type { Action } from '../agent-output.ts';
 import { opError } from '../ops/contract.ts';
-import { readFix, trustedCliRequired } from '../ops/op-fix.ts';
-import { currentSubmissionAuthority } from '../minions/submission-authority.ts';
-import { withCoordinatedWrite, withWriteTrust } from './context.ts';
+import { maintenanceTransaction } from './attribution.ts';
+import { managedPersistenceEnabled } from './ownership.ts';
 import { deriveTrust, recordTaintEdges } from '../trust/taint.ts';
 import { applyGateDecision, derivedGateConfig, derivedGateInput, emptyGateTally, type GateTally } from '../trust/derived-gate.ts';
 import { decideFactWrite, recordFlaggedRow } from '../write-gate-store.ts';
-import { maintenanceAttribution, maintenanceTransaction } from './attribution.ts';
-import { currentVerifiedLocalWriter } from './identity.ts';
-import { managedPersistenceEnabled } from './ownership.ts';
-import { assertPersistenceAccepting } from './service.ts';
-
-const sourcesFix = (sourceId: string): Action => readFix(`Lists sources with their archived state, including ${sourceId}.`, { argv: ['gbrain', 'sources', 'list', '--json'] });
-
-/**
- * Database-only fact rows derived from page text (the fence reconcile, the
- * conversation fact index) never touch a canonical file, so a managed brain
- * publishes them like derived links: inside the coordinator's source
- * capability, serialized on the page key. Returns false on an unmanaged brain.
- * Runs before any provider spend.
- */
-export async function managedDerivedFactsPreflight(engine: BrainEngine, sourceId: string): Promise<boolean> {
-  if (!await managedPersistenceEnabled(engine)) return false;
-  assertPersistenceAccepting(engine);
-  const job = currentSubmissionAuthority();
-  if (job && job.kind !== 'application' || currentVerifiedLocalWriter()?.remote) {
-    throw trustedCliRequired('Managed fact maintenance requires a local writer; remote maintenance jobs are not supported.');
-  }
-  const [source] = await engine.executeRaw<{ archived: boolean }>('SELECT archived FROM sources WHERE id=$1', [sourceId]);
-  if (!source || source.archived) {
-    throw opError('source_changed', 'The fact maintenance source is not active.',
-      `Source ${sourceId} is archived or missing, so its facts were not maintained and no model was called. Restore the source first if it should be maintained.`,
-      { fix: sourcesFix(sourceId) });
-  }
-  return true;
-}
-
-/**
- * One committed transaction holding the source capability and the page keys,
- * after revalidating (under a shared source lock, before the page locks) that
- * the source is still active: model work may have outlived an archive.
- */
-export async function withDerivedFactsWrite<T>(engine: BrainEngine, sourceId: string, slugs: readonly string[],
-  fn: (tx: BrainEngine) => Promise<T>): Promise<T> {
-  const attribution = await maintenanceAttribution(engine);
-  return engine.transaction(tx => withCoordinatedWrite(tx, [sourceId], async () => {
-    const [source] = await tx.executeRaw<{ archived: boolean }>('SELECT archived FROM sources WHERE id=$1 FOR SHARE', [sourceId]);
-    if (!source || source.archived) {
-      throw opError('source_changed', 'The fact maintenance source changed during extraction; nothing was written.',
-        `Source ${sourceId} was archived or removed while its facts were extracted, so nothing was written. Restore the source before maintaining its facts again.`,
-        { fix: sourcesFix(sourceId) });
-    }
-    await tx.lockPageKeys(slugs.map(slug => ({ sourceId, slug })));
-    return fn(tx);
-  }, attribution));
-}
 
 /**
  * #5575 I2: the conversation fact extractor's context is the page alone, so
@@ -63,7 +12,7 @@ export async function withDerivedFactsWrite<T>(engine: BrainEngine, sourceId: st
  * own-session transcript import is agent_written, a third-party one
  * external_untrusted) and an edge to the page.
  */
-const conversationDerivation = (engine: BrainEngine, sourceId: string, slug: string) =>
+export const conversationDerivation = (engine: BrainEngine, sourceId: string, slug: string) =>
   deriveTrust(engine, [{ table: 'pages', sourceId, slug }], { channel: 'derive:conversation_facts' });
 
 /** Edges for the fact ids a batch insert returned (`{ ids }`); other results (deletes, counts) record none. */
@@ -79,7 +28,7 @@ async function recordInsertedEdges(tx: BrainEngine, sourceId: string, result: un
  * counted and skipped.
  */
 type FenceRow = NewFact & { row_num: number; source_markdown_slug: string };
-async function insertGatedFacts(tx: BrainEngine, sourceId: string, slug: string, rows: FenceRow[],
+export async function insertGatedFacts(tx: BrainEngine, sourceId: string, slug: string, rows: FenceRow[],
   derivation: Awaited<ReturnType<typeof conversationDerivation>>): Promise<{ inserted: number; ids: number[]; write_gate: GateTally }> {
   const cfg = await derivedGateConfig(tx);
   const input = derivedGateInput(derivation.trust);
@@ -97,56 +46,26 @@ async function insertGatedFacts(tx: BrainEngine, sourceId: string, slug: string,
   return { inserted: result.inserted, ids: result.ids, write_gate };
 }
 
-/** The conversation fact index's gated batch insert, in writeDerivedFacts' transaction shape. */
+/** The conversation fact index's gated batch insert, in writeDerivedFacts' transaction shape (unmanaged brains). */
 export async function insertDerivedFacts(engine: BrainEngine, sourceId: string, slug: string, rows: FenceRow[]) {
   const derivation = await conversationDerivation(engine, sourceId, slug);
   return writeDerivedFacts(engine, sourceId, slug, db => insertGatedFacts(db, sourceId, slug, rows, derivation));
 }
 
 /**
- * Legacy writers run in one maintenance transaction on unmanaged brains. On a
- * managed brain the page must still be live under its lock, so rows are never
- * published for a page deleted or purged while the model ran.
+ * Unmanaged brains: database-only fact rows derived from page text (the
+ * conversation fact index) commit in one maintenance transaction under the
+ * maintenance principal, at the page's derived tier (#5575 I2). A managed
+ * brain publishes them as receipted maintenance requests instead
+ * (facts/conversation-publication.ts, cycle/extract-facts.ts), so this
+ * refuses there rather than write a guarded table without a receipt.
  */
 export async function writeDerivedFacts<T>(engine: BrainEngine, sourceId: string, slug: string,
   fn: (db: BrainEngine) => Promise<T>): Promise<T> {
+  if (await managedPersistenceEnabled(engine)) {
+    throw opError('writer_coordinator_required', 'Managed brains publish derived facts through receipted maintenance requests.',
+      `The derived facts of ${slug} in source ${sourceId} were not written: a managed brain publishes them through the coordinator, which this caller bypassed. Run the extraction command again; report this if it repeats.`);
+  }
   const { trust, inputs } = await conversationDerivation(engine, sourceId, slug);
-  const write = async (db: BrainEngine) => { const result = await fn(db); await recordInsertedEdges(db, sourceId, result, inputs); return result; };
-  if (!await managedPersistenceEnabled(engine)) return maintenanceTransaction(engine, write, trust);
-  return withDerivedFactsWrite(engine, sourceId, [slug], async tx => {
-    const [page] = await tx.executeRaw('SELECT id FROM pages WHERE source_id=$1 AND slug=$2 AND deleted_at IS NULL', [sourceId, slug]);
-    if (!page) {
-      throw opError('page_not_found', 'The page was deleted during fact extraction; nothing was written.',
-        `Page ${slug} in source ${sourceId} was deleted while its facts were extracted, so nothing was written. No action is needed unless the page should still exist.`);
-    }
-    return withWriteTrust(tx, trust, () => write(tx));
-  });
-}
-
-/**
- * Managed replacement of one page's derived fact batch. Nothing is written
- * while the model runs; afterwards, under the source capability and page key,
- * `isCurrent` rechecks the page the batch was extracted from, then the rows
- * whose `source` starts with `sourcePrefix` are deleted and `build(tx)`'s rows
- * inserted in the same transaction. A failed extraction or a changed page
- * leaves the prior batch in place.
- */
-export async function replaceDerivedFactsForPage(engine: BrainEngine, sourceId: string, slug: string, input: {
-  sourcePrefix: string;
-  isCurrent: (tx: BrainEngine) => Promise<boolean>;
-  build: (tx: BrainEngine) => Promise<Array<NewFact & { row_num: number; source_markdown_slug: string }>>;
-}): Promise<{ deleted: number; inserted: number }> {
-  return withDerivedFactsWrite(engine, sourceId, [slug], async tx => {
-    if (!await input.isCurrent(tx)) {
-      throw opError('revision_conflict', 'The page changed during fact extraction; its prior facts were kept.',
-        `Page ${slug} in source ${sourceId} changed while its facts were extracted, so its prior facts were kept. The next fact maintenance pass extracts from the current page.`);
-    }
-    const [deleted] = await tx.executeRaw<{ count: string }>(
-      `WITH del AS (DELETE FROM facts WHERE source_id=$1 AND source_markdown_slug=$2 AND source LIKE $3 RETURNING 1)
-       SELECT COUNT(*)::text AS count FROM del`, [sourceId, slug, `${input.sourcePrefix}%`]);
-    const rows = await input.build(tx);
-    const derivation = await conversationDerivation(tx, sourceId, slug);
-    const { inserted } = rows.length ? await withWriteTrust(tx, derivation.trust, () => insertGatedFacts(tx, sourceId, slug, rows, derivation)) : { inserted: 0 };
-    return { deleted: Number(deleted?.count ?? 0), inserted };
-  });
+  return maintenanceTransaction(engine, async db => { const result = await fn(db); await recordInsertedEdges(db, sourceId, result, inputs); return result; }, trust);
 }

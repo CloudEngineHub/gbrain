@@ -36,8 +36,11 @@ export const AGENT_WRITE_OPERATIONS: readonly string[] = [
   'takes_remove', 'loops_close', 'relink_facts', 'decide_proposal',
 ];
 
-/** Intent kinds whose preparer computes the tier from the page (owner-source sync and import paths). */
-const OWNER_SOURCE_KINDS = ['canonical_reconcile', 'managed_file_import', 'managed_file_repair', 'managed_grandfather'];
+/**
+ * Intent kinds whose preparer computes the tier from the page (owner-source sync and import paths), and
+ * the owner's `quarantine clear`, which only removes a gate-owned marker and keeps the page's tier.
+ */
+const OWNER_SOURCE_KINDS = ['canonical_reconcile', 'managed_file_import', 'managed_file_repair', 'managed_grandfather', 'managed_quarantine_clear'];
 
 /** Page frontmatter `source_kind` / `ingested_via` / `captured_via` values written by an ingestion capture (external). */
 export const EXTERNAL_CAPTURE_KINDS: readonly string[] = ['webhook', 'file-watcher', 'inbox-folder', 'cron-scheduler', 'ingest_capture'];
@@ -188,4 +191,12 @@ export async function ownerGateInput(engine: Pick<BrainEngine, 'executeRaw'>, ro
   frontmatter: Record<string, unknown> | null | undefined, sourceUri?: string | null) {
   const trust = await ownerImportTrust(engine, row, frontmatter, sourceUri);
   return { tier: trust.tier, origin: { channel: trust.origin?.channel ?? null, source_uri: trust.origin?.source_uri ?? null }, requestId: row.id };
+}
+
+/** The write-gate input of an unmanaged owner file import (direct sync / import of a source's files): the source default lowered by markers. */
+export async function ownerSourceGateInput(engine: Pick<BrainEngine, 'executeRaw'>, sourceId: string, frontmatter: Record<string, unknown> | null | undefined) {
+  const [source] = await engine.executeRaw<{ config: Record<string, unknown> | string | null }>('SELECT config FROM sources WHERE id = $1', [sourceId]);
+  const config = typeof source?.config === 'string' ? JSON.parse(source.config) as Record<string, unknown> : source?.config ?? null;
+  const trust = ownerPageTrust({ frontmatter, sourceConfig: config, channel: 'import' });
+  return { tier: trust.tier, origin: { channel: 'import' }, requestId: null };
 }
