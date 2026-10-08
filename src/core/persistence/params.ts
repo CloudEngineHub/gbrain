@@ -42,6 +42,20 @@ export const PAGE_MUTATION_PARAMS: Record<string, ParamDef> = {
   request_id: WRITE_REQUEST_PARAM,
 };
 
+/**
+ * #5575 CEO-26/DX-8: where the content of an agent write came from. Optional
+ * and additive (MEMORY_VERBS-compatible); `tool_output` stores the write as
+ * external, untrusted. Safety never depends on it (the channel tier holds
+ * without it). Validated at admission (trust/tier.ts contentOriginTier).
+ */
+export const CONTENT_ORIGIN_PARAM: ParamDef = {
+  type: 'string',
+  enum: ['user_said', 'tool_output', 'inferred'],
+  description: 'Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.',
+};
+/** Page mutation params plus `content_origin`, for verbs whose caller supplies the content (put_page, put_pages, capture, edit_page, remember). */
+export const AGENT_CONTENT_PARAMS: Record<string, ParamDef> = { ...PAGE_MUTATION_PARAMS, content_origin: CONTENT_ORIGIN_PARAM };
+
 /** Additive response schema shared by frozen memory-verb success and error envelopes. */
 export const WRITE_RECEIPT_SCHEMA = {
   type: 'object',
