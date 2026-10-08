@@ -21,11 +21,13 @@
         "members": [
           "excludePrivate?: boolean | undefined",
           "lookback_days?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sigma?: number | undefined",
           "since?: string | undefined",
           "sourceId?: string | undefined",
-          "sourceIds?: string[] | undefined"
+          "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined"
         ],
         "name": "AnomaliesOpts"
       },
@@ -152,7 +154,7 @@
           "listStaleChunks: (opts?: { batchSize?: number; afterPageId?: number; afterChunkIndex?: number; sourceId?: string; orderBy?: \"page_id\" | \"updated_desc\"; afterUpdatedAt?: string | null; }) => Promise<StaleChunkRow[]>",
           "listStalePagesForExtraction: (opts: { batchSize: number; afterPageId?: number; sourceId?: string; versionTs?: string; }) => Promise<StalePageRow[]>",
           "listStaleTakes: (opts?: StaleTakeOpts) => Promise<StaleTakeRow[]>",
-          "listSupersessions: (source_id: string, opts?: { since?: Date; limit?: number; visibility?: FactVisibility[]; }) => Promise<FactRow[]>",
+          "listSupersessions: (source_id: string, opts?: { since?: Date; limit?: number; visibility?: FactVisibility[]; eligibility?: FactListOpts[\"eligibility\"]; }) => Promise<FactRow[]>",
           "listTakes: (opts?: TakesListOpts) => Promise<Take[]>",
           "loadContradictionsTrend: (days: number) => Promise<Array<{ run_id: string; ran_at: string; judge_model: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }>>",
           "lockPageKeys: (keys: readonly PageKey[]) => Promise<void>",
@@ -191,8 +193,8 @@
           "runMigration: (version: number, sql: string) => Promise<void>",
           "searchKeyword: (query: string, opts?: SearchOpts) => Promise<SearchResult[]>",
           "searchKeywordChunks: (query: string, opts?: SearchOpts) => Promise<SearchResult[]>",
-          "searchTakes: (query: string, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; }) => Promise<TakeHit[]>",
-          "searchTakesVector: (embedding: Float32Array, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; }) => Promise<TakeHit[]>",
+          "searchTakes: (query: string, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; eligibility?: ReadEligibility; }) => Promise<TakeHit[]>",
+          "searchTakesVector: (embedding: Float32Array, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; eligibility?: ReadEligibility; }) => Promise<TakeHit[]>",
           "searchTitles: (query: string, opts?: SearchOpts) => Promise<SearchResult[]>",
           "searchVector: (embedding: Float32Array, opts?: SearchOpts) => Promise<SearchResult[]>",
           "setConfig: (key: string, value: string) => Promise<void>",
@@ -304,12 +306,14 @@
           "degreeLinkTypes: string[]",
           "excludePrivate?: boolean | undefined",
           "linkTypes: string[]",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "neighborCap: number",
           "objectTypes: string[]",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
           "subjectTypes: string[]",
+          "suppressFlagged?: boolean | undefined",
           "takesHoldersAllowList?: string[] | undefined",
           "temporal?: EdgeTemporalOpts | undefined",
           "toward: \"object\" | \"subject\""
@@ -322,9 +326,11 @@
           "excludePrivate?: boolean | undefined",
           "kind?: string | undefined",
           "limit?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "week?: boolean | undefined"
         ],
         "name": "ChronicleTimelineOpts"
@@ -670,9 +676,11 @@
         "members": [
           "excludePrivate?: boolean | undefined",
           "includeDeleted?: boolean | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
-          "sourceIds?: string[] | undefined"
+          "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined"
         ],
         "name": "GetPageOpts"
       },
@@ -837,9 +845,11 @@
           "excludePrivate?: boolean | undefined",
           "includeQuarantined?: boolean | undefined",
           "minConfidence?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "visibility?: (\"private\" | \"world\")[] | undefined"
         ],
         "name": "OntologyReadOpts"
@@ -953,9 +963,11 @@
         "kind": "interface",
         "members": [
           "excludePrivate?: boolean | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "takesHoldersAllowList?: string[] | undefined"
         ],
         "name": "PageReadPolicy"
@@ -964,9 +976,11 @@
         "kind": "interface",
         "members": [
           "excludePrivate?: boolean | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
-          "sourceIds?: string[] | undefined"
+          "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined"
         ],
         "name": "PageReadScope"
       },
@@ -1101,7 +1115,7 @@
           "listStaleChunks: (opts?: { batchSize?: number; afterPageId?: number; afterChunkIndex?: number; sourceId?: string; orderBy?: \"page_id\" | \"updated_desc\"; afterUpdatedAt?: string | null; }) => Promise<StaleChunkRow[]>",
           "listStalePagesForExtraction: (opts: { batchSize: number; afterPageId?: number; sourceId?: string; versionTs?: string; }) => Promise<StalePageRow[]>",
           "listStaleTakes: (opts?: StaleTakeOpts) => Promise<StaleTakeRow[]>",
-          "listSupersessions: (source_id: string, opts?: { since?: Date; limit?: number; visibility?: (\"private\" | \"world\")[]; }) => Promise<FactRow[]>",
+          "listSupersessions: (source_id: string, opts?: { since?: Date; limit?: number; visibility?: (\"private\" | \"world\")[]; eligibility?: FactListOpts[\"eligibility\"]; }) => Promise<FactRow[]>",
           "listTakes: (opts?: TakesListOpts) => Promise<Take[]>",
           "loadContradictionsTrend: (days: number) => Promise<Array<{ run_id: string; ran_at: string; judge_model: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }>>",
           "lockPageKeys: (keys: readonly PageKey[]) => Promise<void>",
@@ -1174,8 +1188,8 @@
           "runMigration: (_version: number, sqlStr: string) => Promise<void>",
           "searchKeyword: (query: string, opts?: SearchOpts) => Promise<SearchResult[]>",
           "searchKeywordChunks: (query: string, opts?: SearchOpts) => Promise<SearchResult[]>",
-          "searchTakes: (query: string, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; }) => Promise<TakeHit[]>",
-          "searchTakesVector: (embedding: Float32Array, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; }) => Promise<TakeHit[]>",
+          "searchTakes: (query: string, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; eligibility?: ReadEligibility; }) => Promise<TakeHit[]>",
+          "searchTakesVector: (embedding: Float32Array, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; eligibility?: ReadEligibility; }) => Promise<TakeHit[]>",
           "searchTitles: (query: string, opts?: SearchOpts) => Promise<SearchResult[]>",
           "searchVector: (embedding: Float32Array, opts?: SearchOpts) => Promise<SearchResult[]>",
           "setConfig: (key: string, value: string) => Promise<void>",
@@ -1248,10 +1262,12 @@
           "includeMentions?: boolean | undefined",
           "limit?: number | undefined",
           "linkTypes?: string[] | null | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "seedRefs?: { source_id: string; slug: string; }[] | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "takesHoldersAllowList?: string[] | undefined",
           "temporal?: EdgeTemporalOpts | undefined"
         ],
@@ -1297,11 +1313,13 @@
           "days?: number | undefined",
           "excludePrivate?: boolean | undefined",
           "limit?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "recency_bias?: \"flat\" | \"on\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "slugPrefix?: string | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "takesHoldersAllowList?: string[] | undefined"
         ],
         "name": "SalienceOpts"
@@ -1344,6 +1362,7 @@
           "intentWeighting?: boolean | undefined",
           "language?: string | undefined",
           "limit?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "nearSymbol?: string | undefined",
           "offset?: number | undefined",
           "onVectorPoolMeta?: ((m: VectorPoolMeta) => void) | undefined",
@@ -1363,6 +1382,7 @@
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
           "source_boosts?: Record<string, number> | undefined",
+          "suppressFlagged?: boolean | undefined",
           "symbolKind?: string | undefined",
           "takesHoldersAllowList?: string[] | undefined",
           "tokenBudget?: number | undefined",
@@ -1413,6 +1433,7 @@
           "keyword_relaxed?: boolean | undefined",
           "message_id?: string | undefined",
           "modality?: \"image\" | \"text\" | undefined",
+          "origin?: string | undefined",
           "page_id: number",
           "recency_boost?: number | undefined",
           "relational?: RelationalEvidence | undefined",
@@ -1441,7 +1462,9 @@
           "thread_id?: string | undefined",
           "title: string",
           "title_match_boost?: number | undefined",
+          "trust_tier?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "type: string",
+          "unconfirmed?: true | undefined",
           "unverified?: boolean | undefined"
         ],
         "name": "SearchResult"
@@ -1504,11 +1527,14 @@
         "members": [
           "after?: string | undefined",
           "before?: string | undefined",
+          "eligibility?: ReadEligibility | undefined",
           "excludePrivate?: boolean | undefined",
           "limit?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
-          "sourceIds?: string[] | undefined"
+          "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined"
         ],
         "name": "TimelineOpts"
       },
@@ -3300,7 +3326,7 @@
           "listStaleChunks: (opts?: { batchSize?: number; afterPageId?: number; afterChunkIndex?: number; sourceId?: string; orderBy?: \"page_id\" | \"updated_desc\"; afterUpdatedAt?: string | null; }) => Promise<StaleChunkRow[]>",
           "listStalePagesForExtraction: (opts: { batchSize: number; afterPageId?: number; sourceId?: string; versionTs?: string; }) => Promise<StalePageRow[]>",
           "listStaleTakes: (opts?: StaleTakeOpts) => Promise<StaleTakeRow[]>",
-          "listSupersessions: (source_id: string, opts?: { since?: Date; limit?: number; visibility?: FactVisibility[]; }) => Promise<FactRow[]>",
+          "listSupersessions: (source_id: string, opts?: { since?: Date; limit?: number; visibility?: FactVisibility[]; eligibility?: FactListOpts[\"eligibility\"]; }) => Promise<FactRow[]>",
           "listTakes: (opts?: TakesListOpts) => Promise<Take[]>",
           "loadContradictionsTrend: (days: number) => Promise<Array<{ run_id: string; ran_at: string; judge_model: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }>>",
           "lockPageKeys: (keys: readonly PageKey[]) => Promise<void>",
@@ -3339,8 +3365,8 @@
           "runMigration: (version: number, sql: string) => Promise<void>",
           "searchKeyword: (query: string, opts?: SearchOpts) => Promise<SearchResult[]>",
           "searchKeywordChunks: (query: string, opts?: SearchOpts) => Promise<SearchResult[]>",
-          "searchTakes: (query: string, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; }) => Promise<TakeHit[]>",
-          "searchTakesVector: (embedding: Float32Array, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; }) => Promise<TakeHit[]>",
+          "searchTakes: (query: string, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; eligibility?: ReadEligibility; }) => Promise<TakeHit[]>",
+          "searchTakesVector: (embedding: Float32Array, opts?: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[]; eligibility?: ReadEligibility; }) => Promise<TakeHit[]>",
           "searchTitles: (query: string, opts?: SearchOpts) => Promise<SearchResult[]>",
           "searchVector: (embedding: Float32Array, opts?: SearchOpts) => Promise<SearchResult[]>",
           "setConfig: (key: string, value: string) => Promise<void>",
@@ -3389,9 +3415,11 @@
           "bucketSize?: number | undefined",
           "excludePrivate?: boolean | undefined",
           "holder?: string | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
-          "sourceIds?: string[] | undefined"
+          "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined"
         ],
         "name": "CalibrationCurveOpts"
       },
@@ -3456,6 +3484,7 @@
         "kind": "interface",
         "members": [
           "activeOnly?: boolean | undefined",
+          "eligibility?: ReadEligibility | undefined",
           "eventTime?: boolean | undefined",
           "excludeAuditRows?: boolean | undefined",
           "fingerprint?: boolean | undefined",
@@ -3493,9 +3522,11 @@
           "source_id: string",
           "source_session: string | null",
           "superseded_by: number | null",
+          "trust_tier?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "valid_from: Date",
           "valid_until: Date | null",
-          "visibility: FactVisibility"
+          "visibility: FactVisibility",
+          "write_origin?: Record<string, unknown> | null | undefined"
         ],
         "name": "FactRow"
       },
@@ -3637,13 +3668,15 @@
         "members": [
           "excludePrivate?: boolean | undefined",
           "includeDeleted?: boolean | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "preserveExactIdentity?: boolean | undefined",
           "requireLiveSource?: boolean | undefined",
           "requireSafeChunks?: boolean | undefined",
           "requireUnambiguous?: boolean | undefined",
           "resolveAlias?: boolean | undefined",
           "sourceId?: string | undefined",
-          "sourceIds?: string[] | undefined"
+          "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined"
         ],
         "name": "PageSnapshotOptions"
       },
@@ -3814,10 +3847,12 @@
         "kind": "interface",
         "members": [
           "active?: boolean | undefined",
+          "eligibility?: ReadEligibility | undefined",
           "excludePrivate?: boolean | undefined",
           "holder?: string | undefined",
           "kind?: string | undefined",
           "limit?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "offset?: number | undefined",
           "page_id?: number | undefined",
           "page_slug?: string | undefined",
@@ -3826,6 +3861,7 @@
           "sortBy?: \"weight\" | \"since_date\" | \"created_at\" | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "takesHoldersAllowList?: string[] | undefined"
         ],
         "name": "TakesListOpts"
@@ -3852,10 +3888,12 @@
           "domainPrefix?: string | undefined",
           "excludePrivate?: boolean | undefined",
           "holder?: string | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "since?: string | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "until?: string | undefined"
         ],
         "name": "TakesScorecardOpts"
@@ -3909,9 +3947,11 @@
         "members": [
           "excludePrivate?: boolean | undefined",
           "frontierCap?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "temporal?: EdgeTemporalOpts | undefined"
         ],
         "name": "TraverseGraphOpts"
@@ -5758,7 +5798,7 @@
           "grantRevision?: number | undefined",
           "hasSourceGrant?: boolean | undefined",
           "issuedScopes?: string[] | undefined",
-          "minTrust?: \"unknown\" | \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"external_untrusted\" | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "principal?: { kind: \"oauth_client\" | \"legacy_token\"; id: string; } | undefined",
           "scopes: string[]",
           "sourceActive?: boolean | undefined",
@@ -6174,7 +6214,7 @@
           "listStaleChunks: (opts?: { batchSize?: number; afterPageId?: number; afterChunkIndex?: number; sourceId?: string; orderBy?: \"page_id\" | \"updated_desc\"; afterUpdatedAt?: string | null; }) => Promise<StaleChunkRow[]>",
           "listStalePagesForExtraction: (opts: { batchSize: number; afterPageId?: number; sourceId?: string; versionTs?: string; }) => Promise<StalePageRow[]>",
           "listStaleTakes: (opts?: StaleTakeOpts) => Promise<StaleTakeRow[]>",
-          "listSupersessions: (source_id: string, opts?: { since?: Date; limit?: number; visibility?: (\"private\" | \"world\")[]; }) => Promise<FactRow[]>",
+          "listSupersessions: (source_id: string, opts?: { since?: Date; limit?: number; visibility?: (\"private\" | \"world\")[]; eligibility?: FactListOpts[\"eligibility\"]; }) => Promise<FactRow[]>",
           "listTakes: (opts?: TakesListOpts) => Promise<Take[]>",
           "loadContradictionsTrend: (days: number) => Promise<Array<{ run_id: string; ran_at: string; judge_model: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }>>",
           "lockPageKeys: (keys: readonly PageKey[]) => Promise<void>",
@@ -6244,8 +6284,8 @@
           "runMigration: (_version: number, sql: string) => Promise<void>",
           "searchKeyword: (query: string, opts?: SearchOpts) => Promise<SearchResult[]>",
           "searchKeywordChunks: (query: string, opts?: SearchOpts) => Promise<SearchResult[]>",
-          "searchTakes: (query: string, opts?: SearchOpts & { takesHoldersAllowList?: string[]; }) => Promise<TakeHit[]>",
-          "searchTakesVector: (embedding: Float32Array, opts?: SearchOpts & { takesHoldersAllowList?: string[]; }) => Promise<TakeHit[]>",
+          "searchTakes: (query: string, opts?: SearchOpts & { takesHoldersAllowList?: string[]; eligibility?: ReadEligibility; }) => Promise<TakeHit[]>",
+          "searchTakesVector: (embedding: Float32Array, opts?: SearchOpts & { takesHoldersAllowList?: string[]; eligibility?: ReadEligibility; }) => Promise<TakeHit[]>",
           "searchTitles: (query: string, opts?: SearchOpts) => Promise<SearchResult[]>",
           "searchVector: (embedding: Float32Array, opts?: SearchOpts) => Promise<SearchResult[]>",
           "setConfig: (key: string, value: string) => Promise<void>",
@@ -6565,7 +6605,7 @@
         "kind": "interface",
         "members": [
           "budget_tokens?: number | undefined",
-          "caller?: { remote?: boolean; sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean; } | undefined",
+          "caller?: { remote?: boolean; sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean; minTrust?: TrustTier; } | undefined",
           "detail?: \"low\" | \"medium\" | \"high\" | undefined",
           "hits: FrozenHit[]",
           "return_unit: \"auto\" | \"chunk\" | \"window\" | \"section\" | \"page\"",
@@ -6671,9 +6711,11 @@
         "members": [
           "detail?: \"low\" | \"medium\" | \"high\" | undefined",
           "excludePrivate?: boolean | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
-          "sourceIds?: string[] | undefined"
+          "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined"
         ],
         "name": "DeliveryScope"
       },
@@ -6902,7 +6944,7 @@
         "kind": "function",
         "name": "pageEvidenceText",
         "signature": [
-          "(page: { compiled_truth: string; timeline: string; }, includeTimeline: boolean) => { text: string; timelineAt: number; }"
+          "(page: { compiled_truth: string; timeline: string; fenceOverlay?: FenceChunkOverlay; }, includeTimeline: boolean) => { text: string; timelineAt: number; }"
         ]
       },
       {
@@ -7031,6 +7073,7 @@
           "language?: string | undefined",
           "limit?: number | undefined",
           "metadataBoostGate?: MetadataBoostGate | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "mode?: string | undefined",
           "nearSymbol?: string | undefined",
           "offset?: number | undefined",
@@ -7056,6 +7099,7 @@
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
           "source_boosts?: Record<string, number> | undefined",
+          "suppressFlagged?: boolean | undefined",
           "symbolKind?: string | undefined",
           "takesHoldersAllowList?: string[] | undefined",
           "tokenBudget?: number | undefined",
@@ -7096,6 +7140,7 @@
           "fallback?: RecencyDecayConfig | undefined",
           "floorRatio?: number | undefined",
           "graphSignalsEnabled?: boolean | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "onGraphMeta?: ((meta: GraphSignalsMeta) => void) | undefined",
           "onScoreDistribution?: ((dist: ScoreDistribution) => void) | undefined",
           "query?: string | undefined",
@@ -7105,6 +7150,7 @@
           "skipMetadataBoosts?: boolean | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "takesHoldersAllowList?: string[] | undefined",
           "titleBoost?: number | undefined"
         ],
@@ -7581,11 +7627,13 @@
         "members": [
           "excludePrivate?: boolean | undefined",
           "lookback_days?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sigma?: number | undefined",
           "since?: string | undefined",
           "sourceId?: string | undefined",
-          "sourceIds?: string[] | undefined"
+          "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined"
         ],
         "name": "AnomaliesOpts"
       },
@@ -7689,12 +7737,14 @@
           "degreeLinkTypes: string[]",
           "excludePrivate?: boolean | undefined",
           "linkTypes: string[]",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "neighborCap: number",
           "objectTypes: string[]",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
           "subjectTypes: string[]",
+          "suppressFlagged?: boolean | undefined",
           "takesHoldersAllowList?: string[] | undefined",
           "temporal?: EdgeTemporalOpts | undefined",
           "toward: \"object\" | \"subject\""
@@ -7707,9 +7757,11 @@
           "excludePrivate?: boolean | undefined",
           "kind?: string | undefined",
           "limit?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "week?: boolean | undefined"
         ],
         "name": "ChronicleTimelineOpts"
@@ -8055,9 +8107,11 @@
         "members": [
           "excludePrivate?: boolean | undefined",
           "includeDeleted?: boolean | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
-          "sourceIds?: string[] | undefined"
+          "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined"
         ],
         "name": "GetPageOpts"
       },
@@ -8222,9 +8276,11 @@
           "excludePrivate?: boolean | undefined",
           "includeQuarantined?: boolean | undefined",
           "minConfidence?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "visibility?: (\"private\" | \"world\")[] | undefined"
         ],
         "name": "OntologyReadOpts"
@@ -8338,9 +8394,11 @@
         "kind": "interface",
         "members": [
           "excludePrivate?: boolean | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "takesHoldersAllowList?: string[] | undefined"
         ],
         "name": "PageReadPolicy"
@@ -8349,9 +8407,11 @@
         "kind": "interface",
         "members": [
           "excludePrivate?: boolean | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
-          "sourceIds?: string[] | undefined"
+          "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined"
         ],
         "name": "PageReadScope"
       },
@@ -8416,10 +8476,12 @@
           "includeMentions?: boolean | undefined",
           "limit?: number | undefined",
           "linkTypes?: string[] | null | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "seedRefs?: { source_id: string; slug: string; }[] | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "takesHoldersAllowList?: string[] | undefined",
           "temporal?: EdgeTemporalOpts | undefined"
         ],
@@ -8465,11 +8527,13 @@
           "days?: number | undefined",
           "excludePrivate?: boolean | undefined",
           "limit?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "recency_bias?: \"flat\" | \"on\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "slugPrefix?: string | undefined",
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined",
           "takesHoldersAllowList?: string[] | undefined"
         ],
         "name": "SalienceOpts"
@@ -8512,6 +8576,7 @@
           "intentWeighting?: boolean | undefined",
           "language?: string | undefined",
           "limit?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "nearSymbol?: string | undefined",
           "offset?: number | undefined",
           "onVectorPoolMeta?: ((m: VectorPoolMeta) => void) | undefined",
@@ -8531,6 +8596,7 @@
           "sourceId?: string | undefined",
           "sourceIds?: string[] | undefined",
           "source_boosts?: Record<string, number> | undefined",
+          "suppressFlagged?: boolean | undefined",
           "symbolKind?: string | undefined",
           "takesHoldersAllowList?: string[] | undefined",
           "tokenBudget?: number | undefined",
@@ -8581,6 +8647,7 @@
           "keyword_relaxed?: boolean | undefined",
           "message_id?: string | undefined",
           "modality?: \"image\" | \"text\" | undefined",
+          "origin?: string | undefined",
           "page_id: number",
           "recency_boost?: number | undefined",
           "relational?: RelationalEvidence | undefined",
@@ -8609,7 +8676,9 @@
           "thread_id?: string | undefined",
           "title: string",
           "title_match_boost?: number | undefined",
+          "trust_tier?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "type: string",
+          "unconfirmed?: true | undefined",
           "unverified?: boolean | undefined"
         ],
         "name": "SearchResult"
@@ -8672,11 +8741,14 @@
         "members": [
           "after?: string | undefined",
           "before?: string | undefined",
+          "eligibility?: ReadEligibility | undefined",
           "excludePrivate?: boolean | undefined",
           "limit?: number | undefined",
+          "minTrust?: \"user_confirmed\" | \"operator_curated\" | \"tool_observed\" | \"agent_written\" | \"unknown\" | \"external_untrusted\" | undefined",
           "requireSafeChunks?: boolean | undefined",
           "sourceId?: string | undefined",
-          "sourceIds?: string[] | undefined"
+          "sourceIds?: string[] | undefined",
+          "suppressFlagged?: boolean | undefined"
         ],
         "name": "TimelineOpts"
       },
