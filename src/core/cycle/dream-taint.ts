@@ -9,6 +9,8 @@
  *   sessions: relayed user turns are agent_written); a file under the meeting
  *   transcripts directory is third-party speech, external_untrusted.
  * - The dream summary page indexes the pages it lists.
+ * - Patterns: each pass's outputs take the least trusted reflection submitted
+ *   in that pass (patterns.ts partitions external reflections into their own pass).
  */
 import { resolve, sep } from 'node:path';
 import type { BrainEngine } from '../engine.ts';
@@ -63,4 +65,11 @@ export async function putDerivedPage(engine: BrainEngine, derivation: Derivation
     const written = await tx.putPage(slug, page, opts);
     return { result: undefined, rows: [{ table: 'pages' as const, id: Number(written.id), sourceId: opts.sourceId }] };
   });
+}
+
+/** One patterns pass's derivation: every reflection submitted in its prompt. */
+export function patternsDerivation(submitted: Array<{ taint?: TaintInput }>): Derivation & { declaration: DerivationDeclaration } {
+  const inputs = submitted.flatMap(r => (r.taint ? [r.taint] : []));
+  const trust = derivedWriteTrust({ channel: 'derive:patterns', inputs, lowerTo: inputs.length < submitted.length ? ['unknown'] : [] });
+  return { trust, inputs, declaration: declareDerivation(trust, inputs) };
 }
