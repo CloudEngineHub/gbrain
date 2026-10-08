@@ -53,7 +53,7 @@ export async function dropPurgedFenceRows(engine: BrainEngine, sourceId: string,
     const drop = new Set(rows.map(r => Number(r.row_num)));
     const { beginIdx, endIdx } = locateOutsideCode(body, TAKES_FENCE_BEGIN, TAKES_FENCE_END);
     if (beginIdx === -1 || endIdx === -1) return body;
-    body = body.slice(0, beginIdx) + renderTakesFence(parsed.takes.filter(t => !drop.has(t.rowNum))) + body.slice(endIdx + TAKES_FENCE_END.length);
+    body = body.slice(0, beginIdx) + renderTakesFence(parsed.takes.filter(t => !drop.has(t.rowNum)), [...parsed.reservedRowNums, ...drop]) + body.slice(endIdx + TAKES_FENCE_END.length);
   }
   return body;
 }
