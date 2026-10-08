@@ -9,6 +9,7 @@ import { jsonRequested, setCliExitVerdict, writeStdoutFinal } from '../../core/c
 import type { BrainEngine } from '../../core/engine.ts';
 import { TRUST_TIERS, trustLabel } from '../../core/trust/tier.ts';
 import { runTrustBackfill, type TrustBackfillReport } from '../../core/trust/backfill.ts';
+import { runTrustScan } from '../../core/eligibility/scan.ts';
 import type { CliDispatchContext } from '../command-table.ts';
 
 export const TRUST_USAGE = [
@@ -18,6 +19,11 @@ export const TRUST_USAGE = [
   '  the journaled request that wrote the row. Rows with no signal stay "unverified origin"; nothing becomes',
   '  "confirmed by you". --dry-run is read-only (no migrations, no writes) and works before the trust migration;',
   '  it reports the projected count per table and tier. --resume continues an interrupted run.',
+  '',
+  'Usage: gbrain trust scan [--batch-size N] [--json]',
+  '  Runs the write gate\'s deterministic detector over agent-written and lower rows written before the gate,',
+  '  recording a receipt for each instruction-like row so proactive surfaces stop injecting it until you confirm',
+  '  it (gbrain trust review). Changes no row; resumable (rerun to continue); a detector upgrade rescans.',
 ].join('\n');
 
 function render(report: TrustBackfillReport): string {
@@ -33,9 +39,10 @@ function render(report: TrustBackfillReport): string {
 
 export async function run(engine: BrainEngine, args: string[], ctx: CliDispatchContext): Promise<void> {
   const [sub, ...rest] = args;
-  if (!sub || args.includes('--help') || args.includes('-h') || sub !== 'backfill') {
+  const known = sub === 'backfill' || sub === 'scan';
+  if (!sub || args.includes('--help') || args.includes('-h') || !known) {
     console.log(TRUST_USAGE);
-    if (sub && sub !== 'backfill' && !args.includes('--help') && !args.includes('-h')) setCliExitVerdict(2);
+    if (sub && !known && !args.includes('--help') && !args.includes('-h')) setCliExitVerdict(2);
     return;
   }
   const dryRun = rest.includes('--dry-run');
@@ -44,6 +51,15 @@ export async function run(engine: BrainEngine, args: string[], ctx: CliDispatchC
   if (batchSize !== undefined && (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 100_000)) {
     console.error('--batch-size must be an integer from 1 to 100000.');
     setCliExitVerdict(2);
+    return;
+  }
+  if (sub === 'scan') {
+    await ctx.completeStartup?.(engine);
+    const scan = await runTrustScan(engine, batchSize ? { batchSize } : {});
+    if (jsonRequested(args)) await writeStdoutFinal(`${JSON.stringify(scan, null, 2)}\n`);
+    else console.log([`Trust scan (detector v${scan.detector_version}):`,
+      ...scan.tables.map(t => `  ${t.table}: ${t.scanned} row(s) scanned, ${t.flagged} flagged${t.done ? '' : ' (more to scan)'}`),
+      scan.complete ? '  Complete. Flagged rows are withheld from proactive context until confirmed (gbrain trust review).' : `  Continue with: ${scan.resume_command}`].join('\n'));
     return;
   }
   if (!dryRun) await ctx.completeStartup?.(engine);

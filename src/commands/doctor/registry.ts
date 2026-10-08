@@ -96,6 +96,7 @@ import { coreMemoryEntry } from './checks/core-memory.ts';
 import { plannerStatsEntry } from './checks/planner-stats.ts';
 import { revisionBackfillEntry } from './checks/revision-backfill.ts';
 import { trustTiersEntry } from './checks/trust-tiers.ts';
+import { trustScanEntry } from './checks/trust-scan.ts';
 import { harnessWiringDoctorEntry } from './checks/harness-wiring.ts';
 import { agentContractEntry } from './checks/agent-contract.ts';
 import { chatFallbackChainEntry } from './checks/chat-fallback.ts';
@@ -176,6 +177,7 @@ export const DOCTOR_CHECK_REGISTRY: readonly DoctorEntry[] = [
   transcriptSecretExposureEntry,
   revisionBackfillEntry,
   trustTiersEntry,
+  trustScanEntry,
   coreMemoryEntry,
   fenceIntegrityEntry,
   searchModeEntry,

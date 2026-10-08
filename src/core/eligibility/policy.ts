@@ -111,4 +111,5 @@ export const MIN_TRUST_PARAM = {
   type: 'string' as const,
   enum: [...TRUST_TIERS],
   description: 'Lowest trust tier to return (the connection floor still applies).',
+  fullSurfaceOnly: true,
 };

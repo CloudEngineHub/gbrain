@@ -18,6 +18,7 @@ import { PageSnapshotAmbiguousError, type PageSnapshot } from '../page-state/typ
 import { serializePageToMarkdown } from '../markdown.ts';
 import { pageTrustForRead, projectFetchText, projectGetPage, readQuarantined } from './get-page-projection.ts';
 import { MIN_TRUST_PARAM } from '../eligibility/policy.ts';
+import { stampRowTrust } from '../eligibility/stamp.ts';
 import { isAutoLinkEnabled } from '../link-extraction.ts';
 import { sanitizeRemoteBody } from '../remote-body.ts';
 import { getContentFlag } from '../quarantine.ts';
@@ -206,7 +207,7 @@ const get_page: Operation = {
     // `content` roughly duplicates compiled_truth + timeline — always emitting
     // it would double every reader's payload for the round-trip minority.
     const timelineEntries = includeTimelineEntries
-      ? await ctx.engine.getTimeline(page.slug, { ...await readPolicyOpts(ctx, { sourceId: page.source_id }), eligibility: readable.eligibility }) : undefined;
+      ? await stampRowTrust(ctx.engine, 'timeline_entries', await ctx.engine.getTimeline(page.slug, { ...await readPolicyOpts(ctx, { sourceId: page.source_id }), eligibility: readable.eligibility }), e => e.id) : undefined;
     const quarantined = readQuarantined(ctx, page, p.include_quarantined === true); // #6259
     return projectGetPage(visibleBody, {
       revision: snapshot!.revision, tags, includeContent, contentOnly: (p.content_only as boolean) === true, resolved_slug, content_flag, quarantined, trust: readable.trust,

@@ -18,6 +18,13 @@ import { compareTrust, storedTrustTier, trustLabel, type TrustTier } from '../tr
 export interface TrustFields {
   trust_tier: TrustTier;
   origin: string;
+  /**
+   * CEO-20: agent-written-or-lower content carrying an instruction-family
+   * write-gate flag that the owner has not confirmed. Explicit reads return
+   * it with this marker (text label "unconfirmed, agent-written");
+   * proactive surfaces never inject it.
+   */
+  unconfirmed?: true;
 }
 
 const ORIGIN_MAX = 40;
@@ -49,7 +56,7 @@ export interface LabelOpts {
 
 /** The compact per-item text label, e.g. `[written by an agent · mcp:remember]`. */
 export function compactTrustLabel(fields: TrustFields, opts: LabelOpts = {}): string {
-  const words = opts.unconfirmed ? 'unconfirmed, agent-written' : trustLabel(fields.trust_tier);
+  const words = opts.unconfirmed || fields.unconfirmed ? 'unconfirmed, agent-written' : trustLabel(fields.trust_tier);
   return `[${words} · ${fields.origin}]`;
 }
 
@@ -71,7 +78,7 @@ export function renderTrustedText(text: string, fields: TrustFields, opts: Label
 
 /** The attribute string for XML-ish prompt blocks (think `<take>`/`<page>`): `trust="…" origin="…"`. */
 export function trustAttributes(fields: TrustFields, opts: LabelOpts = {}): string {
-  return `trust="${opts.unconfirmed ? 'unconfirmed_agent_written' : fields.trust_tier}" origin="${fields.origin}"`;
+  return `trust="${opts.unconfirmed || fields.unconfirmed ? 'unconfirmed_agent_written' : fields.trust_tier}" origin="${fields.origin}"`;
 }
 
 /** The one line a prompt carries for external-tier blocks so the model reads them as data. */

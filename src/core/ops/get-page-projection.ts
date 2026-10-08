@@ -88,7 +88,6 @@ export function projectGetPage(page: Page, o: GetPageProjectionOpts) {
     : wrap ? { ...page, compiled_truth: enveloped(page.compiled_truth, o.trust), timeline: enveloped(page.timeline, o.trust) } : page;
   const content = () => wrap ? enveloped(serializePageToMarkdown(page, tags), o.trust) : serializePageToMarkdown(visibleBody, tags);
   const extras = {
-    ...(o.trust ? o.trust : {}),
     ...(quarantined ? { quarantined } : {}),
     ...(o.timeline_entries !== undefined ? { timeline_entries: o.timeline_entries } : {}),
     ...(o.file_held !== undefined ? { file_held: o.file_held } : {}),
@@ -113,6 +112,8 @@ export function projectGetPage(page: Page, o: GetPageProjectionOpts) {
     revision,
     tags,
     ...(o.includeContent && !omitted ? { content: content() } : {}),
+    // #5575 A6: the reading shape carries the page's trust; the content_only round-trip shape stays minimal.
+    ...(o.trust ?? {}),
     ...extras,
   };
 }

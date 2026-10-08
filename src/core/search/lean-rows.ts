@@ -30,7 +30,7 @@ const KEPT_FIELDS: ReadonlySet<string> = new Set([
   'injection_suspected', 'injection_p', 'unverified', 'content_flag', 'status', 'superseded', 'superseded_by',
   'message_id', 'thread_id', 'source_subject', 'relational',
   // #5575 A6: every row says how much it deserves influence.
-  'trust_tier', 'origin',
+  'trust_tier', 'origin', 'unconfirmed',
   // Present only when the caller asked for `explain: true`.
   'score_details',
 ]);

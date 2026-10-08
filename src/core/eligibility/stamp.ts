@@ -8,6 +8,9 @@
 import type { BrainEngine } from '../engine.ts';
 import { admitsTrust, type TrustTier } from '../trust/tier.ts';
 import { trustFields, type TrustFields } from './labels.ts';
+import { activationSuppressedSql } from './sql.ts';
+
+const withFlag = (fields: TrustFields, flagged: unknown): TrustFields => (flagged === true ? { ...fields, unconfirmed: true } : fields);
 
 interface PageRef { page_id?: number | null; source_id?: string | null; slug: string; trust_tier?: string; origin?: string }
 
@@ -22,20 +25,20 @@ export async function loadPageTrust(engine: Exec, refs: readonly PageRef[]): Pro
   const ids = [...new Set(refs.map(r => r.page_id).filter((n): n is number => typeof n === 'number' && Number.isFinite(n)))];
   const slugRefs = refs.filter(r => typeof r.page_id !== 'number');
   if (ids.length) {
-    const rows = await engine.executeRaw<{ id: number; source_id: string; slug: string; trust_tier: string; write_origin: unknown }>(
-      'SELECT id, source_id, slug, trust_tier, write_origin FROM pages WHERE id = ANY($1::int[])', [ids]);
+    const rows = await engine.executeRaw<{ id: number; source_id: string; slug: string; trust_tier: string; write_origin: unknown; flagged: boolean }>(
+      `SELECT id, source_id, slug, trust_tier, write_origin, ${activationSuppressedSql('pages', 'pages')} AS flagged FROM pages WHERE id = ANY($1::int[])`, [ids]);
     for (const row of rows) {
-      const fields = trustFields(row.trust_tier, row.write_origin);
+      const fields = withFlag(trustFields(row.trust_tier, row.write_origin), row.flagged);
       byId.set(Number(row.id), fields);
       byKey.set(key(row.source_id, row.slug), fields);
     }
   }
   if (slugRefs.length) {
-    const rows = await engine.executeRaw<{ source_id: string; slug: string; trust_tier: string; write_origin: unknown }>(
-      `SELECT source_id, slug, trust_tier, write_origin FROM pages
+    const rows = await engine.executeRaw<{ source_id: string; slug: string; trust_tier: string; write_origin: unknown; flagged: boolean }>(
+      `SELECT source_id, slug, trust_tier, write_origin, ${activationSuppressedSql('pages', 'pages')} AS flagged FROM pages
         WHERE deleted_at IS NULL AND (source_id, slug) IN (SELECT * FROM unnest($1::text[], $2::text[]))`,
       [slugRefs.map(r => r.source_id ?? 'default'), slugRefs.map(r => r.slug)]);
-    for (const row of rows) byKey.set(key(row.source_id, row.slug), trustFields(row.trust_tier, row.write_origin));
+    for (const row of rows) byKey.set(key(row.source_id, row.slug), withFlag(trustFields(row.trust_tier, row.write_origin), row.flagged));
   }
   return { byId, byKey };
 }
@@ -56,6 +59,7 @@ export async function stampPageTrust<T extends PageRef>(engine: Exec, rows: T[],
       ?? { trust_tier: 'unknown' as const, origin: 'unrecorded' };
     row.trust_tier = fields.trust_tier;
     row.origin = fields.origin;
+    if (fields.unconfirmed) (row as PageRef & { unconfirmed?: true }).unconfirmed = true;
   }
   return floor ? rows.filter(row => admitsTrust(row.trust_tier as TrustTier, floor)) : rows;
 }
@@ -74,9 +78,9 @@ export async function stampRowTrust<T extends object>(
   const ids = [...new Set(rows.map(r => Number(idOf(r))).filter(Number.isFinite))];
   const byId = new Map<number, TrustFields>();
   try {
-    const found = await engine.executeRaw<{ id: number | string; trust_tier: string; write_origin: unknown }>(
-      `SELECT id, trust_tier, write_origin FROM ${ROW_TABLES[table]} WHERE id = ANY($1::bigint[])`, [ids]);
-    for (const row of found) byId.set(Number(row.id), trustFields(row.trust_tier, row.write_origin));
+    const found = await engine.executeRaw<{ id: number | string; trust_tier: string; write_origin: unknown; flagged: boolean }>(
+      `SELECT r.id, r.trust_tier, r.write_origin, ${activationSuppressedSql(table, 'r')} AS flagged FROM ${ROW_TABLES[table]} r WHERE r.id = ANY($1::bigint[])`, [ids]);
+    for (const row of found) byId.set(Number(row.id), withFlag(trustFields(row.trust_tier, row.write_origin), row.flagged));
   } catch { /* labeled unknown below */ }
   return rows.map(row => ({ ...row, ...(byId.get(Number(idOf(row))) ?? { trust_tier: 'unknown' as const, origin: 'unrecorded' }) }));
 }

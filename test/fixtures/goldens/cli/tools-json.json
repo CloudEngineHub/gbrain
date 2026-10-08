@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 213467,
-    "stdoutSha256": "83e5d4ddae14a328b39704f90910d02986cbe8106e72174266310f705ccb4561",
+    "stdoutBytes": 218195,
+    "stdoutSha256": "47b74412739a61e9149e02ca61ed49d8d15d598ca1327647c6d6fba3a421bdc6",
     "toolNames": [
       "remember",
       "entity",
@@ -376,6 +376,7 @@
           "include_deleted": "boolean?",
           "include_quarantined": "boolean?",
           "include_timeline_entries": "boolean?",
+          "min_trust": "string?",
           "slug": "string",
           "source_id": "string?"
         },
@@ -405,6 +406,18 @@
             "include_timeline_entries": {
               "description": "Also return timeline rows.",
               "type": "boolean"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "slug": {
               "description": "Page slug.",
@@ -782,7 +795,8 @@
         "name": "fetch",
         "parameters": {
           "id": "string",
-          "include_quarantined": "boolean?"
+          "include_quarantined": "boolean?",
+          "min_trust": "string?"
         },
         "required_scopes": [],
         "schema": {
@@ -794,6 +808,18 @@
             "include_quarantined": {
               "description": "Admin: quarantined body.",
               "type": "boolean"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             }
           },
           "required": [
@@ -1026,6 +1052,7 @@
         "parameters": {
           "fields": "string?",
           "limit": "number?",
+          "min_trust": "string?",
           "mode": "string?",
           "offset": "number?",
           "query": "string",
@@ -1052,6 +1079,18 @@
             "limit": {
               "description": "Max results (default 20).",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "mode": {
               "description": "Local callers only.",
@@ -1145,6 +1184,7 @@
           "image_mime": "string?",
           "lang": "string?",
           "limit": "number?",
+          "min_trust": "string?",
           "mode": "string?",
           "near_symbol": "string?",
           "offset": "number?",
@@ -1227,6 +1267,18 @@
             "limit": {
               "description": "Default 10/25/50 by search mode.",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "mode": {
               "description": "Local callers only.",
@@ -1331,6 +1383,7 @@
         "parameters": {
           "detail": "string?",
           "hits": "array",
+          "min_trust": "string?",
           "return_unit": "string?",
           "return_window": "number?",
           "token_budget": "number?"
@@ -1353,6 +1406,18 @@
                 "type": "object"
               },
               "type": "array"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "return_unit": {
               "description": "Evidence unit: 'chunk' | 'window' | 'section' | 'page' | 'auto' (default 'page').",
@@ -2046,6 +2111,7 @@
           "after": "string?",
           "before": "string?",
           "limit": "number?",
+          "min_trust": "string?",
           "since": "string?",
           "slug": "string",
           "until": "string?"
@@ -2064,6 +2130,18 @@
             "limit": {
               "description": "Maximum number of timeline entries to return",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "since": {
               "description": "Alias for after; accepted for agent callers",
@@ -3828,6 +3906,7 @@
           "holder": "string?",
           "kind": "string?",
           "limit": "number?",
+          "min_trust": "string?",
           "offset": "number?",
           "page_slug": "string?",
           "resolved": "boolean?",
@@ -3851,6 +3930,18 @@
             "limit": {
               "description": "Max rows (default 100, cap 500)",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "offset": {
               "description": "Skip first N rows",
@@ -3882,6 +3973,7 @@
         "name": "takes_search",
         "parameters": {
           "limit": "number?",
+          "min_trust": "string?",
           "query": "string"
         },
         "required_scopes": [],
@@ -3890,6 +3982,18 @@
             "limit": {
               "description": "Max results (default 30, cap 100)",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "query": {
               "description": "Search text matched against take claim text via trigram similarity, e.g. 'valuation cap'. This is the search text param — there is no `text` param.",
@@ -5108,6 +5212,7 @@
           "days": "number?",
           "max_pages": "number?",
           "min_confidence": "number?",
+          "min_trust": "string?",
           "prior_context": "string?",
           "session_id": "string?",
           "stats": "boolean?",
@@ -5128,6 +5233,18 @@
             "min_confidence": {
               "description": "Confidence gate 0..1 (default 0.7 — slug-suffix matches need an explicit lower gate).",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "prior_context": {
               "description": "Already-surfaced context (pointer blocks / opened page bodies). Pages whose slug appears here are not re-volunteered.",
@@ -5433,6 +5550,7 @@
           "include_expired": "boolean?",
           "include_pending": "boolean?",
           "limit": "number?",
+          "min_trust": "string?",
           "query": "string?",
           "return_unit": "string?",
           "return_window": "number?",
@@ -5475,6 +5593,18 @@
             "limit": {
               "description": "Per-arm max (default 50, cap 100).",
               "type": "number"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "query": {
               "description": "Also search pages (results[] arm).",
@@ -5527,6 +5657,7 @@
           "budget_tokens": "number?",
           "entities": "string?",
           "include_private": "boolean?",
+          "min_trust": "string?",
           "session_id": "string?",
           "since": "string?"
         },
@@ -5544,6 +5675,18 @@
             "include_private": {
               "description": "Local trusted callers only.",
               "type": "boolean"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "session_id": {
               "description": "Opaque session id.",
@@ -5570,6 +5713,7 @@
           "cursor": "string?",
           "entities": "string?",
           "include_private": "boolean?",
+          "min_trust": "string?",
           "session_id": "string?",
           "since": "string?",
           "since_slug": "string?"
@@ -5592,6 +5736,18 @@
             "include_private": {
               "description": "Local trusted callers only.",
               "type": "boolean"
+            },
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
             },
             "session_id": {
               "description": "Session id; keeps a cursor.",

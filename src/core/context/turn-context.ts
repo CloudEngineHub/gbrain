@@ -662,7 +662,13 @@ async function assembleDelta(
           sort: 'updated_asc',
         });
         const window = pages.slice(0, DELTA_PAGE_FETCH_LIMIT);
-        const verdicts = await pageActivationVerdicts(engine, window.map(p => ({ source_id: opts.sourceId, slug: p.slug })), { floor: policy.floor });
+        // Labels are best-effort on an unfloored read; with a floor, an unreadable tier fails the arm closed.
+        const verdicts = await pageActivationVerdicts(engine, window.map(p => ({ source_id: opts.sourceId, slug: p.slug })), { floor: policy.floor })
+          .catch((error: unknown) => {
+            if (policy.floor) throw error;
+            return new Map(window.map(p => [pageKey({ source_id: opts.sourceId, slug: p.slug }),
+              { tier: 'unknown' as const, origin: { channel: 'unrecorded' }, belowFloor: false, suppressed: false }]));
+          });
         acc.pages = {
           status: 'ok',
           overflow: pages.length > DELTA_PAGE_FETCH_LIMIT,

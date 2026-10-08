@@ -835,6 +835,8 @@ export interface SearchResult {
   /** #5575 A6: the page's trust tier and short write origin (eligibility/stamp.ts), stamped after ranking. */
   trust_tier?: import('./trust/tier.ts').TrustTier;
   origin?: string;
+  /** #5575 CEO-20: unconfirmed agent-written content with an instruction-family gate flag (explicit reads only). */
+  unconfirmed?: true;
   /**
    * 2026-09 fix wave (#3617 follow-up): true when this row came from the
    * keyword/title arm's AND→OR zero-strict-recall fallback rather than a

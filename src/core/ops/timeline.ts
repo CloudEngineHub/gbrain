@@ -12,7 +12,7 @@ import { opError, type Operation } from './contract.ts';
 import { opTransport } from './op-fix.ts';
 import { readPolicyOpts } from './context.ts';
 import { MIN_TRUST_PARAM, resolveReadEligibility } from '../eligibility/policy.ts';
-import { withTrustLabel } from '../eligibility/labels.ts';
+import { stampRowTrust } from '../eligibility/stamp.ts';
 import {
   enforceSubagentSlugFence,
   enforceClientSlugFence,
@@ -99,7 +99,7 @@ const get_timeline: Operation = {
       ...(limit !== undefined ? { limit } : {}),
       eligibility,
     });
-    return entries.map(e => withTrustLabel(e));
+    return stampRowTrust(ctx.engine, 'timeline_entries', entries, e => (e as { id: number }).id);
   },
   scope: 'read',
   cliHints: { name: 'timeline', positional: ['slug'] },

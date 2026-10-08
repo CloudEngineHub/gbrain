@@ -41,7 +41,7 @@ import type { BrainEngine, FactRow } from '../engine.ts';
 import { MIN_TRUST_PARAM, resolveReadEligibility } from '../eligibility/policy.ts';
 import { proactiveEligibility } from '../eligibility/registry.ts';
 import { activationSuppressionNotice, suppressionSummary } from '../eligibility/activation.ts';
-import { stampPageTrust } from '../eligibility/stamp.ts';
+import { stampPageTrust, stampRowTrust } from '../eligibility/stamp.ts';
 import { trustFields } from '../eligibility/labels.ts';
 import type { TrustTier } from '../trust/tier.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
@@ -526,6 +526,8 @@ const recall: Operation = {
         }
       : undefined;
 
+    const factTrust = new Map((await stampRowTrust(ctx.engine, 'facts', packedFacts, r => r.id))
+      .map(r => [r.id, { trust_tier: r.trust_tier, origin: r.origin, ...(r.unconfirmed ? { unconfirmed: true as const } : {}) }]));
     return {
       facts: packedFacts.map(r => ({
         id: r.id,
@@ -557,7 +559,7 @@ const recall: Operation = {
         // is the protocol name for the stored source attribution.
         fact_id: String(r.id),
         provenance: r.source, ...(r.attributed_to ? { attributed_to: r.attributed_to } : {}),
-        ...trustFields(r.trust_tier, r.write_origin),
+        ...(factTrust.get(r.id) ?? trustFields(r.trust_tier, r.write_origin)),
       })),
       total: packedFacts.length,
       ...(ambiguousEntity ? { ambiguous_entity: { candidates: ambiguousEntity, suggestion: AMBIGUOUS_ENTITY_SUGGESTION } } : {}),
@@ -576,6 +578,7 @@ const recall: Operation = {
               ...(r.delivered ? { delivered: r.delivered } : {}),
               ...(r.relational ? { relational: r.relational } : {}),
               ...(r.trust_tier ? { trust_tier: r.trust_tier, origin: r.origin } : {}),
+              ...(r.unconfirmed ? { unconfirmed: true } : {}),
             })),
             ...(searchDegraded ? { search_degraded: searchDegraded } : {}),
             ...(searchDegraded ? {} : await searchAnswerFeedback(ctx, 'recall', packedResults)),
