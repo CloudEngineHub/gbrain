@@ -158,6 +158,8 @@ const ROWS: readonly Row[] = [
   ['timeline_entries', 'out_of_scope', 'probed_reported', 'source summary detail write_principal_kind write_principal_id last_write_principal_kind last_write_principal_id trust_tier write_origin', 'summary detail'],
   ['trust_proposals', 'out_of_scope', 'probed_reported', 'action source_id target_table related_table before_state after_state proposer proposer_principal_kind proposer_principal_id status decided_principal_kind decided_principal_id', 'before_state after_state'],
   ['wanted_links', 'out_of_scope', 'probed_reported', 'source_id producer ref_kind target_source_id target_ref link_type context', 'context'],
+  ['write_gate_holds', 'out_of_scope', 'probed_reported', 'kind source_id slug fingerprint payload write_origin tier reason_families reasons request_id status decided_by', 'payload'],
+  ['write_gate_receipts', 'out_of_scope', 'text_free_ledger', 'target_table target_id source_id content_hash tier verdict reason_families reasons request_id'],
 ];
 
 export const DELETION_INVENTORY: readonly InventoryEntry[] = ROWS.map(([table, cls, reason, columns, probe]) => ({
