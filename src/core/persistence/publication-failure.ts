@@ -39,6 +39,7 @@ export interface PublicationFailure { code: string; message: string; detail?: Pu
 const IDENT = /^[A-Za-z_][A-Za-z0-9_.:-]{0,79}$/;
 const ident = (value: unknown) => typeof value === 'string' && IDENT.test(value) ? value : undefined;
 const GUARD_PREFIX = 'writer_coordinator_required:';
+const PURGED_PREFIX = 'purged_content:';
 const RELATIONSHIP_TEXT: Record<string, string> = {
   different_source: 'a row in a source this publication does not own',
   missing_source: 'a row whose source could not be resolved',
@@ -69,6 +70,8 @@ export function databaseRefusal(error: unknown): PublicationFailure | null {
   const table = ident(e.table_name ?? e.table);
   const constraint = typeof (e.constraint_name ?? e.constraint) === 'string' ? String(e.constraint_name ?? e.constraint) : '';
   const message = typeof e.message === 'string' ? e.message : '';
+  if (message.startsWith(PURGED_PREFIX)) return { code: 'purged_content', message: `${message.slice(PURGED_PREFIX.length).trim()}. Nothing was committed.`,
+    detail: { origin: 'database_trigger', sqlstate, ...(raiser ? { raiser } : {}), ...(table ? { table } : {}) } };
   if (message.startsWith(GUARD_PREFIX) || constraint.startsWith('managed_writer_guard')) {
     const branch = constraint.startsWith('managed_writer_guard:') ? ident(constraint.slice('managed_writer_guard:'.length)) : undefined;
     const detail: PublicationFailureDetail = { origin: 'database_guard', sqlstate, raiser: raiser ?? 'gbrain_require_managed_writer',
