@@ -169,7 +169,9 @@ describe('activation control (CEO-20, DX-10)', () => {
     await engine.setConfig('trust.agent_activation', 'allow');
     const allowed = await resolveEntitiesToPointers(engine, 'default', [{ display: 'Acme Example', query: 'Acme Example' } as never], {});
     expect(allowed?.pointers.find(p => p.slug === 'companies/acme-example')).toMatchObject({ trust_tier: 'agent_written' });
-    expect(allowed?.text).toContain('[written by an agent');
+    // Kept under allow (the shipped default), it carries its flag, not just its tier.
+    expect(allowed?.pointers.find(p => p.slug === 'companies/acme-example')).toMatchObject({ unconfirmed: true });
+    expect(allowed?.text).toContain('[unconfirmed, agent-written');
     await engine.setConfig('trust.agent_activation', 'suppress');
 
     const hits = await op('search').handler(ctx(), { query: 'account closed', limit: 5 }) as Array<{ slug: string; unconfirmed?: true }>;

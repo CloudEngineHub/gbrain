@@ -128,6 +128,8 @@ export interface RunTrustSuitesOpts {
   progress?: (note: string) => void;
   /** Use this brain for the protection cells instead of a fresh one with protections on (left open for the caller). */
   brain?: TrustBrain;
+  /** Use this brain for the default-mode poisoning arm instead of a fresh default-mode one (left open for the caller). */
+  defaultBrain?: TrustBrain;
   /** Called before each step of each fixture (mutation probes). */
   beforeStep?: RunTrustStepsOpts['beforeStep'];
 }
@@ -147,14 +149,14 @@ export async function runTrustSuites(fixtures: LoadedFixture[], opts: RunTrustSu
   }
   const poisoning = fixtures.filter(lf => lf.fixture.suites.find(isTrustSuite) === 'poisoning');
   if (poisoning.length === 0) return agg;
-  const defaults = await createTrustBrain({ protections: false });
+  const defaults = opts.defaultBrain ?? await createTrustBrain({ protections: false });
   try {
     for (const lf of poisoning) {
       progress(`trust ${lf.fixture.fixture_id} [default mode]`);
       await runPoisonDefaultFixture(defaults, lf, opts, agg, progress);
     }
   } finally {
-    await defaults.close();
+    if (!opts.defaultBrain) await defaults.close();
   }
   return agg;
 }
