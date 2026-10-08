@@ -55,9 +55,19 @@ export const OWN_SESSION_HARNESSES: readonly string[] = [
   'claude-code', 'codex', 'openclaw', 'cursor', 'hermes', 'gemini-cli', 'opencode', 'chatgpt', 'claude', 'grok',
 ];
 
+/**
+ * The internal intent kind of a journaled request (`managed_*`, `connector_v2_*`,
+ * `canonical_reconcile`, `code_projection_reindex`), or ''. A caller's own `kind`
+ * param (a fact kind on remember, a take kind on takes_add) is not a channel.
+ */
+function internalIntentKind(intent: Record<string, unknown> | null | undefined): string {
+  const kind = typeof intent?.kind === 'string' ? intent.kind : '';
+  return /^(?:managed_|connector_v2_|canonical_|code_projection_)/.test(kind) ? kind : '';
+}
+
 /** The origin channel name of a journaled request, e.g. `mcp:put_page`, `cli:remember`, `connector:google`. */
 export function requestChannel(row: Pick<WriteRequest, 'operation' | 'authority' | 'intent'>): string {
-  const kind = typeof row.intent?.kind === 'string' ? row.intent.kind : '';
+  const kind = internalIntentKind(row.intent);
   if (kind.startsWith('connector_v2_') || kind.startsWith('managed_connector_')) return `connector:${kind}`;
   if (kind) return kind;
   return `${row.authority?.remote === true ? 'mcp' : 'cli'}:${row.operation}`;
@@ -75,7 +85,7 @@ export function intentContentOrigin(intent: Record<string, unknown> | null | und
  * maintenance) or that write no tiered rows. Undeclared rows stamp `unknown`.
  */
 export function requestChannelTrust(row: Pick<WriteRequest, 'id' | 'operation' | 'authority' | 'intent'>): WriteTrust | undefined {
-  const kind = typeof row.intent?.kind === 'string' ? row.intent.kind : '';
+  const kind = internalIntentKind(row.intent);
   const origin = { channel: requestChannel(row), request_id: row.id };
   if (kind.startsWith('connector_v2_') || kind.startsWith('managed_connector_')) return effectiveWriteTrust({ channel: 'external_untrusted', origin });
   if (row.authority?.remote === true) {

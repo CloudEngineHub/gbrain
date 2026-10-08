@@ -1913,11 +1913,11 @@ function refuseThinClient(command: string, mcpUrl: string): never {
     }), command);
 }
 
-/** The refused invocation's subcommand word (id-shaped only, per A1 argv safety), for the host-side fix. */
+/** The refused invocation's subcommand word and, for `trust`, its typed ref (id-shaped only, per A1 argv safety), for the host-side fix. */
 function thinRefusalSubcommand(command: string): string[] {
   const argv = process.argv.slice(2);
-  const next = argv[argv.indexOf(command) + 1] ?? '';
-  return argv.includes(command) && /^[a-z][a-z0-9-]*$/.test(next) ? [next] : [];
+  const [next = '', ref = ''] = argv.slice(argv.indexOf(command) + 1); // #5575: `trust <verb> <ref>` keeps its typed ref (f12, tp7, p:source/slug)
+  return argv.includes(command) && /^[a-z][a-z0-9-]*$/.test(next) ? [next, ...(command === 'trust' && /^(?:(?:f|t|h|e|a|tp)\d{1,18}|p:[a-z0-9_-]{1,64}\/[a-z0-9][a-z0-9/_.-]{0,200})$/.test(ref) ? [ref] : [])] : [];
 }
 
 const THIN_CLIENT_BRAIN_FLAG_MESSAGE = '--brain is not supported on a thin-client install: the remote server is a single brain.';

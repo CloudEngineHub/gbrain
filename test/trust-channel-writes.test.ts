@@ -172,6 +172,10 @@ describe('channel tiers on journaled writes', () => {
       const fenced = await pageRow(b, 'people/alice-example');
       expect(fenced.compiled_truth).toContain('Alice prefers green tea');
       expect(fenced.trust_tier).toBe('operator_curated');
+      // The origin channel names the verb, never the caller's fact kind.
+      const pref = await run(b.remote, 'remember', { fact: 'Alice prefers window seats', provenance: 'chat', entity: 'people/alice-example', kind: 'preference' });
+      const [origin] = await engine.executeRaw<{ channel: string }>(`SELECT write_origin->>'channel' AS channel FROM facts WHERE id=$1`, [Number(pref.id)]);
+      expect(origin?.channel).toBe('mcp:remember');
       const tool = await run(b.remote, 'remember', { fact: 'Alice moved to acme-example', provenance: 'email', entity: 'people/alice-example', content_origin: 'tool_output' });
       const [external] = await engine.executeRaw<{ trust_tier: string }>('SELECT trust_tier FROM facts WHERE id=$1', [Number(tool.id)]);
       expect(external.trust_tier).toBe('external_untrusted');
