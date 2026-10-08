@@ -420,14 +420,15 @@ export async function prepareCanonicalProjections(engine: BrainEngine, page: Par
       return { timelineRowsRemoved: removedSummary(removedDates) };
     }
     // #5575: rows more trusted than the writer are never expired by it, and new rows pass the write gate (trust/fence-guard.ts).
-    const guard = await guardFenceRows(tx, { sourceId, slug, incoming, rows: factRows, cfg: loadWriteGateConfig }, () => pipelined(tx, [expireFacts]));
+    // The timeline rows are independent of the fact and take rows, so they ride in the first pipeline.
+    const guard = await guardFenceRows(tx, { sourceId, slug, incoming, rows: factRows, cfg: loadWriteGateConfig }, () => pipelined(tx, [expireFacts, ...timelineRows]));
     if (guard.rows.length) await tx.insertFacts(guard.rows, { source_id: sourceId }); // gbrain-allow-direct-insert: canonical fence projection shares the journal publication transaction
     const contested = await guard.finish(tx);
     await pipelined(tx, [...factFields, checkTakes, dropTakes]);
     if (takes.length) {
       await tx.addTakesBatch(takes.map(t => takesPreparation.toCanonicalBatchInput(id, t)));
-      await pipelined(tx, [...resolveTakes, ...timelineRows]);
-    } else await pipelined(tx, timelineRows);
+      await pipelined(tx, resolveTakes);
+    }
     return { timelineRowsRemoved: removedSummary(removedDates), ...(contested.length ? { contested } : {}) };
   };
 }
