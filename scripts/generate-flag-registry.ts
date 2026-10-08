@@ -52,8 +52,9 @@ const EXTRA_FLAGS: Record<string, string[]> = {
   embed: ['--pace', '--pace-max-concurrency'],
   // sync shares the same pace surface via env/config plus CLI passthrough.
   sync: ['--pace', '--pace-max-concurrency'],
-  // Deferred persistence routing reaches runForget in recall.ts two levels deep.
-  forget: ['--reason', '--request-id'],
+  // Deferred persistence routing reaches runForget in recall.ts two levels deep;
+  // `forget --purge` hands off from there to src/commands/forget-purge.ts.
+  forget: ['--reason', '--request-id', '--purge', '--dry-run', '--yes', '--match', '--status', '--vacuum', '--all-subjects'],
 };
 
 /**
