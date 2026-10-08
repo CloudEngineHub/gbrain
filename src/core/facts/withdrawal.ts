@@ -4,6 +4,7 @@ import { OperationError } from '../ops/contract.ts';
 import { fenceOperationError } from '../fence-repair/refusal.ts';
 import { withdrawnFact, withdrawalFenceBlocks } from './withdrawal-overlay.ts';
 import { ambiguousFenceClaims, discoverWithdrawalTargets, withdrawalDiscoveryFailure } from './withdrawal-discovery.ts';
+import { dropPurgedFenceRows } from './purge-overlay.ts';
 
 export interface WithdrawalCommit {
   withdrawn: boolean;
@@ -105,7 +106,9 @@ async function ambiguousFenceMatchesWithdrawal(engine: BrainEngine, sourceId: st
   const rows = await engine.executeRaw(`WITH incoming AS MATERIALIZED (${FINGERPRINTED_CLAIMS}
       FROM jsonb_to_recordset($2::text::jsonb) i(claim text,visibility text))
     SELECT 1 FROM incoming
-    JOIN fact_withdrawals w ON w.source_id=$1 AND w.fact_hash IN (incoming.fp,incoming.fp_v1)
+    JOIN (SELECT source_id,visibility,subject,fact_hash FROM fact_withdrawals WHERE source_id=$1
+      UNION ALL SELECT source_id,visibility,subject,fact_hash FROM fact_purges WHERE source_id=$1) w
+      ON w.source_id=$1 AND w.fact_hash IN (incoming.fp,incoming.fp_v1)
       AND (incoming.visibility IS NULL OR w.visibility=incoming.visibility)
       AND ($3::text IS NULL OR w.subject = '*' OR w.subject = $3::text) LIMIT 1`,
   [sourceId, JSON.stringify(claims), subject]);
@@ -133,6 +136,7 @@ async function withdrawalDates(engine: BrainEngine, sourceId: string, facts: rea
  * as `subject`; without it every subject's withdrawal applies (conservative).
  */
 export async function preserveWithdrawnFenceRows(engine: BrainEngine, sourceId: string, body: string, subject?: string): Promise<string> {
+  body = await dropPurgedFenceRows(engine, sourceId, body, subject);
   if (!body.includes('gbrain:facts:begin')) return body;
   const blocks = withdrawalFenceBlocks(body);
   for (const block of blocks.reverse()) {
