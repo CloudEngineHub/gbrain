@@ -81,8 +81,8 @@ export interface VolunteerOpts {
   excludePrivate?: boolean;
   /** #5575: the enclosing surface's proactive eligibility; absent, the `volunteer` surface policy applies. */
   eligibility?: ReadEligibility;
-  /** #5575 DX-10: receives how many deliverable pages activation control withheld. */
-  onWithheld?: (count: number) => void;
+  /** #5575 DX-10: receives the page keys (`source_id:slug`) activation control withheld. */
+  onWithheld?: (keys: string[]) => void;
 }
 
 /** Shared wire protocol for window turns — watch.ts imports this so the two

@@ -279,8 +279,10 @@ export async function assembleTurnContext(
   const startedAt = Date.now();
   // #5575 (CEO-20, DX-10): one proactive policy for every arm of this turn.
   const policy = opts.eligibility ?? await proactiveEligibility({ engine }, 'hook.user_prompt').catch(() => ({ suppressFlagged: true }));
-  let withheld = 0;
-  const onWithheld = (n: number) => { withheld += n; };
+  // Pages withheld by both the pointer and the volunteer arm count once.
+  const withheldPages = new Set<string>();
+  let withheldFacts = 0;
+  const onWithheld = (keys: string[]) => { for (const k of keys) withheldPages.add(k); };
   const s6Module = import('./recall-needed.ts');
   const recall = s6Module.then((m) => m.startRecallNeeded(engine, { sourceId: opts.sourceId, window, sessionId: opts.sessionId, startedAt }));
   recall.catch(() => {});
@@ -361,7 +363,7 @@ export async function assembleTurnContext(
       };
       const meta = await getBrainHotMemoryMeta('turn_context', metaCtx);
       const hot = meta?.brain_hot_memory as { facts?: TurnContextFact[]; suppressed?: SuppressionSummary } | undefined;
-      onWithheld(hot?.suppressed?.withheld ?? 0);
+      withheldFacts += hot?.suppressed?.withheld ?? 0;
       const all = Array.isArray(hot?.facts) ? [...hot.facts] : [];
       // Cross-turn dedupe, same contract as volunteered pages: a fact already
       // injected this session is not repeated. Matched without the trailing
@@ -395,7 +397,7 @@ export async function assembleTurnContext(
     factsCount: facts.length,
     ...(degradedReason ? { degradedReason } : {}),
     ...(s6 ? { decide: { recall_needed: s6.meta } } : {}),
-    ...(withheld ? { suppressed: suppressionSummary(withheld) } : {}),
+    ...(withheldPages.size + withheldFacts ? { suppressed: suppressionSummary(withheldPages.size + withheldFacts) } : {}),
   };
 }
 

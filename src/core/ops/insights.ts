@@ -88,7 +88,7 @@ const volunteer_context: Operation = {
     const { loadConfig: loadCfgForArms } = await import('../config.ts');
     const { lexicalArmsEnabled } = await import('../context/reflex.ts');
     const { resolveExcludePrivatePages } = await import('../search/private-visibility.ts');
-    let withheld = 0;
+    const withheldKeys = new Set<string>();
     const pages = await volunteerContext(ctx.engine, turns, {
       sourceIds,
       priorContext: typeof p.prior_context === 'string' ? p.prior_context : undefined,
@@ -101,8 +101,9 @@ const volunteer_context: Operation = {
       excludePrivate: await resolveExcludePrivatePages(ctx.engine, ctx.remote),
       // #5575: token floor + min_trust + activation control (CEO-20, DX-10).
       eligibility: await proactiveEligibility(ctx, 'volunteer', { minTrust: p.min_trust }),
-      onWithheld: n => { withheld += n; },
+      onWithheld: keys => { for (const k of keys) withheldKeys.add(k); },
     });
+    const withheld = withheldKeys.size;
     const notice = activationSuppressionNotice(withheld, 'volunteered context');
     if (notice) ctx.emitNotice?.(notice);
 

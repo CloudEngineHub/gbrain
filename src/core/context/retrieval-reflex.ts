@@ -198,8 +198,8 @@ export interface ResolvePointersOpts {
    * applies the `retrieval_reflex` surface policy itself (fail-closed).
    */
   eligibility?: ReadEligibility;
-  /** #5575 DX-10: receives how many deliverable pointers activation control withheld. */
-  onWithheld?: (count: number) => void;
+  /** #5575 DX-10: receives the page keys (`source_id:slug`) of deliverable pointers activation control withheld. */
+  onWithheld?: (keys: string[]) => void;
 }
 
 export interface PageRow {
@@ -556,7 +556,7 @@ export async function resolveEntitiesToPointers(
   // candidate page in one query; a page that cannot be checked is dropped.
   const policy = opts.eligibility ?? await proactiveEligibility({ engine }, 'retrieval_reflex');
   const verdicts = await pageActivationVerdicts(engine, resolved.map(r => ({ source_id: r.source_id, slug: r.slug })), policy).catch(() => null);
-  let withheld = 0;
+  const withheld: string[] = [];
 
   // Build pointers in confidence order, applying suppression + cap.
   const suppression = opts.suppression ?? 'slug-and-title';
@@ -578,14 +578,14 @@ export async function resolveEntitiesToPointers(
         if (titleLc && wholeWordIncludes(priorLc, titleLc)) continue;
       }
     }
-    if (verdict.suppressed) { withheld++; continue; }
+    if (verdict.suppressed) { withheld.push(`${source_id}:${slug}`); continue; }
     const display = displayForRow(row, displayByNorm);
     const synopsis = safeSynopsis(row);
     const trust = trustFields(verdict.tier, verdict.origin);
     pointers.push({ display, slug, source_id, synopsis, arm, confidence: ARM_CONFIDENCE[arm], matchedNorm, ...trust });
     if (pointers.length >= maxPointers) break;
   }
-  if (withheld) opts.onWithheld?.(withheld);
+  if (withheld.length) opts.onWithheld?.(withheld);
 
   if (!pointers.length) return null;
   return { pointers, text: renderPointerBlock(pointers) };
