@@ -81,6 +81,7 @@ boundary and add its link here rather than raising the cap.
 | [Workspace push and backup coverage (key files cluster)](key-files/workspace-push-and-backup.md) | Workspace push, hook push backstops, backup verdicts |
 | [Ambient capture consent gate (key files cluster)](key-files/ambient-capture.md) | `memory.auto_writeback` capture lanes |
 | [Quarantine (cluster)](key-files/quarantine.md) | Gate-marker strip; quarantined pages in facts, reads, writes |
+| [Memory purge (cluster)](key-files/memory-purge.md) | `forget --purge`, purge ledgers and overlay, page purge tombstones, deletion inventory, purged intents |
 
 ## BrainBench — in a sibling repo
 
