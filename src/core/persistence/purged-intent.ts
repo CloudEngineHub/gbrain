@@ -7,8 +7,9 @@
  *
  * Checks the claims a memory or take write names (`fact`, `claim`) and the
  * facts-fence rows of page content against fact_purges, and page content's
- * content hash against page_purges. One indexed probe decides that a source
- * with no tombstones needs no parsing.
+ * content hash against page_purges. Whether the source holds any tombstone
+ * rides completeWrite's terminal statement (PURGE_PRESENCE_COLUMNS), so a
+ * source with none needs no parsing and no extra statement.
  */
 
 import type { BrainEngine } from '../engine.ts';
@@ -17,13 +18,21 @@ import { parseFactsFence } from '../facts-fence.ts';
 import { contentHash } from '../utils.ts';
 import type { WriteRequest } from './model.ts';
 
-export async function intentCarriesPurgedContent(tx: BrainEngine, row: Pick<WriteRequest, 'source_id' | 'slug' | 'intent'>): Promise<boolean> {
+/** Only content-bearing writes (content, fact or claim) can carry purged text; every other completion skips the probe. */
+export function intentCarriesContent(intent: unknown): boolean {
+  const named = intent as Record<string, unknown> | null;
+  return !!named && [named.content, named.fact, named.claim].some(v => typeof v === 'string' && v);
+}
+
+/** Selected by completeWrite's terminal statement (#6007: no extra round trip): does the source hold any fact or page tombstone? */
+export const PURGE_PRESENCE_COLUMNS = `EXISTS (SELECT 1 FROM fact_purges WHERE source_id=done.source_id) AS purge_has_facts,
+    EXISTS (SELECT 1 FROM page_purges WHERE source_id=done.source_id) AS purge_has_pages`;
+
+export async function intentCarriesPurgedContent(tx: BrainEngine, row: Pick<WriteRequest, 'source_id' | 'slug' | 'intent'>,
+  has: { facts: boolean; pages: boolean }): Promise<boolean> {
   const intent = row.intent as Record<string, unknown> | null;
-  // Only content-bearing writes can carry purged text; every other completion skips the probe.
-  if (!intent || ![intent.content, intent.fact, intent.claim].some(v => typeof v === 'string' && v)) return false;
-  const [has] = await tx.executeRaw<{ facts: boolean; pages: boolean }>(`SELECT EXISTS (SELECT 1 FROM fact_purges WHERE source_id=$1) AS facts,
-    EXISTS (SELECT 1 FROM page_purges WHERE source_id=$1) AS pages`, [row.source_id]);
-  if (!has?.facts && !has?.pages) return false;
+  if (!intent || !intentCarriesContent(intent)) return false;
+  if (!has.facts && !has.pages) return false;
   const content = typeof intent.content === 'string' ? intent.content : null;
   // Tombstones are subject-scoped like the guards: a memory write's claim is about its entity, a fence row about its page.
   const subject = typeof intent.entity_slug === 'string' ? intent.entity_slug : typeof intent.entity === 'string' ? intent.entity : row.slug;

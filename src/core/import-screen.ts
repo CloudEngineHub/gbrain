@@ -10,6 +10,7 @@
  */
 import type { BrainEngine } from './engine.ts';
 import { loadConfig, loadConfigWithEngine } from './config.ts';
+import { loadConfigSnapshot } from './config-snapshot.ts';
 import { assessContentSanity, ContentSanityBlockError, type ContentSanityResult } from './content-sanity.ts';
 import { carryStoredQuarantineOverride, dropClassifierMarkers, hasCurrentQuarantineOverride, QUARANTINE_OVERRIDE_KEY, withQuarantineOverride } from './quarantine-override.ts';
 import { logContentSanityAssessment } from './audit/content-sanity-audit.ts';
@@ -57,10 +58,17 @@ export interface ImportSanityConfig {
 export async function loadImportSanityConfig(engine: BrainEngine): Promise<ImportSanityConfig> {
   const baseCfg = loadConfig();
   let effectiveCfg = baseCfg;
-  const readKey = (key: string) => engine.getConfig(key).catch(() => null);
+  // One whole-table read answers the DB config lift and the write-gate keys (#6007 statement budget).
+  const snapshot = await loadConfigSnapshot(engine);
+  const reader = snapshot ? {
+    getConfig: async (key: string) => snapshot[key] ?? null,
+    getAllConfig: async () => snapshot,
+    listConfigKeys: async (prefix: string) => Object.keys(snapshot).filter(key => key.startsWith(prefix)),
+  } : engine;
+  const readKey = async (key: string) => { try { return await reader.getConfig(key); } catch { return null; } };
   const gateKeys = Promise.all([readKey('write_gate.external_mode'), readKey('write_gate.agent_mode')]);
   try {
-    effectiveCfg = await loadConfigWithEngine(engine, baseCfg);
+    effectiveCfg = await loadConfigWithEngine(reader, baseCfg);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(`[gbrain] content-sanity: DB config lift failed (${msg}); falling back to file/env\n`);
@@ -92,7 +100,7 @@ export interface ContentDisposition {
   /** The write-gate assessment, when the caller passed `writeGate`. */
   gate: WriteGateAssessment | null;
   /** Records the gate's flag/quarantine receipt for the written page inside the publication transaction. */
-  persistReceipt: (tx: BrainEngine) => Promise<void>;
+  persistReceipt: (tx: BrainEngine, page: { existed: boolean }) => Promise<void>;
 }
 
 /**
@@ -248,8 +256,9 @@ export async function settleContentDisposition(engine: BrainEngine, parsed: Pars
   }
   return {
     quarantined: pageQuarantined, flagged: pageFlagged, ...(pageFlagReason ? { flagReason: pageFlagReason } : {}), gate,
-    persistReceipt: async tx => {
-      if (gate?.ran) await clearStalePageGateReceipts(tx, { slug, sourceId: sourceId ?? 'default', contentHash: gate.contentHash });
+    persistReceipt: async (tx, page) => {
+      // A page created by this write has a fresh id, so no receipt can name it yet (#6007: no delete on create).
+      if (gate?.ran && page.existed) await clearStalePageGateReceipts(tx, { slug, sourceId: sourceId ?? 'default', contentHash: gate.contentHash });
       if (gate) await recordPageGateReceipt(tx, { slug, sourceId: sourceId ?? 'default', assessment: gate, requestId: ctx.writeGate?.requestId ?? null });
     },
   };

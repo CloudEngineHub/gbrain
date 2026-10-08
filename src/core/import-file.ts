@@ -830,7 +830,7 @@ export async function importFromContent(
     await writePageAliases(tx, slug, sourceId ?? 'default', parsed, opts.activePack, mentionPolicy);
     if (!opts.coordinated) await verifyPageReadable(tx, slug, hash, sourceId, 'importFromContent');
     await opts.beforeCommit?.(tx, slug);
-    await disposition.persistReceipt(tx);
+    await disposition.persistReceipt(tx, { existed: !!existing });
     if (opts.onPostCommitEmbedding && !opts.noEmbed && chunks.length > 0) {
       // Capture the complete installed projection before releasing the page
       // guard. Deferred provider results cannot replace newer text or chunks.

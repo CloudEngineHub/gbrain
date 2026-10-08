@@ -22,7 +22,7 @@ import { decideFactWrite, recordFlaggedRow, recordWriteGateHold, type GatedRowDe
 import { gateInput } from './gate-outcomes.ts';
 import { insertTrustProposal } from './proposals.ts';
 import { recordContestedFact } from './supersede-handlers.ts';
-import { compareTrust, storedTrustTier, trustRankSql } from './tier.ts';
+import { compareTrust, storedTrustTier, trustRankSql, type WriteTrust } from './tier.ts';
 
 type FenceFact = NewFact & { row_num: number };
 const WRITER_RANK = trustRankSql(`COALESCE(NULLIF(current_setting('gbrain.write_trust_tier', true), ''), 'unknown')`);
@@ -53,6 +53,8 @@ export async function guardFenceRows<T extends FenceFact>(tx: BrainEngine, input
       ORDER BY f.row_num FOR UPDATE`, [sourceId, slug, incoming]);
   if (guarded.length) await tx.executeRaw('UPDATE facts SET row_num = NULL WHERE id = ANY($1::bigint[])', [guarded.map(g => Number(g.id))]);
   await expire();
+  // A fence with no rows and nothing guarded has nothing to place or gate (#6007: no reads on a fence-free publish).
+  if (!input.rows.length && !guarded.length) return { rows: [], async finish() { return []; } };
   const occupied = new Set((await tx.executeRaw<{ row_num: number }>(
     'SELECT row_num FROM facts WHERE source_id = $1 AND source_markdown_slug = $2 AND row_num IS NOT NULL AND expired_at IS NULL', [sourceId, slug]))
     .map(r => Number(r.row_num)));
@@ -65,18 +67,19 @@ export async function guardFenceRows<T extends FenceFact>(tx: BrainEngine, input
     occupied.add(target.row_num);
     rows = rows.filter(r => r !== target);
   }
-  const trust = await currentWriteTrust(tx) ?? { tier: 'unknown' as const, origin: null };
   const gated: Array<{ row: T; decision: GatedRowDecision }> = [];
   const inserted: T[] = [];
-  // Owner-tier writers (tool_observed and above) are never gated, so they read no gate config.
-  const cfg = compareTrust(trust.tier, 'tool_observed') < 0 && rows.some(r => !occupied.has(r.row_num)) ? await input.cfg(tx) : null;
+  // Only new rows are gated; owner-tier writers (tool_observed and above) never are, so they read no gate config.
+  let trust: WriteTrust | null = null;
+  const writerTrust = async (db: BrainEngine) => trust ??= await currentWriteTrust(db) ?? { tier: 'unknown', origin: null };
+  const cfg = rows.some(r => !occupied.has(r.row_num)) && compareTrust((await writerTrust(tx)).tier, 'tool_observed') < 0 ? await input.cfg(tx) : null;
   // Only a row this write inserts at a guarded row's old position replaces it; a moved row never does.
   const fresh = new Set(rows.filter(r => !occupied.has(r.row_num)).map(r => r.row_num));
   for (const row of rows) {
     if (!cfg || occupied.has(row.row_num)) { inserted.push(row); continue; }
     const decision = decideFactWrite({ fact: row.fact, context: row.context ?? null, source: row.source ?? null }, { sourceId, slug,
       payload: { fact: row.fact, kind: row.kind, visibility: row.visibility, entity_slug: row.entity_slug, source: row.source, context: row.context ?? null, row_num: row.row_num },
-      input: gateInput(trust, null), cfg });
+      input: gateInput(await writerTrust(tx), null), cfg });
     if (decision.action === 'hold') { await recordWriteGateHold(tx, decision.hold!); continue; }
     if (decision.action === 'reject') continue;
     inserted.push(row);
@@ -95,7 +98,7 @@ export async function guardFenceRows<T extends FenceFact>(tx: BrainEngine, input
             newTier: storedTrustTier(replacement.trust_tier), guard: 'fence_projection' })).proposal_ref);
         } else {
           const { id } = await insertTrustProposal(db, { action: 'forget', sourceId, target: { table: 'facts', id: Number(g.id) }, proposer: 'fence_projection',
-            before: { guard: 'fence_projection', fact: { id: Number(g.id), tier: storedTrustTier(g.trust_tier) }, writer_tier: trust.tier, slug } });
+            before: { guard: 'fence_projection', fact: { id: Number(g.id), tier: storedTrustTier(g.trust_tier) }, writer_tier: (await writerTrust(db)).tier, slug } });
           refs.push(`tp${id}`);
         }
       }
