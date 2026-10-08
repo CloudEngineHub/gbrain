@@ -35,7 +35,7 @@ export interface InventoryEntry {
 
 type Row = [table: string, cls: InventoryClass, reason: string, columns: string, probe?: string];
 const ROWS: readonly Row[] = [
-  ['access_tokens', 'out_of_scope', 'secret_material', 'name token_hash scopes permissions source_grant source_id federated_read allowed_operations takes_holders'],
+  ['access_tokens', 'out_of_scope', 'secret_material', 'name token_hash scopes permissions source_grant source_id federated_read allowed_operations takes_holders min_trust'],
   ['budget_ledger', 'out_of_scope', 'no_memory_text', 'scope resolver_id'],
   ['budget_reservations', 'out_of_scope', 'no_memory_text', 'reservation_id scope resolver_id status'],
   ['calibration_profiles', 'out_of_scope', 'probed_reported', 'source_id holder wave_version domain_scorecards pattern_statements active_bias_tags model_id', 'pattern_statements domain_scorecards'],
@@ -74,7 +74,7 @@ const ROWS: readonly Row[] = [
   ['fact_purges', 'out_of_scope', 'text_free_ledger', 'source_id visibility subject fact_hash actor reason'],
   ['fact_relink_attempts', 'out_of_scope', 'probed_reported', 'source_id outcome reason tier model target_slug run_id', 'reason'],
   ['fact_withdrawals', 'out_of_scope', 'text_free_ledger', 'source_id visibility subject fact_hash'],
-  ['facts', 'swept', 'fact', 'source_id entity_slug fact kind visibility notability context source source_session embedding source_markdown_slug claim_metric claim_unit claim_period event_type dimension value value_hash dim_status embedding_model embedded_text_hash write_principal_kind write_principal_id last_write_principal_kind last_write_principal_id attributed_to'],
+  ['facts', 'swept', 'fact', 'source_id entity_slug fact kind visibility notability context source source_session embedding source_markdown_slug claim_metric claim_unit claim_period event_type dimension value value_hash dim_status embedding_model embedded_text_hash write_principal_kind write_principal_id last_write_principal_kind last_write_principal_id attributed_to trust_tier write_origin'],
   ['files', 'swept', 'page_files', 'source_id page_slug filename storage_path mime_type content_hash metadata'],
   ['gbrain_cycle_locks', 'out_of_scope', 'no_memory_text', 'id holder_host'],
   ['ingest_log', 'out_of_scope', 'probed_reported', 'source_id source_type source_ref pages_updated summary', 'summary pages_updated'],
@@ -96,7 +96,7 @@ const ROWS: readonly Row[] = [
   ['minion_lease_pressure_log', 'out_of_scope', 'no_memory_text', 'lease_key queue_name job_name model provider'],
   ['minion_self_fix_log', 'out_of_scope', 'no_memory_text', 'classifier_bucket policy_applied outcome'],
   ['needs_rederive', 'out_of_scope', 'text_free_ledger', 'derived_table derived_id source_id reason'],
-  ['oauth_clients', 'out_of_scope', 'secret_material', 'client_id client_secret_hash client_name redirect_uris grant_types scope token_endpoint_auth_method source_id federated_read bound_tools bound_source_id bound_brain_id bound_slug_prefixes surface surface_set_by allowed_operations delegated_slug_prefixes delegated_namespace grant_profile grant_repair_reasons source_grant takes_holders'],
+  ['oauth_clients', 'out_of_scope', 'secret_material', 'client_id client_secret_hash client_name redirect_uris grant_types scope token_endpoint_auth_method source_id federated_read bound_tools bound_source_id bound_brain_id bound_slug_prefixes surface surface_set_by allowed_operations delegated_slug_prefixes delegated_namespace grant_profile grant_repair_reasons source_grant takes_holders min_trust'],
   ['oauth_codes', 'out_of_scope', 'secret_material', 'code_hash client_id scopes code_challenge code_challenge_method redirect_uri state resource'],
   ['oauth_grant_audit', 'out_of_scope', 'no_memory_text', 'client_id actor action before_grant after_grant'],
   ['oauth_tokens', 'out_of_scope', 'secret_material', 'token_hash token_type client_id scopes resource'],
@@ -108,9 +108,9 @@ const ROWS: readonly Row[] = [
   ['page_mention_state', 'out_of_scope', 'no_memory_text', 'source_id'],
   ['page_projection_jobs', 'out_of_scope', 'no_memory_text', 'slug reason'],
   ['page_purges', 'out_of_scope', 'text_free_ledger', 'source_id content_hash slug'],
-  ['page_versions', 'swept', 'page_versions', 'compiled_truth frontmatter timeline title type tags source_path write_principal_kind write_principal_id archived_principal_kind archived_principal_id'],
+  ['page_versions', 'swept', 'page_versions', 'compiled_truth frontmatter timeline title type tags source_path write_principal_kind write_principal_id archived_principal_kind archived_principal_id trust_tier write_origin'],
   ['page_write_guards', 'out_of_scope', 'no_memory_text', 'slug'],
-  ['pages', 'swept', 'page_body', 'source_id slug type page_kind title compiled_truth timeline frontmatter content_hash effective_date_source import_filename database_only_reason contextual_retrieval_mode corpus_generation search_vector source_path ingested_via source_uri source_kind embedding_signature revision_principal_kind revision_principal_id'],
+  ['pages', 'swept', 'page_body', 'source_id slug type page_kind title compiled_truth timeline frontmatter content_hash effective_date_source import_filename database_only_reason contextual_retrieval_mode corpus_generation search_vector source_path ingested_via source_uri source_kind embedding_signature revision_principal_kind revision_principal_id trust_tier write_origin'],
   ['persistence_counters', 'out_of_scope', 'no_memory_text', 'key'],
   ['persistence_effects', 'swept', 'effect_recovery', 'kind data state source_id error_code outcome recovery'],
   ['persistence_graduation', 'out_of_scope', 'probed_reported', 'role state source_data_dir trigger_bypass table_receipts replay_probe timings doctor rollback', 'table_receipts'],
@@ -153,9 +153,10 @@ const ROWS: readonly Row[] = [
   ['take_nudge_log', 'out_of_scope', 'no_memory_text', 'source_id nudge_pattern channel wave_version'],
   ['take_proposals', 'swept', 'take_proposals', 'source_id page_slug content_hash prompt_version wave_version proposal_run_id status claim_text kind holder domain dedup_against_fence_rows model_id acted_by'],
   ['take_purges', 'out_of_scope', 'text_free_ledger', 'source_id subject claim_hash'],
-  ['takes', 'swept', 'take', 'claim kind holder since_date until_date source resolved_unit resolved_source resolved_by embedding resolved_quality embedding_model embedded_text_hash write_principal_kind write_principal_id last_write_principal_kind last_write_principal_id'],
+  ['takes', 'swept', 'take', 'claim kind holder since_date until_date source resolved_unit resolved_source resolved_by embedding resolved_quality embedding_model embedded_text_hash write_principal_kind write_principal_id last_write_principal_kind last_write_principal_id trust_tier write_origin'],
   ['think_ab_results', 'out_of_scope', 'probed_reported', 'source_id wave_version question baseline_answer with_calibration_answer preferred model_id notes', 'question baseline_answer with_calibration_answer'],
-  ['timeline_entries', 'out_of_scope', 'probed_reported', 'source summary detail write_principal_kind write_principal_id last_write_principal_kind last_write_principal_id', 'summary detail'],
+  ['timeline_entries', 'out_of_scope', 'probed_reported', 'source summary detail write_principal_kind write_principal_id last_write_principal_kind last_write_principal_id trust_tier write_origin', 'summary detail'],
+  ['trust_proposals', 'out_of_scope', 'probed_reported', 'action source_id target_table related_table before_state after_state proposer proposer_principal_kind proposer_principal_id status decided_principal_kind decided_principal_id', 'before_state after_state'],
   ['wanted_links', 'out_of_scope', 'probed_reported', 'source_id producer ref_kind target_source_id target_ref link_type context', 'context'],
 ];
 
