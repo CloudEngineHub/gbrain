@@ -1689,7 +1689,7 @@
           "category": "brain",
           "details": {
             "backfill": {
-              "completed_at": null,
+              "completed_at": "<ts>",
               "interrupted": false
             },
             "by_tier": {
@@ -1766,7 +1766,7 @@
           "category": "brain",
           "details": {
             "completed_at": null,
-            "detector_version": 1,
+            "detector_version": 2,
             "total_unscanned": 0,
             "unscanned": {
               "facts": 0,
