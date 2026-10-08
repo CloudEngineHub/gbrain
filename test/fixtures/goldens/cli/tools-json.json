@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 218195,
-    "stdoutSha256": "47b74412739a61e9149e02ca61ed49d8d15d598ca1327647c6d6fba3a421bdc6",
+    "stdoutBytes": 218589,
+    "stdoutSha256": "9f8fd6331b2d83da62a9b91a37e8235d251af39deabe226a3b23cdad09593b57",
     "toolNames": [
       "remember",
       "entity",
@@ -3228,11 +3228,24 @@
         "mutating": false,
         "name": "get_chunks",
         "parameters": {
+          "min_trust": "string?",
           "slug": "string"
         },
         "required_scopes": [],
         "schema": {
           "properties": {
+            "min_trust": {
+              "description": "Lowest trust tier to return (the connection floor still applies).",
+              "enum": [
+                "user_confirmed",
+                "operator_curated",
+                "tool_observed",
+                "agent_written",
+                "unknown",
+                "external_untrusted"
+              ],
+              "type": "string"
+            },
             "slug": {
               "description": "Slug of the page whose content chunks to return.",
               "type": "string"

@@ -42,7 +42,6 @@ import { MIN_TRUST_PARAM, resolveReadEligibility } from '../eligibility/policy.t
 import { proactiveEligibility } from '../eligibility/registry.ts';
 import { activationSuppressionNotice, suppressionSummary } from '../eligibility/activation.ts';
 import { stampPageTrust, stampRowTrust } from '../eligibility/stamp.ts';
-import { trustFields } from '../eligibility/labels.ts';
 import type { TrustTier } from '../trust/tier.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 
@@ -282,9 +281,7 @@ const recall: Operation = {
       ctx.remote === false
         ? undefined
         : ['world'] as ('private' | 'world')[];
-    // #5575: read floor (token floor, min_trust, read policy) plus the
-    // quarantined-page and needs_rederive hiding, applied in each arm's SQL.
-    const eligibility = await resolveReadEligibility(ctx, { minTrust: p.min_trust });
+    const eligibility = await resolveReadEligibility(ctx, { minTrust: p.min_trust }); // #5575 floor + quarantine/rederive hiding
 
     type FactRows = Awaited<ReturnType<typeof ctx.engine.listFactsByEntity>>;
     type FactRowItem = FactRows[number];
@@ -339,8 +336,7 @@ const recall: Operation = {
       limit,
       visibility,
       grep: grep ?? undefined,
-      excludeAuditRows: true,
-      eligibility,
+      excludeAuditRows: true, eligibility,
     };
 
     if (p.supersessions === true) {
@@ -526,10 +522,8 @@ const recall: Operation = {
         }
       : undefined;
 
-    const factTrust = new Map((await stampRowTrust(ctx.engine, 'facts', packedFacts, r => r.id))
-      .map(r => [r.id, { trust_tier: r.trust_tier, origin: r.origin, ...(r.unconfirmed ? { unconfirmed: true as const } : {}) }]));
     return {
-      facts: packedFacts.map(r => ({
+      facts: await stampRowTrust(ctx.engine, 'facts', packedFacts.map(r => ({ // #5575 A6: + trust_tier, origin, unconfirmed
         id: r.id,
         fact: r.fact,
         kind: r.kind,
@@ -559,8 +553,7 @@ const recall: Operation = {
         // is the protocol name for the stored source attribution.
         fact_id: String(r.id),
         provenance: r.source, ...(r.attributed_to ? { attributed_to: r.attributed_to } : {}),
-        ...(factTrust.get(r.id) ?? trustFields(r.trust_tier, r.write_origin)),
-      })),
+      })), f => f.id),
       total: packedFacts.length,
       ...(ambiguousEntity ? { ambiguous_entity: { candidates: ambiguousEntity, suggestion: AMBIGUOUS_ENTITY_SUGGESTION } } : {}),
       ...(pending_consolidation_count !== undefined ? { pending_consolidation_count } : {}),
@@ -577,8 +570,7 @@ const recall: Operation = {
               provenance: r.slug,
               ...(r.delivered ? { delivered: r.delivered } : {}),
               ...(r.relational ? { relational: r.relational } : {}),
-              ...(r.trust_tier ? { trust_tier: r.trust_tier, origin: r.origin } : {}),
-              ...(r.unconfirmed ? { unconfirmed: true } : {}),
+              ...(r.trust_tier ? { trust_tier: r.trust_tier, origin: r.origin, ...(r.unconfirmed ? { unconfirmed: true } : {}) } : {}),
             })),
             ...(searchDegraded ? { search_degraded: searchDegraded } : {}),
             ...(searchDegraded ? {} : await searchAnswerFeedback(ctx, 'recall', packedResults)),

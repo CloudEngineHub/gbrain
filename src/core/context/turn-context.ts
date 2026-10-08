@@ -369,7 +369,8 @@ export async function assembleTurnContext(
       // injected this session is not repeated. Matched without the trailing
       // confidence, which drifts as facts age.
       const prior = opts.priorContextText;
-      return prior ? all.filter((f) => !prior.includes(renderFactLine(f).replace(/ \([0-9.]+\)$/, ' ('))) : all;
+      // The trust label is not part of the match: a fact injected before labels (or before its tier changed) stays injected.
+      return prior ? all.filter((f) => !prior.includes(renderFactLine({ ...f, trust_tier: undefined }).replace(/ \([0-9.]+\)$/, ' (').slice(2))) : all;
     } catch {
       return [];
     }

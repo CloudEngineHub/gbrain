@@ -10,6 +10,7 @@ import type { BrainEngine } from '../../core/engine.ts';
 import { TRUST_TIERS, trustLabel } from '../../core/trust/tier.ts';
 import { runTrustBackfill, type TrustBackfillReport } from '../../core/trust/backfill.ts';
 import { runTrustScan } from '../../core/eligibility/scan.ts';
+import { explainTrust } from '../../core/eligibility/explain.ts';
 import type { CliDispatchContext } from '../command-table.ts';
 
 export const TRUST_USAGE = [
@@ -24,6 +25,11 @@ export const TRUST_USAGE = [
   '  Runs the write gate\'s deterministic detector over agent-written and lower rows written before the gate,',
   '  recording a receipt for each instruction-like row so proactive surfaces stop injecting it until you confirm',
   '  it (gbrain trust review). Changes no row; resumable (rerun to continue); a detector upgrade rescans.',
+  '',
+  'Usage: gbrain trust explain <ref> [--json]',
+  '  Why a memory is or is not used: its trust tier and origin, the write gate\'s verdict and receipts, and whether',
+  '  each proactive surface (hook, context engine, context pack, volunteer, reflex, core, hot memory) and explicit',
+  '  reads use it. Refs: f<id> fact, t<id> take, e<id> timeline entry, h<id> hold, p:<source>/<slug> page. Read-only.',
 ].join('\n');
 
 function render(report: TrustBackfillReport): string {
@@ -39,7 +45,7 @@ function render(report: TrustBackfillReport): string {
 
 export async function run(engine: BrainEngine, args: string[], ctx: CliDispatchContext): Promise<void> {
   const [sub, ...rest] = args;
-  const known = sub === 'backfill' || sub === 'scan';
+  const known = sub === 'backfill' || sub === 'scan' || sub === 'explain';
   if (!sub || args.includes('--help') || args.includes('-h') || !known) {
     console.log(TRUST_USAGE);
     if (sub && !known && !args.includes('--help') && !args.includes('-h')) setCliExitVerdict(2);
@@ -51,6 +57,18 @@ export async function run(engine: BrainEngine, args: string[], ctx: CliDispatchC
   if (batchSize !== undefined && (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 100_000)) {
     console.error('--batch-size must be an integer from 1 to 100000.');
     setCliExitVerdict(2);
+    return;
+  }
+  if (sub === 'explain') {
+    const ref = rest.find(a => !a.startsWith('--'));
+    if (!ref) { console.error('Usage: gbrain trust explain <ref> [--json]'); setCliExitVerdict(2); return; }
+    const why = await explainTrust(engine, ref);
+    if (!why.found) setCliExitVerdict(1);
+    if (jsonRequested(args)) { await writeStdoutFinal(`${JSON.stringify(why, null, 2)}\n`); return; }
+    if (!why.found) { console.log(`${ref}: no fact, take, timeline entry, hold or page has this ref.`); return; }
+    console.log([`${ref}: ${why.label} (${why.trust_tier}), origin ${why.origin}; gate verdict ${why.verdict}${why.unconfirmed ? ', unconfirmed' : ''}`,
+      ...Object.entries(why.activation).map(([surface, decision]) => `  ${surface}: ${decision}`),
+      ...(why.next ? [`  Review: ${why.next.join(' ')}`] : [])].join('\n'));
     return;
   }
   if (sub === 'scan') {

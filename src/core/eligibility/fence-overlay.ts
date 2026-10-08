@@ -140,11 +140,17 @@ type HoldTexts = ReadonlyArray<string | null | undefined>;
  * texts)` (write-gate-store.ts), so a fence row matches the hold its
  * projection created. Tests may swap it; null turns the held lookup off.
  */
-let factHoldFingerprint: ((texts: HoldTexts) => string) | null = texts => holdFingerprint('fact', texts);
+const gateHoldFingerprint = (texts: HoldTexts) => holdFingerprint('fact', texts);
+let factHoldFingerprint: ((texts: HoldTexts) => string) | null = gateHoldFingerprint;
 
 /** Installs the held-row fingerprint (the write gate's `holdFingerprint('fact', …)`); null turns the held lookup off. */
 export function registerFactHoldFingerprint(fingerprint: ((texts: HoldTexts) => string) | null): void {
   factHoldFingerprint = fingerprint;
+}
+
+/** Restores the write gate's fingerprint (test cleanup). */
+export function resetFactHoldFingerprint(): void {
+  factHoldFingerprint = gateHoldFingerprint;
 }
 
 /** The gated text fields of a fence row, in the gate's `decideFactWrite` order (fact, context, value). */

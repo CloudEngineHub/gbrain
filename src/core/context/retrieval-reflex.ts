@@ -31,7 +31,7 @@ import type { TrustTier } from '../trust/tier.ts';
 import type { ReadEligibility } from '../eligibility/policy.ts';
 import { proactiveEligibility } from '../eligibility/registry.ts';
 import { pageActivationVerdicts, pageKey } from '../eligibility/activation.ts';
-import { renderTrustedInline, trustFields } from '../eligibility/labels.ts';
+import { renderTrustedInline, trustFields, type TrustFields } from '../eligibility/labels.ts';
 import { normalizeAlias } from '../search/alias-normalize.ts';
 import { CJK_SLUG_CHARS } from '../cjk.ts';
 import { escapeLikePattern } from '../search/sql-ranking.ts';
@@ -552,20 +552,12 @@ export async function resolveEntitiesToPointers(
     rowByKey.set(keyOf(r.source_id, r.slug), r); push(r.slug, r.source_id, 'weak-title', (r.title ?? '').toLowerCase());
   }
 
-  // #5575: trust labels, read floor and activation control for every
-  // candidate page in one query; a page that cannot be checked is dropped.
-  const policy = opts.eligibility ?? await proactiveEligibility({ engine }, 'retrieval_reflex');
-  const verdicts = await pageActivationVerdicts(engine, resolved.map(r => ({ source_id: r.source_id, slug: r.slug })), policy).catch(() => null);
-  const withheld: string[] = [];
-
-  // Build pointers in confidence order, applying suppression + cap.
+  const trust = await gatePointerCandidates(engine, resolved, opts); // #5575 gate; then pointers by confidence, suppression + cap
   const suppression = opts.suppression ?? 'slug-and-title';
   const pointers: ReflexPointer[] = [];
   for (const { slug, source_id, arm, matchedNorm } of resolved) {
     const row = rowByKey.get(keyOf(source_id, slug));
-    if (!row) continue;
-    const verdict = verdicts?.get(pageKey({ source_id, slug }));
-    if (!verdict || verdict.belowFloor) continue;
+    if (!row || !trust.has(pageKey({ source_id, slug }))) continue;
     // Suppression: already present in PRIOR context. The current turn is
     // deliberately excluded from priorContextText. Under windowing
     // ('slug-only', codex D7) only the slug counts — a slug appears in prior
@@ -578,17 +570,35 @@ export async function resolveEntitiesToPointers(
         if (titleLc && wholeWordIncludes(priorLc, titleLc)) continue;
       }
     }
-    if (verdict.suppressed) { withheld.push(`${source_id}:${slug}`); continue; }
     const display = displayForRow(row, displayByNorm);
     const synopsis = safeSynopsis(row);
-    const trust = trustFields(verdict.tier, verdict.origin);
-    pointers.push({ display, slug, source_id, synopsis, arm, confidence: ARM_CONFIDENCE[arm], matchedNorm, ...trust });
+    pointers.push({ display, slug, source_id, synopsis, arm, confidence: ARM_CONFIDENCE[arm], matchedNorm, ...trust.get(pageKey({ source_id, slug })) });
     if (pointers.length >= maxPointers) break;
   }
-  if (withheld.length) opts.onWithheld?.(withheld);
 
   if (!pointers.length) return null;
   return { pointers, text: renderPointerBlock(pointers) };
+}
+
+/**
+ * #5575 (CEO-20, A6): one query over every resolved candidate page. Returns
+ * the label fields of the pages a pointer may name; pages below the floor or
+ * unreadable are absent (fail-closed), and activation-suppressed pages are
+ * absent and reported through `opts.onWithheld`.
+ */
+async function gatePointerCandidates(engine: BrainEngine, resolved: ReadonlyArray<{ source_id: string; slug: string }>,
+  opts: ResolvePointersOpts): Promise<Map<string, TrustFields>> {
+  const policy = opts.eligibility ?? await proactiveEligibility({ engine }, 'retrieval_reflex');
+  const verdicts = await pageActivationVerdicts(engine, resolved.map(r => ({ source_id: r.source_id, slug: r.slug })), policy).catch(() => null);
+  const out = new Map<string, TrustFields>();
+  const withheld: string[] = [];
+  for (const [key, v] of verdicts ?? []) {
+    if (v.belowFloor) continue;
+    if (v.suppressed) withheld.push(key.replace('\u0000', ':'));
+    else out.set(key, trustFields(v.tier, v.origin));
+  }
+  if (withheld.length) opts.onWithheld?.(withheld);
+  return out;
 }
 
 /** Recover a display label: prefer the matched candidate surface, else the page title. */

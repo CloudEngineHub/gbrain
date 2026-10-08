@@ -14,8 +14,8 @@
  * low-tier chunk loses its marker. Runs on PGLite, and on Postgres through
  * test/e2e/fence-chunk-overlay-postgres.test.ts.
  */
+import { holdFingerprint } from '../src/core/write-gate-store.ts';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
@@ -32,7 +32,7 @@ import { preparePageProjection, readProjectionSnapshot } from '../src/core/page-
 import { stampPageTrust } from '../src/core/eligibility/stamp.ts';
 import { compactTrustLabel } from '../src/core/eligibility/labels.ts';
 import {
-  chunkTrustMarker, fenceTrustMarker, lowestFenceTrustMarker, loadFenceChunkOverlay, registerFactHoldFingerprint, splitFenceOverlay,
+  chunkTrustMarker, fenceTrustMarker, lowestFenceTrustMarker, loadFenceChunkOverlay, registerFactHoldFingerprint, resetFactHoldFingerprint, splitFenceOverlay,
   unmarkFenceChunk, withPendingFenceRows, type FenceChunkOverlay,
 } from '../src/core/eligibility/fence-overlay.ts';
 import { withPageTierKept } from '../src/core/trust/fence-append.ts';
@@ -44,9 +44,6 @@ const row = (rowNum: number, claim: string, visibility: 'world' | 'private' = 'w
 const truthWith = (rows: ParsedFact[]) => `Alice Example runs acme-example.\n\n## Facts\n\n${renderFactsTable(rows)}\n`;
 const pageWith = (rows: ParsedFact[]) => `---\ntype: person\ntitle: Alice Example\n---\n${truthWith(rows)}`;
 const overlay = (omit: number[], demote: Array<[number, TrustTier]> = []): FenceChunkOverlay => ({ omit: new Set(omit), demote: new Map(demote) });
-/** Stand-in for the write gate's holdFingerprint('fact', texts) (write-gate-store.ts on capy/memory-trust-gate). */
-const testHoldFingerprint = (texts: ReadonlyArray<string | null | undefined>) =>
-  createHash('sha256').update(`fact\u0000${texts.map(t => (t ?? '').toLowerCase().replace(/\s+/g, ' ').trim()).join('\u0001')}`).digest('hex');
 
 describe('fence trust marker', () => {
   test('round-trips every tier as a compact label line and reads nothing else as a marker', () => {
@@ -121,7 +118,7 @@ beforeAll(async () => {
   }
 }, 180_000);
 afterAll(async () => { for (const b of backends) await b.close(); });
-afterEach(() => registerFactHoldFingerprint(null));
+afterEach(() => resetFactHoldFingerprint());
 
 const SOURCE = 'default';
 const trust = (tier: TrustTier, channel: string) => ({ tier, origin: { channel } });
@@ -152,12 +149,8 @@ for (const name of testBackends()) {
       await importPage(engine, slug, pageWith(rows));
       await engine.executeRaw("UPDATE pages SET trust_tier='external_untrusted' WHERE source_id=$1 AND slug=$2", [SOURCE, slug]);
       expect(await hits(engine, 'zanzibarquux', slug)).toHaveLength(1);
-      // The write gate's hold table (lane L2a contract), created here until the gate lands on this branch.
-      await engine.executeRaw(`CREATE TABLE IF NOT EXISTS write_gate_holds (id BIGSERIAL PRIMARY KEY, kind TEXT NOT NULL, source_id TEXT NOT NULL,
-        slug TEXT NOT NULL DEFAULT '', fingerprint TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'held', payload JSONB NOT NULL DEFAULT '{}'::jsonb)`);
-      await engine.executeRaw("INSERT INTO write_gate_holds (kind, source_id, slug, fingerprint) VALUES ('fact', $1, $2, $3)",
-        [SOURCE, slug, testHoldFingerprint([rows[1]!.claim, null, null])]);
-      registerFactHoldFingerprint(testHoldFingerprint);
+      await engine.executeRaw(`INSERT INTO write_gate_holds (kind, source_id, slug, fingerprint, detector_version, tier, payload)
+        VALUES ('fact', $1, $2, $3, 1, 'external_untrusted', '{}'::jsonb)`, [SOURCE, slug, holdFingerprint('fact', [rows[1]!.claim, null, null])]);
       await importPage(engine, slug, pageWith(rows));
       expect(await hits(engine, 'zanzibarquux', slug)).toHaveLength(0);
       expect(await hits(engine, 'widgets', slug)).toHaveLength(1);

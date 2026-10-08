@@ -407,6 +407,9 @@
       "write_gate_holds.write_gate_holds_kind_check": "c CHECK ((kind = ANY (ARRAY['fact'::text, 'take'::text])))",
       "write_gate_holds.write_gate_holds_pkey": "p PRIMARY KEY (id)",
       "write_gate_holds.write_gate_holds_status_check": "c CHECK ((status = ANY (ARRAY['held'::text, 'released'::text, 'dropped'::text])))",
+      "write_gate_receipts.trust_generation_delete": "t TRIGGER DEFERRABLE INITIALLY DEFERRED",
+      "write_gate_receipts.trust_generation_insert": "t TRIGGER DEFERRABLE INITIALLY DEFERRED",
+      "write_gate_receipts.trust_generation_update": "t TRIGGER DEFERRABLE INITIALLY DEFERRED",
       "write_gate_receipts.write_gate_receipts_pkey": "p PRIMARY KEY (id)",
       "write_gate_receipts.write_gate_receipts_target_table_check": "c CHECK ((target_table = ANY (ARRAY['pages'::text, 'facts'::text, 'takes'::text, 'timeline_entries'::text, 'write_gate_holds'::text])))",
       "write_gate_receipts.write_gate_receipts_verdict_check": "c CHECK ((verdict = ANY (ARRAY['flag'::text, 'quarantine'::text])))"
@@ -3500,7 +3503,10 @@
       "timeline_entries.planner_stats_ins": "CREATE TRIGGER planner_stats_ins AFTER INSERT ON public.timeline_entries REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
       "timeline_entries.planner_stats_upd": "CREATE TRIGGER planner_stats_upd AFTER UPDATE ON public.timeline_entries REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
       "timeline_entries.trust_generation_update": "CREATE CONSTRAINT TRIGGER trust_generation_update AFTER UPDATE ON public.timeline_entries DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN ((old.trust_tier IS DISTINCT FROM new.trust_tier)) EXECUTE FUNCTION gbrain_bump_trust_generation()",
-      "timeline_entries.trust_tier_stamp": "CREATE TRIGGER trust_tier_stamp BEFORE INSERT OR UPDATE ON public.timeline_entries FOR EACH ROW EXECUTE FUNCTION gbrain_stamp_trust_tier()"
+      "timeline_entries.trust_tier_stamp": "CREATE TRIGGER trust_tier_stamp BEFORE INSERT OR UPDATE ON public.timeline_entries FOR EACH ROW EXECUTE FUNCTION gbrain_stamp_trust_tier()",
+      "write_gate_receipts.trust_generation_delete": "CREATE CONSTRAINT TRIGGER trust_generation_delete AFTER DELETE ON public.write_gate_receipts DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (true) EXECUTE FUNCTION gbrain_bump_trust_generation()",
+      "write_gate_receipts.trust_generation_insert": "CREATE CONSTRAINT TRIGGER trust_generation_insert AFTER INSERT ON public.write_gate_receipts DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (true) EXECUTE FUNCTION gbrain_bump_trust_generation()",
+      "write_gate_receipts.trust_generation_update": "CREATE CONSTRAINT TRIGGER trust_generation_update AFTER UPDATE ON public.write_gate_receipts DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN ((((((old.verdict IS DISTINCT FROM new.verdict) OR (old.reason_families IS DISTINCT FROM new.reason_families)) OR (old.content_hash IS DISTINCT FROM new.content_hash)) OR (old.target_table IS DISTINCT FROM new.target_table)) OR (old.target_id IS DISTINCT FROM new.target_id))) EXECUTE FUNCTION gbrain_bump_trust_generation()"
     },
     "viewColumns": {
       "page_links": [
