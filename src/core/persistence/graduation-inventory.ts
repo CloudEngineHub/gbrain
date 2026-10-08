@@ -156,6 +156,8 @@ export const GRADUATION_INVENTORY: Inventory = {
     carry('think_ab_results', 'operational', 'Think A/B eval results.'),
     carry('timeline_entries', 'user_data', 'Timeline entries with attribution.'),
     carry('wanted_links', 'user_data', 'Unresolved authored links (wanted pages); the edge appears when the target page is written, so they are not re-derived without a full re-extraction.'),
+    carry('write_gate_holds', 'user_data', 'Facts and takes the write gate held for the owner\'s review (#5575); dropping them would lose content awaiting release or drop.'),
+    carry('write_gate_receipts', 'user_data', 'Write-gate verdicts (flag/quarantine) per persisted row (#5575); dropping them would forget which agent-written instructions are unconfirmed.'),
 
     entry('persistence_brain', 'rebind', 'user_data', 'Brain identity and flags carry (brain_id keeps every identity file valid); enabled is set on the target only at cutover.', {
       transforms: [{ column: 'enabled', rule: 'false until cutover', expression: 'false' }],
