@@ -56,6 +56,7 @@ import { logStubGuardEvent } from './stub-guard-audit.ts';
 import { isFactWithdrawn } from './withdrawal.ts';
 import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 import { maintenanceTransaction } from '../persistence/attribution.ts';
+import { withPageTierKept } from '../trust/fence-append.ts';
 
 /** Resolved source binding for the entity page. */
 export interface FenceTarget {
@@ -523,9 +524,10 @@ export async function writeFactsToFence(
         const reparsed = parseMarkdown(tmpBody, `${target.slug}.md`);
         const existing = await engine.getPage(target.slug, { sourceId: target.sourceId });
         if (existing) {
-          await maintenanceTransaction(engine, tx => tx.refreshPageBody(target.slug, target.sourceId,
+          // #5575 ENG-1: the appended rows carry their own tier; the page keeps its tier.
+          await maintenanceTransaction(engine, tx => withPageTierKept(tx, target, () => tx.refreshPageBody(target.slug, target.sourceId,
             sanitizeText(reparsed.compiled_truth), sanitizeText(reparsed.timeline),
-            existing.content_hash || contentHash(existing)));
+            existing.content_hash || contentHash(existing))));
         }
       } catch (err) {
         // The file is committed; the page cache stays stale until the next
