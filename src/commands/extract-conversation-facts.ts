@@ -75,7 +75,7 @@ import {
   type ExtractedFact,
 } from '../core/facts/extract.ts';
 import { configureGatewayIfUninitialized, isAvailable, withBudgetTracker } from '../core/ai/gateway.ts';
-import { managedDerivedFactsPreflight, replaceDerivedFactsForPage, writeDerivedFacts } from '../core/persistence/derived-facts.ts';
+import { insertDerivedFacts, managedDerivedFactsPreflight, replaceDerivedFactsForPage, writeDerivedFacts } from '../core/persistence/derived-facts.ts';
 import { managedPersistenceEnabled } from '../core/persistence/ownership.ts';
 import { BudgetTracker, BudgetExhausted, loadPricingOverrides, type BudgetReason, type NoPricingGuidance } from '../core/budget/budget-tracker.ts';
 import { noPricingMessage } from '../core/budget/no-pricing.ts';
@@ -1222,7 +1222,7 @@ async function processPage(
       if (state.managed) {
         managedRows.push(...rows);
       } else {
-        const ins = await writeDerivedFacts(state.engine, state.sourceId, page.slug, db => db.insertFacts(rows, { source_id: state.sourceId })); // gbrain-allow-direct-insert: canonical bulk extraction path for conversation pages — fences-as-system-of-record doesn't apply because conversations don't carry `## Facts` fences (the chat-log shape is the source-of-truth)
+        const ins = await insertDerivedFacts(state.engine, state.sourceId, page.slug, rows); // canonical bulk extraction path for conversation pages (no `## Facts` fence: the chat log is the source of truth), through the write gate
         pageInsertedTotal += ins.inserted;
         state.result.facts_inserted += ins.inserted;
       }

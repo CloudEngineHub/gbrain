@@ -58,6 +58,7 @@ import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 import { maintenanceTransaction } from '../persistence/attribution.ts';
 import { withTrustKeep } from '../persistence/context.ts';
 import { recordTaintEdges } from '../trust/taint.ts';
+import { recordFlaggedRow, type GatedRowDecision } from '../write-gate-store.ts';
 import type { TaintInput, WriteTrust } from '../trust/tier.ts';
 
 /** Resolved source binding for the entity page. */
@@ -102,6 +103,8 @@ export interface FenceInputFact {
   sessionId: string | null;
   /** Speaker attribution; written to the fence's attributed_to cell. */
   attributedTo?: FactAttribution;
+  /** #5575 B3: the deriver's write-gate decision (an `insert`); a flag records its receipt on the new row. */
+  gate?: GatedRowDecision;
 }
 
 export interface FenceWriteResult {
@@ -342,7 +345,7 @@ export async function writeFactsToFence(
   }
   const { filePath, writeRoot } = resolved;
   if (!hasSourceFilesystemLock(writeRoot)) {
-    return withSourceFilesystemLock(engine, writeRoot, () => writeFactsToFence(engine, target, facts));
+    return withSourceFilesystemLock(engine, writeRoot, () => writeFactsToFence(engine, target, facts, derivation));
   }
   const tmpPath = `${filePath}.tmp`;
   const durabilityEnabled = isDurabilityHardened(writeRoot);
@@ -561,7 +564,10 @@ export async function writeFactsToFence(
 
       const result = await maintenanceTransaction(engine, async tx => {
         const inserted = await tx.insertFacts(enriched, { source_id: target.sourceId }); // gbrain-allow-direct-insert: writeFactsToFence is the markdown-first reconcile path; runs only after the atomic fence write commits
-        for (const id of derivation ? inserted.ids : []) await recordTaintEdges(tx, { table: 'facts', id, sourceId: target.sourceId }, derivation!.inputs);
+        for (const [i, id] of (derivation ? inserted.ids : []).entries()) {
+          await recordTaintEdges(tx, { table: 'facts', id, sourceId: target.sourceId }, derivation!.inputs);
+          if (facts[i]?.gate && inserted.ids.length === facts.length) await recordFlaggedRow(tx, facts[i].gate!, { table: 'facts', id, sourceId: target.sourceId });
+        }
         return inserted;
       }, derivation?.trust);
       // v0.46 (#3014) — an unresolvable `superseded by #N` reference (self

@@ -5,6 +5,8 @@ import { readFix, trustedCliRequired } from '../ops/op-fix.ts';
 import { currentSubmissionAuthority } from '../minions/submission-authority.ts';
 import { withCoordinatedWrite, withWriteTrust } from './context.ts';
 import { deriveTrust, recordTaintEdges } from '../trust/taint.ts';
+import { applyGateDecision, derivedGateConfig, derivedGateInput, emptyGateTally, type GateTally } from '../trust/derived-gate.ts';
+import { decideFactWrite, recordFlaggedRow } from '../write-gate-store.ts';
 import { maintenanceAttribution, maintenanceTransaction } from './attribution.ts';
 import { currentVerifiedLocalWriter } from './identity.ts';
 import { managedPersistenceEnabled } from './ownership.ts';
@@ -71,6 +73,37 @@ async function recordInsertedEdges(tx: BrainEngine, sourceId: string, result: un
 }
 
 /**
+ * #5575 B3: one batch of extracted rows through the write gate at the page's
+ * declared tier (ENG-18): allowed rows are inserted with their input edges
+ * and flag receipts, held rows go to write_gate_holds, rejected rows are
+ * counted and skipped.
+ */
+type FenceRow = NewFact & { row_num: number; source_markdown_slug: string };
+async function insertGatedFacts(tx: BrainEngine, sourceId: string, slug: string, rows: FenceRow[],
+  derivation: Awaited<ReturnType<typeof conversationDerivation>>): Promise<{ inserted: number; ids: number[]; write_gate: GateTally }> {
+  const cfg = await derivedGateConfig(tx);
+  const input = derivedGateInput(derivation.trust);
+  const write_gate = emptyGateTally();
+  const decisions = rows.map(row => decideFactWrite({ fact: row.fact, context: row.context, source: row.source },
+    { sourceId, slug, payload: { ...row, embedding: null }, input, cfg }));
+  for (const decision of decisions) if (decision.action !== 'insert') await applyGateDecision(tx, decision, { table: 'facts', sourceId }, async () => null, write_gate);
+  const allowed = rows.filter((_, i) => decisions[i].action === 'insert');
+  const flags = decisions.filter(decision => decision.action === 'insert');
+  const result = allowed.length ? await tx.insertFacts(allowed, { source_id: sourceId }) : { inserted: 0, ids: [] }; // gbrain-allow-direct-insert: conversation fact rows that passed the write gate
+  for (const [i, id] of result.ids.entries()) {
+    await recordTaintEdges(tx, { table: 'facts', id, sourceId }, derivation.inputs);
+    if (result.ids.length === allowed.length && await recordFlaggedRow(tx, flags[i], { table: 'facts', id, sourceId }) !== null) write_gate.flagged++;
+  }
+  return { inserted: result.inserted, ids: result.ids, write_gate };
+}
+
+/** The conversation fact index's gated batch insert, in writeDerivedFacts' transaction shape. */
+export async function insertDerivedFacts(engine: BrainEngine, sourceId: string, slug: string, rows: FenceRow[]) {
+  const derivation = await conversationDerivation(engine, sourceId, slug);
+  return writeDerivedFacts(engine, sourceId, slug, db => insertGatedFacts(db, sourceId, slug, rows, derivation));
+}
+
+/**
  * Legacy writers run in one maintenance transaction on unmanaged brains. On a
  * managed brain the page must still be live under its lock, so rows are never
  * published for a page deleted or purged while the model ran.
@@ -112,12 +145,8 @@ export async function replaceDerivedFactsForPage(engine: BrainEngine, sourceId: 
       `WITH del AS (DELETE FROM facts WHERE source_id=$1 AND source_markdown_slug=$2 AND source LIKE $3 RETURNING 1)
        SELECT COUNT(*)::text AS count FROM del`, [sourceId, slug, `${input.sourcePrefix}%`]);
     const rows = await input.build(tx);
-    const { trust, inputs } = await conversationDerivation(tx, sourceId, slug);
-    const { inserted } = rows.length ? await withWriteTrust(tx, trust, async () => {
-      const result = await tx.insertFacts(rows, { source_id: sourceId }); // gbrain-allow-direct-insert: managed replacement of a page's derived fact batch inside the coordinator transaction that deleted the prior batch
-      await recordInsertedEdges(tx, sourceId, result, inputs);
-      return result;
-    }) : { inserted: 0 };
+    const derivation = await conversationDerivation(tx, sourceId, slug);
+    const { inserted } = rows.length ? await withWriteTrust(tx, derivation.trust, () => insertGatedFacts(tx, sourceId, slug, rows, derivation)) : { inserted: 0 };
     return { deleted: Number(deleted?.count ?? 0), inserted };
   });
 }
