@@ -562,14 +562,7 @@ export async function writeFactsToFence(
         source_session: facts[i].sessionId,
       }));
 
-      const result = await maintenanceTransaction(engine, async tx => {
-        const inserted = await tx.insertFacts(enriched, { source_id: target.sourceId }); // gbrain-allow-direct-insert: writeFactsToFence is the markdown-first reconcile path; runs only after the atomic fence write commits
-        for (const [i, id] of (derivation ? inserted.ids : []).entries()) {
-          await recordTaintEdges(tx, { table: 'facts', id, sourceId: target.sourceId }, derivation!.inputs);
-          if (facts[i]?.gate && inserted.ids.length === facts.length) await recordFlaggedRow(tx, facts[i].gate!, { table: 'facts', id, sourceId: target.sourceId });
-        }
-        return inserted;
-      }, derivation?.trust);
+      const result = await insertFenceRows(engine, target.sourceId, enriched, facts, derivation);
       // v0.46 (#3014) — an unresolvable `superseded by #N` reference (self
       // / dangling / struck target) leaves superseded_by NULL; log it rather
       // than swallow it. The row still lands (expired_at set for struck
@@ -591,6 +584,23 @@ export async function writeFactsToFence(
     },
     { timeoutMs: 5_000 },
   );
+}
+
+/**
+ * The DB stamp of new fence rows in one attributed transaction: at the
+ * deriver's tier when it declared one, with input edges, and the flag receipt
+ * of a row whose gate decision flagged it (`facts[i]` is the input of row i).
+ */
+async function insertFenceRows(engine: BrainEngine, sourceId: string, rows: Parameters<BrainEngine['insertFacts']>[0], facts: FenceInputFact[],
+  derivation?: { trust: WriteTrust; inputs: readonly TaintInput[] }) {
+  return maintenanceTransaction(engine, async tx => {
+    const inserted = await tx.insertFacts(rows, { source_id: sourceId }); // gbrain-allow-direct-insert: writeFactsToFence is the markdown-first reconcile path; runs only after the atomic fence write commits
+    for (const [i, id] of inserted.ids.entries()) {
+      if (derivation) await recordTaintEdges(tx, { table: 'facts', id, sourceId }, derivation.inputs);
+      if (facts[i]?.gate && inserted.ids.length === facts.length) await recordFlaggedRow(tx, facts[i].gate!, { table: 'facts', id, sourceId });
+    }
+    return inserted;
+  }, derivation?.trust);
 }
 
 /**

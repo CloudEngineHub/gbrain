@@ -166,6 +166,8 @@ export type FactsBackstopResult =
       skipped?: 'extraction_disabled' | 'extraction_unavailable' | `eligibility_failed:${string}`;
       /** Set when the LLM extraction step failed non-transport-fatally (see runPipelineWithBody). */
       skipped_reason?: import('./extract.ts').ExtractFailureReason;
+      /** #5575 B3: rows the write gate flagged, held or rejected (unmanaged path). */
+      write_gate?: GateTally;
     };
 
 /** One pipeline run's input: the turn text plus its page provenance and observation date. */
@@ -617,6 +619,42 @@ async function runPipelineWithBody(
   return runPipelineBodyInner(input, ctx, abortSignal);
 }
 
+/**
+ * #5575 B3: the unmanaged pipeline's gated writers. Every row passes the write
+ * gate at the extraction's declared tier (ENG-18); the extractor rewrites
+ * strict injection hits to [redacted], so such a row is also gated on the
+ * source text. `counts` accumulates the run's insert counters.
+ */
+async function derivedFactWriter(ctx: FactsBackstopCtx, input: PipelineInput, derivation: Awaited<ReturnType<typeof factsDerivation>>,
+  counts: { inserted: number; duplicate: number; superseded: number; fact_ids: number[] }) {
+  const gateCfg = await derivedGateConfig(ctx.engine);
+  const gateInput = derivedGateInput(derivation.trust, ctx.persistenceRequestId);
+  const write_gate = emptyGateTally();
+  const decideFact = (row: { fact: string; context?: string | null; source?: string | null }, slug: string | null, payload: Record<string, unknown>) =>
+    decideFactWrite({ ...row, source_text: row.fact.includes('[redacted]') ? input.turnText : null },
+      { sourceId: ctx.sourceId, slug, payload: { ...payload, embedding: null }, input: gateInput, cfg: gateCfg });
+  /** A DB-only insert: one attributed transaction at the derived tier, gated, with input edges for a new row. */
+  const insertDerivedFact = (newFact: NewFact) => maintenanceTransaction(ctx.engine, tx =>
+    applyGateDecision(tx, decideFact(newFact, newFact.entity_slug ?? null, { ...newFact }), { table: 'facts', sourceId: ctx.sourceId }, async () => {
+      const result = await tx.insertFact(newFact, { source_id: ctx.sourceId }); // gbrain-allow-direct-insert: the facts backstop's DB-only fallbacks (unparented / thin-client facts, stub-guard or unresolvable targets, a declined fence lane)
+      counts.fact_ids.push(result.id);
+      if (result.status === 'inserted') counts.inserted += 1;
+      else if ((result.status as FactInsertStatus) === 'duplicate') { counts.duplicate += 1; return null; }
+      else counts.superseded += 1;
+      await recordTaintEdges(tx, { table: 'facts', id: result.id, sourceId: ctx.sourceId }, derivation.inputs);
+      return result.id;
+    }, write_gate), derivation.trust);
+  /** Gates one entity group before its fence write: held and rejected rows are recorded; the rest carry their decision. */
+  const gateGroup = async <F extends { fact: string; context?: string | null; source?: string | null }>(facts: F[], slug: string) => {
+    const decisions = facts.map(fact => decideFact(fact, slug, { ...fact }));
+    if (decisions.some(d => d.action !== 'insert')) await maintenanceTransaction(ctx.engine, async tx => {
+      for (const d of decisions) if (d.action !== 'insert') await applyGateDecision(tx, d, { table: 'facts', sourceId: ctx.sourceId }, async () => null, write_gate);
+    });
+    return { keep: decisions.map(d => d.action === 'insert'), keptFacts: facts.flatMap((fact, i) => decisions[i].action === 'insert' ? [{ ...fact, gate: decisions[i] }] : []) };
+  };
+  return { insertDerivedFact, gateGroup, write_gate };
+}
+
 /** The actual pipeline body — always runs inside a BudgetTracker scope (#4210). */
 async function runPipelineBodyInner(
   input: PipelineInput,
@@ -706,29 +744,9 @@ async function runPipelineBodyInner(
   if (!managed) await assertAmbientCaptureAdmissible(ctx.engine, ctx.source);
   if (managed) return withCaptureDrops(dropped, facts.length || !dropped.length ? await publishManagedFacts(ctx.engine, managed, ctx, facts, visibility, input.pageSlug) : null);
 
-  let inserted = 0;
-  let duplicate = dropped.length;
-  let superseded = 0;
-  const fact_ids: number[] = [...dropped];
-  // #5575 B3: every row passes the write gate at the extraction's declared tier (ENG-18). The extractor
-  // rewrites strict injection hits to [redacted], so such a row is also gated on the source text.
-  const gateCfg = await derivedGateConfig(ctx.engine);
-  const gateInput = derivedGateInput(derivation.trust, ctx.persistenceRequestId);
-  const write_gate = emptyGateTally();
-  const decideFact = (row: { fact: string; context?: string | null; source?: string | null }, slug: string | null, payload: Record<string, unknown>) =>
-    decideFactWrite({ ...row, source_text: row.fact.includes('[redacted]') ? input.turnText : null },
-      { sourceId: ctx.sourceId, slug, payload: { ...payload, embedding: null }, input: gateInput, cfg: gateCfg });
-  // Every DB-only insert: one attributed transaction at the derived tier, gated, with input edges for a new row.
-  const insertDerivedFact = (newFact: NewFact) => maintenanceTransaction(ctx.engine, tx =>
-    applyGateDecision(tx, decideFact(newFact, newFact.entity_slug ?? null, { ...newFact }), { table: 'facts', sourceId: ctx.sourceId }, async () => {
-      const result = await tx.insertFact(newFact, { source_id: ctx.sourceId }); // gbrain-allow-direct-insert: the facts backstop's DB-only fallbacks (unparented / thin-client facts, stub-guard or unresolvable targets, a declined fence lane)
-      fact_ids.push(result.id);
-      if (result.status === 'inserted') inserted += 1;
-      else if ((result.status as FactInsertStatus) === 'duplicate') { duplicate += 1; return null; }
-      else superseded += 1;
-      await recordTaintEdges(tx, { table: 'facts', id: result.id, sourceId: ctx.sourceId }, derivation.inputs);
-      return result.id;
-    }, write_gate), derivation.trust);
+  const counts = { inserted: 0, duplicate: dropped.length, superseded: 0, fact_ids: [...dropped] };
+  const writer = await derivedFactWriter(ctx, input, derivation, counts);
+  const { insertDerivedFact, write_gate } = writer;
   // Cathedral 5: slugs whose fence-write actually inserted a fact this run.
   const fencedSlugs = new Set<string>();
 
@@ -782,8 +800,8 @@ async function runPipelineBodyInner(
     }
 
     if (matchedExistingId !== null) {
-      duplicate += 1;
-      fact_ids.push(matchedExistingId);
+      counts.duplicate += 1;
+      counts.fact_ids.push(matchedExistingId);
       continue;
     }
 
@@ -791,7 +809,7 @@ async function runPipelineBodyInner(
   }
 
   if (survived.length === 0) {
-    return { inserted, duplicate, superseded, fact_ids, entity_slugs: [], write_gate };
+    return { ...counts, entity_slugs: [], write_gate };
   }
 
   // Phase 2: group survived facts by resolved entity_slug. Facts with
@@ -866,7 +884,7 @@ async function runPipelineBodyInner(
   if (localPath === null) {
     // All went through legacy bucket; nothing left to fence — DB-only
     // inserts have no fence-written page, so entity_slugs stays empty.
-    return { inserted, duplicate, superseded, fact_ids, entity_slugs: [], write_gate };
+    return { ...counts, entity_slugs: [], write_gate };
   }
 
   // Phase 5: fence-write per entity. writeFactsToFence handles the
@@ -893,12 +911,8 @@ async function runPipelineBodyInner(
       sessionId: f.source_session ?? null,
     }));
     // #5575 B3: gate before the fence write; a held or rejected row reaches neither the fence nor a fallback below.
-    const decisions = inputFacts.map(fact => decideFact(fact, slug, { ...fact }));
-    if (decisions.some(d => d.action !== 'insert')) await maintenanceTransaction(ctx.engine, async tx => {
-      for (const d of decisions) if (d.action !== 'insert') await applyGateDecision(tx, d, { table: 'facts', sourceId: ctx.sourceId }, async () => null, write_gate);
-    });
-    const kept = group.filter((_, i) => decisions[i].action === 'insert');
-    const keptFacts = inputFacts.flatMap((fact, i) => decisions[i].action === 'insert' ? [{ ...fact, gate: decisions[i] }] : []);
+    const { keptFacts, keep } = await writer.gateGroup(inputFacts, slug);
+    const kept = group.filter((_, i) => keep[i]);
     if (!keptFacts.length) continue;
 
     // #4108 fail-closed on mixed provenance: one fallback-minted ref in the
@@ -986,10 +1000,10 @@ async function runPipelineBodyInner(
       continue;
     }
 
-    inserted += result.inserted;
-    fact_ids.push(...result.ids);
+    counts.inserted += result.inserted;
+    counts.fact_ids.push(...result.ids);
     if (result.inserted > 0) fencedSlugs.add(slug);
   }
 
-  return { inserted, duplicate, superseded, fact_ids, entity_slugs: [...fencedSlugs], write_gate };
+  return { ...counts, entity_slugs: [...fencedSlugs], write_gate };
 }

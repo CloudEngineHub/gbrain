@@ -50,6 +50,7 @@ import { managedDerivedFactsPreflight, withDerivedFactsWrite } from '../persiste
 import { withWriteTrust } from '../persistence/context.ts';
 import { deriveTrust, recordTaintEdges } from '../trust/taint.ts';
 import { applyGateDecision, derivedGateConfig, derivedGateInput, emptyGateTally, type GateTally } from '../trust/derived-gate.ts';
+import type { WriteGateConfig } from '../write-gate.ts';
 import { decideFactWrite, recordFlaggedRow } from '../write-gate-store.ts';
 import type { WriteTrust } from '../trust/tier.ts';
 import { maintenanceTransaction } from '../persistence/attribution.ts';
@@ -249,6 +250,30 @@ async function refuseDestructiveReconcileOnStaleCache(
     'refusing destructive fact reconciliation until gbrain sync refreshes the page index.',
   );
   return true;
+}
+
+/**
+ * #5575 I2/B3: new fence rows restate the page (no model), so they take its
+ * tier capped at operator_curated (the caller's write scope) and pass the
+ * write gate at it (an owner page never runs it). Held rows go to
+ * write_gate_holds, rejected rows are skipped; inserted rows get input edges
+ * and flag receipts.
+ */
+type ReconcileRow = Parameters<BrainEngine['insertFacts']>[0][number];
+async function insertReconciledFacts<F extends ReconcileRow>(
+  tx: BrainEngine, sourceId: string, slug: string, inserts: F[], derivation: Awaited<ReturnType<typeof deriveTrust>>, cfg: WriteGateConfig, tally: GateTally,
+): Promise<{ inserted: { inserted: number; ids: number[] }; allowed: F[] }> {
+  const decisions = inserts.map(f => decideFactWrite(f, { sourceId, slug, payload: { ...(f as ReconcileRow), embedding: null }, input: derivedGateInput(derivation.trust), cfg }));
+  for (const d of decisions) if (d.action !== 'insert') await applyGateDecision(tx, d, { table: 'facts', sourceId }, async () => null, tally);
+  const allowed = inserts.filter((_, i) => decisions[i].action === 'insert');
+  const flags = decisions.filter(d => d.action === 'insert');
+  const inserted = allowed.length === 0 ? { inserted: 0, ids: [] as number[] }
+    : await tx.insertFacts(allowed.map(f => ({ ...f, superseded_by_row: undefined })), { source_id: sourceId }); // gbrain-allow-direct-insert: extract_facts cycle phase reconciles fence → DB
+  for (const [i, id] of inserted.ids.entries()) {
+    await recordTaintEdges(tx, { table: 'facts', id, sourceId }, derivation.inputs);
+    if (inserted.ids.length === allowed.length && await recordFlaggedRow(tx, flags[i], { table: 'facts', id, sourceId }) !== null) tally.flagged++;
+  }
+  return { inserted, allowed };
 }
 
 /**
@@ -822,7 +847,6 @@ export async function runExtractFacts(
       result.warnings.push(`${slug}: destructive fact reconciliation deferred; existing vectors preserved until embedding succeeds`);
     }
 
-    // #5575 I2: the fence rows restate the page (no model): they take its tier, capped at operator_curated.
     const derivation = await deriveTrust(engine, [{ table: 'pages', id: page.id }], { channel: 'derive:facts_fence', projection: true });
     const apply = async () => {
       try {
@@ -856,21 +880,7 @@ export async function runExtractFacts(
                 f.claim_metric ?? null, f.claim_value ?? null, f.claim_unit ?? null, f.claim_period ?? null],
             );
           }
-          // #5575 B3: each new fence row passes the write gate at the page's tier (an owner page never runs it).
-          const decisions = inserts.map(f => decideFactWrite(f, { sourceId, slug, payload: { ...f, embedding: null }, input: derivedGateInput(derivation.trust), cfg: gateCfg }));
-          for (const d of decisions) if (d.action !== 'insert') await applyGateDecision(tx, d, { table: 'facts', sourceId }, async () => null, gateTally);
-          const allowed = inserts.filter((_, i) => decisions[i].action === 'insert');
-          const flags = decisions.filter(d => d.action === 'insert');
-          const inserted = allowed.length === 0
-            ? { inserted: 0, ids: [] as number[] }
-            : await tx.insertFacts( // gbrain-allow-direct-insert: extract_facts cycle phase reconciles fence → DB
-              allowed.map(f => ({ ...f, superseded_by_row: undefined })),
-              { source_id: sourceId },
-            );
-          for (const [i, id] of inserted.ids.entries()) {
-            await recordTaintEdges(tx, { table: 'facts', id, sourceId }, derivation.inputs);
-            if (inserted.ids.length === allowed.length && await recordFlaggedRow(tx, flags[i], { table: 'facts', id, sourceId }) !== null) gateTally.flagged++;
-          }
+          const { inserted, allowed } = await insertReconciledFacts(tx, sourceId, slug, inserts, derivation, gateCfg, gateTally);
           const insertedRows = new Set(allowed.map(f => f.row_num));
           const linked = await syncSupersession(tx, sourceId, slug, extracted, chain, insertedRows);
           opts.signal?.throwIfAborted();
