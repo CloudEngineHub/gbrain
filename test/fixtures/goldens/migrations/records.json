@@ -1,6 +1,6 @@
 {
   "golden": {
-    "count": 220,
+    "count": 221,
     "gaps": [
       17,
       18,
@@ -36,7 +36,7 @@
       "sqlQueryForEngine": "71fb1ccec1b22cdc1662876dbd8c17ed81e9ab83485c6965cdf5caa4fc4a4ab5",
       "verifyProjectionStatistics": "59d9ccfea1c53384d8607874a51209a9c2dfd51b2b85a2cb6269fa4120faf1f3"
     },
-    "latest": 225,
+    "latest": 226,
     "records": [
       {
         "handler": {
@@ -3271,6 +3271,19 @@
       {
         "handler": "absent",
         "idempotent": true,
+        "name": "chunk_embedding_pending_since",
+        "sql": {
+          "length": 897,
+          "sha256": "ba56b68f73e85332abfab79b4d36b2bd174ca57886d9191e05a21d14c3a38144"
+        },
+        "sqlFor": "absent",
+        "transaction": "absent",
+        "verify": "absent",
+        "version": 221
+      },
+      {
+        "handler": "absent",
+        "idempotent": true,
         "name": "trust_tiers",
         "sql": {
           "length": 21064,
@@ -3279,7 +3292,7 @@
         "sqlFor": "absent",
         "transaction": "absent",
         "verify": "absent",
-        "version": 221
+        "version": 222
       },
       {
         "handler": "absent",
@@ -3292,7 +3305,7 @@
         "sqlFor": "absent",
         "transaction": "absent",
         "verify": "absent",
-        "version": 222
+        "version": 223
       },
       {
         "handler": "absent",
@@ -3305,7 +3318,7 @@
         "sqlFor": "absent",
         "transaction": "absent",
         "verify": "absent",
-        "version": 223
+        "version": 224
       },
       {
         "handler": "absent",
@@ -3318,7 +3331,7 @@
         "sqlFor": "absent",
         "transaction": "absent",
         "verify": "absent",
-        "version": 224
+        "version": 225
       },
       {
         "handler": "absent",
@@ -3331,7 +3344,7 @@
         "sqlFor": "absent",
         "transaction": "absent",
         "verify": "absent",
-        "version": 225
+        "version": 226
       }
     ],
     "versions": [
@@ -3554,7 +3567,8 @@
       222,
       223,
       224,
-      225
+      225,
+      226
     ]
   },
   "normalizer": "migrations-record-v1"

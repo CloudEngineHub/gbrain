@@ -248,8 +248,8 @@ test('applyForwardReferenceBootstrap covers every forward reference declared in 
       ALTER TABLE pages DROP CONSTRAINT IF EXISTS pages_source_slug_key;
       ALTER TABLE pages ADD CONSTRAINT pages_slug_key UNIQUE (slug);
       DROP INDEX IF EXISTS idx_pages_source_id;
-      -- The v225 trust generation trigger's WHEN reads pages.source_id, slug and
-      -- deleted_at; a pre-v0.18 brain predates it (v225 recreates it).
+      -- The v226 trust generation trigger's WHEN reads pages.source_id, slug and
+      -- deleted_at; a pre-v0.18 brain predates it (v226 recreates it).
       DROP TRIGGER IF EXISTS trust_generation_update ON pages;
       ALTER TABLE pages DROP COLUMN IF EXISTS source_id;
       DROP TABLE IF EXISTS sources CASCADE;
@@ -414,8 +414,8 @@ test('after bootstrap, PGLITE_SCHEMA_SQL replays without crashing on missing for
       ALTER TABLE pages DROP CONSTRAINT IF EXISTS pages_source_slug_key;
       ALTER TABLE pages ADD CONSTRAINT pages_slug_key UNIQUE (slug);
       DROP INDEX IF EXISTS idx_pages_source_id;
-      -- The v225 trust generation trigger's WHEN reads pages.source_id, slug and
-      -- deleted_at; a pre-v0.18 brain predates it (v225 recreates it).
+      -- The v226 trust generation trigger's WHEN reads pages.source_id, slug and
+      -- deleted_at; a pre-v0.18 brain predates it (v226 recreates it).
       DROP TRIGGER IF EXISTS trust_generation_update ON pages;
       ALTER TABLE pages DROP COLUMN IF EXISTS source_id;
       DROP TABLE IF EXISTS sources CASCADE;
@@ -897,6 +897,12 @@ const COLUMN_EXEMPTIONS = new Set<string>([
   // claim, after the migration chain has run.
   'minion_jobs.spend_authorization',
   'minion_jobs.spend_claim_token',
+  // E-B (wave 0) content_chunks.embedding_pending_since (migration
+  // chunk_embedding_pending_since): deliberately migration-only so fresh and
+  // upgraded catalogs keep the same column order (test/pglite-upgrade-replay);
+  // the schema blob carries a comment, no CREATE TABLE column and no index
+  // reads it, so there is no forward reference for the bootstrap to trip on.
+  'content_chunks.embedding_pending_since',
   // T7 — search_telemetry rank-1 drift columns (migration v111). search_telemetry
   // is created entirely by migration v57 (not in the schema blob), so the v57+v111
   // chain handles fresh + upgrade; no CREATE INDEX references these columns, so

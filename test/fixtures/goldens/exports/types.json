@@ -1659,7 +1659,7 @@
           "responseModel?: string | undefined",
           "stopReason: \"other\" | \"length\" | \"end\" | \"tool_calls\" | \"refusal\" | \"content_filter\"",
           "text: string",
-          "usage: { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number; }"
+          "usage: { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number; reasoning_tokens?: number; }"
         ],
         "name": "ChatResult"
       },
@@ -1863,7 +1863,7 @@
           "messages: ChatMessage[]",
           "stopReason: ToolLoopStopReason",
           "totalTurns: number",
-          "totalUsage: { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number; }"
+          "totalUsage: { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number; reasoning_tokens?: number; }"
         ],
         "name": "ToolLoopResult"
       },
@@ -4042,7 +4042,8 @@
           "finish_reason: string | null",
           "response_model: string | null",
           "sessions_truncated: number",
-          "text: string"
+          "text: string",
+          "usage: ReaderUsage | null"
         ],
         "name": "ReaderAnswer"
       },
@@ -4063,6 +4064,18 @@
         "signature": [
           "\"direct\" | \"notes\""
         ]
+      },
+      {
+        "kind": "interface",
+        "members": [
+          "cache_read_input_tokens: number",
+          "cache_write_input_tokens: number",
+          "output_tokens: number",
+          "reasoning_tokens: number | null",
+          "total_input_tokens: number",
+          "uncached_input_tokens: number"
+        ],
+        "name": "ReaderUsage"
       },
       {
         "kind": "interface",
@@ -4107,6 +4120,20 @@
         "name": "readerConfigHash",
         "signature": [
           "(config: ReaderConfig, model: string) => string"
+        ]
+      },
+      {
+        "kind": "function",
+        "name": "readerUsageFromGateway",
+        "signature": [
+          "(u: ChatResult[\"usage\"]) => ReaderUsage"
+        ]
+      },
+      {
+        "kind": "function",
+        "name": "readerUsageFromMessage",
+        "signature": [
+          "(message: Anthropic.Message & { gbrain_usage?: ReaderUsage; }) => ReaderUsage | null"
         ]
       },
       {
@@ -5928,6 +5955,7 @@
           "protocolVersion?: number | undefined",
           "reason?: string | undefined",
           "receiptFields?: { operation: string; source_id: string; slug: string | null; principal_kind: string; principal_id: string; } | undefined",
+          "retryable?: boolean | undefined",
           "stack?: string | undefined",
           "suggestion?: string | undefined",
           "toJSON: () => { contract_version?: 1 | undefined; fence_issues?: Record<string, unknown>[] | undefined; fence?: Record<string, unknown> | undefined; notices?: unknown[] | undefined; fix?: unknown; why?: string | undefined; reason?: string | undefined; write_error?: \"writer_lock_unavailable\" | \"writer_pool_capacity\" | \"owner_unavailable\" | \"recovery_required\" | \"queue_capacity\" | \"revision_required\" | \"revision_conflict\" | \"idempotency_conflict\" | \"source_changed\" | \"write_pending\" | \"storage_error\" | \"cancelled\" | \"permission_denied\" | \"scope_denied\" | \"invalid_params\" | \"not_found\" | \"page_not_found\" | \"page_identity_changed\" | \"write_claim_lost\" | \"request_too_large\" | \"response_too_large\" | \"writer_registration_required\" | \"writer_identity_invalid\" | \"writer_not_initialized\" | \"writer_coordinator_required\" | \"fact_already_expired\" | \"source_writeback_required\" | \"unsupported_mutation_protocol\" | \"writer_upgrade_required\" | \"writer_not_quiesced\" | \"skill_bundle_required\" | \"take_row_collision\" | \"invalid_source_uri\" | \"writer_admin_locked\" | \"connector_account_changed\" | \"connector_intent_outdated\" | \"checkpoint_validation_timeout\" | \"invalid_connector_text\" | \"connector_holds_exhausted\" | \"connector_fence_below_timeline\" | \"core_budget_exceeded\" | \"core_mark_owner_only\" | \"core_remote_edit_refused\" | \"core_delete_owner_only\" | \"timeline_rows_would_be_removed\" | \"purged_content\" | \"preparation_stalled\" | \"fence_unrenderable\" | undefined; write_request?: WriteReceipt | undefined; error: ErrorCode; code: string; message: string; suggestion: string | undefined; docs: string | undefined; detail: string | undefined; protocol_version: number | undefined; }",
