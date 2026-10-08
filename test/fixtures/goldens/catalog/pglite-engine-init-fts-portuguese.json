@@ -1,6 +1,7 @@
 {
   "golden": {
     "constraints": {
+      "access_tokens.access_tokens_min_trust_check": "c CHECK (((min_trust IS NULL) OR (min_trust = ANY (ARRAY['user_confirmed'::text, 'operator_curated'::text, 'tool_observed'::text, 'agent_written'::text, 'unknown'::text, 'external_untrusted'::text]))))",
       "access_tokens.access_tokens_pkey": "p PRIMARY KEY (id)",
       "access_tokens.access_tokens_source_grant_check": "c CHECK ((source_grant = ANY (ARRAY['default'::text, 'scalar'::text, 'federated'::text, 'none'::text])))",
       "access_tokens.access_tokens_token_hash_key": "u UNIQUE (token_hash)",
@@ -81,6 +82,7 @@
       "facts.facts_pkey": "p PRIMARY KEY (id)",
       "facts.facts_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
       "facts.facts_superseded_by_fkey": "f FOREIGN KEY (superseded_by) REFERENCES facts(id) ON DELETE SET NULL",
+      "facts.facts_trust_tier_check": "c CHECK ((trust_tier = ANY (ARRAY['user_confirmed'::text, 'operator_curated'::text, 'tool_observed'::text, 'agent_written'::text, 'unknown'::text, 'external_untrusted'::text])))",
       "facts.facts_visibility_check": "c CHECK ((visibility = ANY (ARRAY['private'::text, 'world'::text])))",
       "files.files_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE SET NULL",
       "files.files_pkey": "p PRIMARY KEY (id)",
@@ -164,6 +166,7 @@
       "minion_self_fix_log.minion_self_fix_log_parent_id_fkey": "f FOREIGN KEY (parent_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
       "minion_self_fix_log.minion_self_fix_log_pkey": "p PRIMARY KEY (id)",
       "oauth_clients.oauth_clients_complete_agent_grant": "c CHECK (((NOT (COALESCE(scope, ''::text) ~ '(^|[[:space:]])agent([[:space:]]|$)'::text)) OR ((COALESCE(cardinality(bound_tools), 0) > 0) AND (source_id IS NOT NULL) AND (bound_source_id IS NOT NULL) AND (bound_source_id = source_id) AND COALESCE((source_id = ANY (federated_read)), false) AND (((delegated_namespace = 'job'::text) AND (delegated_slug_prefixes IS NULL)) OR ((delegated_namespace = 'prefixes'::text) AND (COALESCE(cardinality(delegated_slug_prefixes), 0) > 0))) AND (bound_max_concurrent > 0))))",
+      "oauth_clients.oauth_clients_min_trust_check": "c CHECK (((min_trust IS NULL) OR (min_trust = ANY (ARRAY['user_confirmed'::text, 'operator_curated'::text, 'tool_observed'::text, 'agent_written'::text, 'unknown'::text, 'external_untrusted'::text]))))",
       "oauth_clients.oauth_clients_pkey": "p PRIMARY KEY (client_id)",
       "oauth_clients.oauth_clients_source_grant_check": "c CHECK ((source_grant = 'none'::text))",
       "oauth_clients.oauth_clients_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE RESTRICT",
@@ -198,12 +201,14 @@
       "page_projection_jobs.page_projection_jobs_source_incarnation_fkey": "f FOREIGN KEY (source_incarnation) REFERENCES sources(incarnation) ON DELETE CASCADE",
       "page_versions.page_versions_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE",
       "page_versions.page_versions_pkey": "p PRIMARY KEY (id)",
+      "page_versions.page_versions_trust_tier_check": "c CHECK (((trust_tier IS NULL) OR (trust_tier = ANY (ARRAY['user_confirmed'::text, 'operator_curated'::text, 'tool_observed'::text, 'agent_written'::text, 'unknown'::text, 'external_untrusted'::text]))))",
       "page_write_guards.page_write_guards_pkey": "p PRIMARY KEY (source_incarnation, slug)",
       "page_write_guards.page_write_guards_source_incarnation_fkey": "f FOREIGN KEY (source_incarnation) REFERENCES sources(incarnation) ON DELETE CASCADE",
       "pages.pages_page_kind_check": "c CHECK ((page_kind = ANY (ARRAY['markdown'::text, 'code'::text, 'image'::text])))",
       "pages.pages_pkey": "p PRIMARY KEY (id)",
       "pages.pages_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
       "pages.pages_source_slug_key": "u UNIQUE (source_id, slug)",
+      "pages.pages_trust_tier_check": "c CHECK ((trust_tier = ANY (ARRAY['user_confirmed'::text, 'operator_curated'::text, 'tool_observed'::text, 'agent_written'::text, 'unknown'::text, 'external_untrusted'::text])))",
       "persistence_brain.persistence_brain_pkey": "p PRIMARY KEY (singleton)",
       "persistence_brain.persistence_brain_singleton_check": "c CHECK ((singleton = 1))",
       "persistence_brain.persistence_brain_writer_protocol_floor_check": "c CHECK ((writer_protocol_floor = ANY (ARRAY[1, 2])))",
@@ -349,6 +354,7 @@
       "takes.takes_pkey": "p PRIMARY KEY (id)",
       "takes.takes_resolution_consistency": "c CHECK ((((resolved_quality IS NULL) AND (resolved_outcome IS NULL)) OR ((resolved_quality = 'correct'::text) AND (resolved_outcome = true)) OR ((resolved_quality = 'incorrect'::text) AND (resolved_outcome = false)) OR ((resolved_quality = 'partial'::text) AND (resolved_outcome IS NULL)) OR ((resolved_quality = 'unresolvable'::text) AND (resolved_outcome IS NULL))))",
       "takes.takes_resolved_quality_values": "c CHECK (((resolved_quality IS NULL) OR (resolved_quality = ANY (ARRAY['correct'::text, 'incorrect'::text, 'partial'::text, 'unresolvable'::text]))))",
+      "takes.takes_trust_tier_check": "c CHECK ((trust_tier = ANY (ARRAY['user_confirmed'::text, 'operator_curated'::text, 'tool_observed'::text, 'agent_written'::text, 'unknown'::text, 'external_untrusted'::text])))",
       "takes.takes_weight_check": "c CHECK (((weight >= (0)::double precision) AND (weight <= (1)::double precision)))",
       "think_ab_results.think_ab_results_pkey": "p PRIMARY KEY (id)",
       "think_ab_results.think_ab_results_preferred_check": "c CHECK ((preferred = ANY (ARRAY['baseline'::text, 'with_calibration'::text, 'neither'::text, 'tie'::text])))",
@@ -356,6 +362,14 @@
       "timeline_entries.timeline_entries_event_page_id_fkey": "f FOREIGN KEY (event_page_id) REFERENCES pages(id) ON DELETE CASCADE",
       "timeline_entries.timeline_entries_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE",
       "timeline_entries.timeline_entries_pkey": "p PRIMARY KEY (id)",
+      "timeline_entries.timeline_entries_trust_tier_check": "c CHECK ((trust_tier = ANY (ARRAY['user_confirmed'::text, 'operator_curated'::text, 'tool_observed'::text, 'agent_written'::text, 'unknown'::text, 'external_untrusted'::text])))",
+      "trust_proposals.trust_proposals_action_check": "c CHECK ((action = ANY (ARRAY['supersede_fact'::text, 'supersede_take'::text, 'forget'::text, 'lower_page'::text, 'confirm'::text])))",
+      "trust_proposals.trust_proposals_check": "c CHECK (((related_table IS NULL) = (related_id IS NULL)))",
+      "trust_proposals.trust_proposals_pkey": "p PRIMARY KEY (id)",
+      "trust_proposals.trust_proposals_related_table_check": "c CHECK ((related_table = ANY (ARRAY['facts'::text, 'takes'::text, 'timeline_entries'::text, 'pages'::text])))",
+      "trust_proposals.trust_proposals_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
+      "trust_proposals.trust_proposals_status_check": "c CHECK ((status = ANY (ARRAY['pending'::text, 'accepted'::text, 'rejected'::text, 'undone'::text, 'superseded'::text])))",
+      "trust_proposals.trust_proposals_target_table_check": "c CHECK ((target_table = ANY (ARRAY['facts'::text, 'takes'::text, 'timeline_entries'::text, 'pages'::text])))",
       "wanted_links.wanted_links_origin_page_id_fkey": "f FOREIGN KEY (origin_page_id) REFERENCES pages(id) ON DELETE CASCADE",
       "wanted_links.wanted_links_pkey": "p PRIMARY KEY (id)",
       "wanted_links.wanted_links_producer_check": "c CHECK ((producer = ANY (ARRAY['body'::text, 'frontmatter'::text])))",
@@ -387,9 +401,11 @@
       "gbrain_lease_shared_skill_delivery()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=5e493c1ac8dce8cb025a736629e563437c4b214744137c302c532c20bf7e7acf",
       "gbrain_preserve_fact_withdrawal()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=9beb118551a08451a228146373f50f2aa2ce0cfe89937e937d361b33224aa0aa",
       "gbrain_queue_page_projection()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=6c544b9c129b6a17dcabeb5ee8d44a2b0e0af9d02ca3fe47c7d7f22ec313042c",
-      "gbrain_require_managed_writer()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=9dc91548479da39c77e3015481b89901ef13fb02ce496597606fbac592c05201",
+      "gbrain_require_managed_writer()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=d444fd431abe188062c7266caa9ab41327336c916805d7dd02a362affe2f26a7",
       "gbrain_require_persistence_protocol(required integer)": "RETURNS void kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=af07b7fac60dec0a4fe568217931ac449d32f73b3a53a047b3b02a5f59cb5058",
+      "gbrain_snapshot_version_trust()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=7452350236ed4c68a6cd1f4d78a1381a4ef44cc70e8a032141f01bba4a704702",
       "gbrain_stamp_revision_attribution()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=d446ed1145d8bb9c93cb0ca4aa076a5dc7a5fe07b3e79518adaf1b17b0a51216",
+      "gbrain_stamp_trust_tier()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=c3dbe0330bcdd42294891167e4d9cbec0902e8304ce26e934f0b124bd451bb94",
       "gbrain_stamp_version_attribution()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=1b28a0e5769198d86490dc20b2aee80b7e6595670428a63ac9c6825cd2a35b10",
       "gbrain_stamp_write_attribution()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=50e9b0e5bf37eeae6555dd16c8104cb0807be6c05a79e0c82237d45162c21dc2",
       "update_chunk_search_vector()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=e099e8a1d30bd74b7632b6055d3edffe753c00c00183e3bdac34d28d23347555",
@@ -757,6 +773,9 @@
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "timeline_entries": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "trust_proposals": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "wanted_links": [
@@ -1130,6 +1149,10 @@
       "think_ab_results_pkey": "CREATE UNIQUE INDEX think_ab_results_pkey ON public.think_ab_results USING btree (id)",
       "think_ab_results_recent_idx": "CREATE INDEX think_ab_results_recent_idx ON public.think_ab_results USING btree (source_id, ran_at DESC)",
       "timeline_entries_pkey": "CREATE UNIQUE INDEX timeline_entries_pkey ON public.timeline_entries USING btree (id)",
+      "trust_proposals_pending_idx": "CREATE INDEX trust_proposals_pending_idx ON public.trust_proposals USING btree (source_id, created_at) WHERE (status = 'pending'::text)",
+      "trust_proposals_pending_unique": "CREATE UNIQUE INDEX trust_proposals_pending_unique ON public.trust_proposals USING btree (action, target_table, target_id, COALESCE(related_table, ''::text), COALESCE(related_id, (0)::bigint)) WHERE (status = 'pending'::text)",
+      "trust_proposals_pkey": "CREATE UNIQUE INDEX trust_proposals_pkey ON public.trust_proposals USING btree (id)",
+      "trust_proposals_target_idx": "CREATE INDEX trust_proposals_target_idx ON public.trust_proposals USING btree (target_table, target_id)",
       "uniq_minion_attachments_job_filename": "CREATE UNIQUE INDEX uniq_minion_attachments_job_filename ON public.minion_attachments USING btree (job_id, filename)",
       "uniq_minion_jobs_idempotency": "CREATE UNIQUE INDEX uniq_minion_jobs_idempotency ON public.minion_jobs USING btree (idempotency_key) WHERE (idempotency_key IS NOT NULL)",
       "uniq_subagent_messages_idx": "CREATE UNIQUE INDEX uniq_subagent_messages_idx ON public.subagent_messages USING btree (job_id, message_idx)",
@@ -1195,6 +1218,7 @@
       "takes_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=takes.id",
       "think_ab_results_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=think_ab_results.id",
       "timeline_entries_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=timeline_entries.id",
+      "trust_proposals_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=trust_proposals.id",
       "wanted_links_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=wanted_links.id"
     },
     "tables": {
@@ -1213,7 +1237,8 @@
           "11 federated_read ARRAY/_text NULL",
           "12 allowed_operations ARRAY/_text NULL",
           "13 takes_holders ARRAY/_text NULL",
-          "14 grant_revision integer/int4 NOT NULL DEFAULT 0"
+          "14 grant_revision integer/int4 NOT NULL DEFAULT 0",
+          "15 min_trust text/text NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -1844,7 +1869,9 @@
           "38 last_write_principal_kind text/text NULL",
           "39 last_write_principal_id text/text NULL",
           "40 last_written_at timestamp with time zone/timestamptz NULL",
-          "41 attributed_to text/text NULL"
+          "41 attributed_to text/text NULL",
+          "42 trust_tier text/text NOT NULL DEFAULT 'unknown'::text",
+          "43 write_origin jsonb/jsonb NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -2219,7 +2246,8 @@
           "27 grant_repair_reasons ARRAY/_text NOT NULL DEFAULT '{}'::text[]",
           "28 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "29 source_grant text/text NULL",
-          "30 takes_holders ARRAY/_text NULL"
+          "30 takes_holders ARRAY/_text NULL",
+          "31 min_trust text/text NULL"
         ],
         "flags": "relkind=r rls=true force_rls=false"
       },
@@ -2381,7 +2409,9 @@
           "15 write_principal_id text/text NULL",
           "16 archived_write_request_id uuid/uuid NULL",
           "17 archived_principal_kind text/text NULL",
-          "18 archived_principal_id text/text NULL"
+          "18 archived_principal_id text/text NULL",
+          "19 trust_tier text/text NULL",
+          "20 write_origin jsonb/jsonb NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -2433,7 +2463,9 @@
           "37 links_attendance_blocked_at timestamp with time zone/timestamptz NULL",
           "38 revision_write_request_id uuid/uuid NULL",
           "39 revision_principal_kind text/text NULL",
-          "40 revision_principal_id text/text NULL"
+          "40 revision_principal_id text/text NULL",
+          "41 trust_tier text/text NOT NULL DEFAULT 'unknown'::text",
+          "42 write_origin jsonb/jsonb NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -3130,7 +3162,9 @@
           "29 last_write_request_id uuid/uuid NULL",
           "30 last_write_principal_kind text/text NULL",
           "31 last_write_principal_id text/text NULL",
-          "32 last_written_at timestamp with time zone/timestamptz NULL"
+          "32 last_written_at timestamp with time zone/timestamptz NULL",
+          "33 trust_tier text/text NOT NULL DEFAULT 'unknown'::text",
+          "34 write_origin jsonb/jsonb NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -3165,7 +3199,33 @@
           "12 last_write_request_id uuid/uuid NULL",
           "13 last_write_principal_kind text/text NULL",
           "14 last_write_principal_id text/text NULL",
-          "15 last_written_at timestamp with time zone/timestamptz NULL"
+          "15 last_written_at timestamp with time zone/timestamptz NULL",
+          "16 trust_tier text/text NOT NULL DEFAULT 'unknown'::text",
+          "17 write_origin jsonb/jsonb NULL"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "trust_proposals": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('trust_proposals_id_seq'::regclass)",
+          "2 action text/text NOT NULL",
+          "3 source_id text/text NOT NULL",
+          "4 target_table text/text NOT NULL",
+          "5 target_id bigint/int8 NOT NULL",
+          "6 related_table text/text NULL",
+          "7 related_id bigint/int8 NULL",
+          "8 before_state jsonb/jsonb NOT NULL DEFAULT '{}'::jsonb",
+          "9 after_state jsonb/jsonb NOT NULL DEFAULT '{}'::jsonb",
+          "10 proposer text/text NOT NULL",
+          "11 proposer_principal_kind text/text NULL",
+          "12 proposer_principal_id text/text NULL",
+          "13 write_request_id uuid/uuid NULL",
+          "14 status text/text NOT NULL DEFAULT 'pending'::text",
+          "15 decided_at timestamp with time zone/timestamptz NULL",
+          "16 decided_principal_kind text/text NULL",
+          "17 decided_principal_id text/text NULL",
+          "18 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "19 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -3197,11 +3257,13 @@
       "facts.planner_stats_del": "CREATE TRIGGER planner_stats_del AFTER DELETE ON public.facts REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
       "facts.planner_stats_ins": "CREATE TRIGGER planner_stats_ins AFTER INSERT ON public.facts REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
       "facts.planner_stats_upd": "CREATE TRIGGER planner_stats_upd AFTER UPDATE ON public.facts REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
+      "facts.trust_tier_stamp": "CREATE TRIGGER trust_tier_stamp BEFORE INSERT OR UPDATE ON public.facts FOR EACH ROW EXECUTE FUNCTION gbrain_stamp_trust_tier()",
       "links.planner_stats_del": "CREATE TRIGGER planner_stats_del AFTER DELETE ON public.links REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
       "links.planner_stats_ins": "CREATE TRIGGER planner_stats_ins AFTER INSERT ON public.links REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
       "links.planner_stats_upd": "CREATE TRIGGER planner_stats_upd AFTER UPDATE ON public.links REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
       "minion_jobs.minion_queue_protocol": "CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON public.minion_jobs FOR EACH ROW EXECUTE FUNCTION enforce_minion_queue_protocol()",
       "page_aliases.managed_writer_guard": "CREATE TRIGGER managed_writer_guard BEFORE INSERT OR DELETE OR UPDATE ON public.page_aliases FOR EACH ROW EXECUTE FUNCTION gbrain_require_managed_writer()",
+      "page_versions.page_versions_trust_snapshot": "CREATE TRIGGER page_versions_trust_snapshot BEFORE INSERT ON public.page_versions FOR EACH ROW EXECUTE FUNCTION gbrain_snapshot_version_trust()",
       "page_versions.page_versions_write_attribution": "CREATE TRIGGER page_versions_write_attribution BEFORE INSERT ON public.page_versions FOR EACH ROW EXECUTE FUNCTION gbrain_stamp_version_attribution()",
       "pages.bump_page_generation_clock_trg": "CREATE TRIGGER bump_page_generation_clock_trg AFTER INSERT OR DELETE OR UPDATE ON public.pages FOR EACH STATEMENT EXECUTE FUNCTION bump_page_generation_clock_fn()",
       "pages.bump_page_generation_trg": "CREATE TRIGGER bump_page_generation_trg BEFORE INSERT OR UPDATE ON public.pages FOR EACH ROW EXECUTE FUNCTION bump_page_generation_fn()",
@@ -3214,6 +3276,7 @@
       "pages.planner_stats_ins": "CREATE TRIGGER planner_stats_ins AFTER INSERT ON public.pages REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
       "pages.planner_stats_upd": "CREATE TRIGGER planner_stats_upd AFTER UPDATE ON public.pages REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
       "pages.trg_pages_search_vector": "CREATE TRIGGER trg_pages_search_vector BEFORE INSERT OR UPDATE OF title, timeline ON public.pages FOR EACH ROW EXECUTE FUNCTION update_page_search_vector()",
+      "pages.trust_tier_stamp": "CREATE TRIGGER trust_tier_stamp BEFORE INSERT OR UPDATE ON public.pages FOR EACH ROW EXECUTE FUNCTION gbrain_stamp_trust_tier()",
       "persistence_brain.gbrain_protocol_activation": "CREATE TRIGGER gbrain_protocol_activation BEFORE UPDATE ON public.persistence_brain FOR EACH ROW EXECUTE FUNCTION gbrain_guard_protocol_activation()",
       "persistence_effects.gbrain_effect_protocol": "CREATE TRIGGER gbrain_effect_protocol BEFORE INSERT OR DELETE OR UPDATE ON public.persistence_effects FOR EACH ROW EXECUTE FUNCTION gbrain_guard_effect_protocol()",
       "persistence_requests.gbrain_request_protocol": "CREATE TRIGGER gbrain_request_protocol BEFORE INSERT OR DELETE OR UPDATE ON public.persistence_requests FOR EACH ROW EXECUTE FUNCTION gbrain_guard_request_protocol()",
@@ -3230,11 +3293,13 @@
       "takes.planner_stats_del": "CREATE TRIGGER planner_stats_del AFTER DELETE ON public.takes REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
       "takes.planner_stats_ins": "CREATE TRIGGER planner_stats_ins AFTER INSERT ON public.takes REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
       "takes.planner_stats_upd": "CREATE TRIGGER planner_stats_upd AFTER UPDATE ON public.takes REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
+      "takes.trust_tier_stamp": "CREATE TRIGGER trust_tier_stamp BEFORE INSERT OR UPDATE ON public.takes FOR EACH ROW EXECUTE FUNCTION gbrain_stamp_trust_tier()",
       "timeline_entries.gbrain_write_attribution": "CREATE TRIGGER gbrain_write_attribution BEFORE INSERT OR UPDATE ON public.timeline_entries FOR EACH ROW EXECUTE FUNCTION gbrain_stamp_write_attribution()",
       "timeline_entries.managed_writer_guard": "CREATE TRIGGER managed_writer_guard BEFORE INSERT OR DELETE OR UPDATE ON public.timeline_entries FOR EACH ROW EXECUTE FUNCTION gbrain_require_managed_writer()",
       "timeline_entries.planner_stats_del": "CREATE TRIGGER planner_stats_del AFTER DELETE ON public.timeline_entries REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
       "timeline_entries.planner_stats_ins": "CREATE TRIGGER planner_stats_ins AFTER INSERT ON public.timeline_entries REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
-      "timeline_entries.planner_stats_upd": "CREATE TRIGGER planner_stats_upd AFTER UPDATE ON public.timeline_entries REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()"
+      "timeline_entries.planner_stats_upd": "CREATE TRIGGER planner_stats_upd AFTER UPDATE ON public.timeline_entries REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION gbrain_count_modifications()",
+      "timeline_entries.trust_tier_stamp": "CREATE TRIGGER trust_tier_stamp BEFORE INSERT OR UPDATE ON public.timeline_entries FOR EACH ROW EXECUTE FUNCTION gbrain_stamp_trust_tier()"
     },
     "viewColumns": {
       "page_links": [

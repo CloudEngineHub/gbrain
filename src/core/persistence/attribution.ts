@@ -2,13 +2,19 @@ import { currentVerifiedLocalWriter, existingLocalHostId, readLocalWriter } from
 import type { Principal, SqlEngine, WriteRequest } from './model.ts';
 import type { BrainEngine } from '../engine.ts';
 import { withWriteAttribution } from './context.ts';
+import type { WriteTrust } from '../trust/tier.ts';
 
 /**
  * The actor the database stamps on rows written inside withCoordinatedWrite
  * or withWriteAttribution. `requestId` is persistence_requests.id (globally
  * unique), or null for a maintenance write with no journal request.
  */
-export interface WriteAttribution { requestId: string | null; principal: Principal; }
+export interface WriteAttribution {
+  requestId: string | null;
+  principal: Principal;
+  /** The tier and origin of the rows written (trust/tier.ts). Undeclared: rows are stamped `unknown` unless an enclosing scope declared one. */
+  trust?: WriteTrust;
+}
 
 export { withWriteAttribution };
 
@@ -55,7 +61,7 @@ const installationRegistration = new WeakMap<SqlEngine, Promise<string>>();
  * stale-atom retirement) whose rows carry the maintenance principal. A managed
  * brain's guard still refuses these writes: this sets no coordinator capability.
  */
-export async function maintenanceTransaction<T>(engine: BrainEngine, fn: (tx: BrainEngine) => Promise<T>): Promise<T> {
+export async function maintenanceTransaction<T>(engine: BrainEngine, fn: (tx: BrainEngine) => Promise<T>, trust?: WriteTrust): Promise<T> {
   const attribution = await maintenanceAttribution(engine);
-  return engine.transaction(tx => withWriteAttribution(tx, attribution, () => fn(tx)));
+  return engine.transaction(tx => withWriteAttribution(tx, trust ? { ...attribution, trust } : attribution, () => fn(tx)));
 }
