@@ -827,7 +827,7 @@ function factRowToJson(r: FactRow): Record<string, unknown> {
 }
 
 export async function runForget(engine: BrainEngine | (() => Promise<BrainEngine>), args: string[]): Promise<void> {
-  if (args.includes('--purge')) return (await import('./forget-purge.ts')).runForgetPurge(engine, args);
+  if (args.includes('--purge') || args.includes('--help') || args.includes('-h')) return (await import('./forget-purge.ts')).runForgetPurge(engine, args);
   const idArg = args.find(a => /^\d+$/.test(a));
   if (!idArg) {
     process.stderr.write('Usage: gbrain forget <fact-id> [--reason <text>] [--source <id>] [--request-id <uuid>] [--json]\n');

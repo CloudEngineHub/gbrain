@@ -75,7 +75,7 @@ export function purgeHostOnly(id: unknown): OperationError {
 
 function notFound(rawId: string): OperationError {
   return opError('fact_not_found', `No fact with id "${rawId}" in this source.`,
-    'Ids come from remember or recall. A purged fact no longer exists; check a purge with --status --request-id <id>.',
+    'Ids come from remember or recall. A purged fact no longer exists; check an earlier purge by its request id with --status.',
     { fix: readFix('Lists recent facts with their ids, read-only.', { argv: ['gbrain', 'recall', '--json'] }) });
 }
 
@@ -217,7 +217,7 @@ export async function submitPurgeFactMutation(ctx: OperationContext, params: Rec
   await initializeLocalPersistence(ctx);
   if (params.status === true) {
     const requestId = parseWriteRequestId(params.request_id);
-    if (!requestId) throw opError('invalid_params', '--status needs --request-id.', 'Pass the request id the purge printed: gbrain forget --purge --status --request-id <uuid>.');
+    if (!requestId) throw opError('invalid_params', '--status needs --request-id.', 'Pass the request id the purge printed with --request-id, together with --status.');
     return purgeStatus(ctx, requestId);
   }
   const sourceIdForMatch = typeof params.source_id === 'string' ? params.source_id : ctx.sourceId ?? 'default';

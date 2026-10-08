@@ -250,7 +250,8 @@ export const CLI_COMMANDS: readonly CliCommandRecord[] = [  // Pre-connect: disp
   // unreachable because the dispatcher's generic short-circuit (printCliOnlyHelp at :204-208) fired
   // before runCapture saw --help. brainstorm + lsd were already in the set; capture was the holdout.
   { name: 'capture', phase: 'pre-connect-own-engine', thinClient: 'none', selfHelp: true, dispatchedBy: 'deferred-persistence', routes_source: true, load: () => import('../commands/persistence-delegate.ts') },
-  { name: 'forget', phase: 'pre-connect-own-engine', thinClient: 'none', dispatchedBy: 'deferred-persistence', load: () => import('../commands/persistence-delegate.ts') },
+  // selfHelp: runForget prints the forget and purge-family usage (#5575 DX-11) before any engine.
+  { name: 'forget', phase: 'pre-connect-own-engine', thinClient: 'none', selfHelp: true, dispatchedBy: 'deferred-persistence', load: () => import('../commands/persistence-delegate.ts') },
   { name: 'call', phase: 'pre-connect-own-engine', thinClient: 'refuse', dispatchedBy: 'deferred-persistence', load: () => import('../commands/persistence-delegate.ts') },
 
   // Post-connect: dispatched by dispatchConnectedCommand after connectEngine(), in master switch order.

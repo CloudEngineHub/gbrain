@@ -130,6 +130,7 @@ CREATE TRIGGER takes_refuse_purged BEFORE INSERT OR UPDATE OF claim, page_id ON 
 CREATE OR REPLACE FUNCTION gbrain_refuse_purged_page() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog, public AS $fn$
   BEGIN
+    -- No column list on the trigger: a column-scoped trigger would pin pages.source_id and content_hash.
     IF NEW.content_hash IS NOT NULL
       AND (TG_OP = 'INSERT' OR NEW.content_hash IS DISTINCT FROM OLD.content_hash OR NEW.source_id IS DISTINCT FROM OLD.source_id)
       AND EXISTS (SELECT 1 FROM page_purges WHERE source_id = NEW.source_id AND content_hash = NEW.content_hash) THEN
@@ -141,6 +142,6 @@ CREATE OR REPLACE FUNCTION gbrain_refuse_purged_page() RETURNS trigger
   END
   $fn$;
 DROP TRIGGER IF EXISTS pages_refuse_purged ON pages;
-CREATE TRIGGER pages_refuse_purged BEFORE INSERT OR UPDATE OF content_hash, source_id ON pages
+CREATE TRIGGER pages_refuse_purged BEFORE INSERT OR UPDATE ON pages
   FOR EACH ROW EXECUTE FUNCTION gbrain_refuse_purged_page();
 `;

@@ -32,7 +32,9 @@ export const PURGE_FAMILY_HELP = `Purge family (remove content from live stores;
   gbrain pages unpurge <slug>           clear a page tombstone so the content can be imported again
 `;
 
-const USAGE = `Usage: gbrain forget <fact-id> --purge [--dry-run] [--yes --request-id <uuid>] [--reason <text>] [--all-subjects] [--vacuum] [--source <id>] [--json]
+const USAGE = `Usage: gbrain forget <fact-id> [--reason <text>] [--source <id>] [--request-id <uuid>] [--json]
+       (withdraws the fact: it expires and cannot be re-saved; the text stays in history and backups)
+       gbrain forget <fact-id> --purge [--dry-run] [--yes --request-id <uuid>] [--reason <text>] [--all-subjects] [--vacuum] [--source <id>] [--json]
        gbrain forget --purge --match "<text>"
        gbrain forget --purge --status --request-id <uuid>
 
