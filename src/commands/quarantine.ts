@@ -398,7 +398,7 @@ async function runScan(engine: BrainEngine, args: string[]): Promise<void> {
   }
 }
 
-export const QUARANTINE_HELP = `Usage: gbrain quarantine <list|clear|scan> [options]
+export const QUARANTINE_HELP = `Usage: gbrain quarantine <list|clear|scan|release|drop> [options]
 
   list [--json] [--include-flagged]
       Pages the content-quality gate hid as junk (quarantine), and with
@@ -412,6 +412,9 @@ export const QUARANTINE_HELP = `Usage: gbrain quarantine <list|clear|scan> [opti
   scan [--limit N] [--apply] [--no-embed] [--json]
       Re-check existing pages against the gate (preview by default).
       --apply re-imports them and is refused on a managed brain.
+  release <h<id>> | drop <h<id>>
+      Aliases of gbrain trust release|drop: release a held fact or take into
+      memory (asks you to type its ref), or drop it.
 
 One junk pattern that misfires brain-wide can be turned off with
 content_sanity.disabled_patterns.`;

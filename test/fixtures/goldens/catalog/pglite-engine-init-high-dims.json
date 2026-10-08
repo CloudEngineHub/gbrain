@@ -389,6 +389,11 @@
       "timeline_entries.timeline_entries_pkey": "p PRIMARY KEY (id)",
       "timeline_entries.timeline_entries_trust_tier_check": "c CHECK ((trust_tier = ANY (ARRAY['user_confirmed'::text, 'operator_curated'::text, 'tool_observed'::text, 'agent_written'::text, 'unknown'::text, 'external_untrusted'::text])))",
       "timeline_entries.trust_generation_update": "t TRIGGER DEFERRABLE INITIALLY DEFERRED",
+      "trust_allow_rules.trust_allow_rules_pkey": "p PRIMARY KEY (id)",
+      "trust_allow_rules.trust_allow_rules_reason_check": "c CHECK (((reason IS NULL) OR (length(reason) <= 500)))",
+      "trust_allow_rules.trust_allow_rules_reason_family_check": "c CHECK (((reason_family IS NULL) OR (reason_family = ANY (ARRAY['override'::text, 'standing_instruction'::text, 'exfiltration'::text, 'credential'::text]))))",
+      "trust_allow_rules.trust_allow_rules_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
+      "trust_allow_rules.trust_allow_rules_uri_prefix_check": "c CHECK (((uri_prefix IS NULL) OR ((length(uri_prefix) >= 1) AND (length(uri_prefix) <= 2048))))",
       "trust_policy_state.trust_policy_state_id_check": "c CHECK ((id = 1))",
       "trust_policy_state.trust_policy_state_pkey": "p PRIMARY KEY (id)",
       "trust_proposals.trust_proposals_action_check": "c CHECK ((action = ANY (ARRAY['supersede_fact'::text, 'supersede_take'::text, 'forget'::text, 'lower_page'::text, 'confirm'::text])))",
@@ -446,7 +451,7 @@
       "gbrain_require_persistence_protocol(required integer)": "RETURNS void kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=af07b7fac60dec0a4fe568217931ac449d32f73b3a53a047b3b02a5f59cb5058",
       "gbrain_snapshot_version_trust()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=7452350236ed4c68a6cd1f4d78a1381a4ef44cc70e8a032141f01bba4a704702",
       "gbrain_stamp_revision_attribution()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=d446ed1145d8bb9c93cb0ca4aa076a5dc7a5fe07b3e79518adaf1b17b0a51216",
-      "gbrain_stamp_trust_tier()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=c3dbe0330bcdd42294891167e4d9cbec0902e8304ce26e934f0b124bd451bb94",
+      "gbrain_stamp_trust_tier()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=e37916d28aa1c5e936f3991aef485e67aaadc38de084204b86ec3caf7928cca7",
       "gbrain_stamp_version_attribution()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=1b28a0e5769198d86490dc20b2aee80b7e6595670428a63ac9c6825cd2a35b10",
       "gbrain_stamp_write_attribution()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=50e9b0e5bf37eeae6555dd16c8104cb0807be6c05a79e0c82237d45162c21dc2",
       "update_chunk_search_vector()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=e12c37d5489202aaf708560db42e6c0c7c8886d198d412e1c5d915c3ae782559",
@@ -829,6 +834,9 @@
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "timeline_entries": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "trust_allow_rules": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "trust_policy_state": [
@@ -1216,6 +1224,9 @@
       "think_ab_results_pkey": "CREATE UNIQUE INDEX think_ab_results_pkey ON public.think_ab_results USING btree (id)",
       "think_ab_results_recent_idx": "CREATE INDEX think_ab_results_recent_idx ON public.think_ab_results USING btree (source_id, ran_at DESC)",
       "timeline_entries_pkey": "CREATE UNIQUE INDEX timeline_entries_pkey ON public.timeline_entries USING btree (id)",
+      "trust_allow_rules_active_idx": "CREATE INDEX trust_allow_rules_active_idx ON public.trust_allow_rules USING btree (source_id) WHERE (removed_at IS NULL)",
+      "trust_allow_rules_active_unique": "CREATE UNIQUE INDEX trust_allow_rules_active_unique ON public.trust_allow_rules USING btree (source_id, COALESCE(uri_prefix, ''::text), COALESCE(reason_family, ''::text)) WHERE (removed_at IS NULL)",
+      "trust_allow_rules_pkey": "CREATE UNIQUE INDEX trust_allow_rules_pkey ON public.trust_allow_rules USING btree (id)",
       "trust_policy_state_pkey": "CREATE UNIQUE INDEX trust_policy_state_pkey ON public.trust_policy_state USING btree (id)",
       "trust_proposals_pending_idx": "CREATE INDEX trust_proposals_pending_idx ON public.trust_proposals USING btree (source_id, created_at) WHERE (status = 'pending'::text)",
       "trust_proposals_pending_unique": "CREATE UNIQUE INDEX trust_proposals_pending_unique ON public.trust_proposals USING btree (action, target_table, target_id, COALESCE(related_table, ''::text), COALESCE(related_id, (0)::bigint)) WHERE (status = 'pending'::text)",
@@ -1292,6 +1303,7 @@
       "takes_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=takes.id",
       "think_ab_results_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=think_ab_results.id",
       "timeline_entries_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=timeline_entries.id",
+      "trust_allow_rules_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=trust_allow_rules.id",
       "trust_proposals_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=trust_proposals.id",
       "wanted_links_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=wanted_links.id",
       "write_gate_holds_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=write_gate_holds.id",
@@ -3333,6 +3345,20 @@
           "15 last_written_at timestamp with time zone/timestamptz NULL",
           "16 trust_tier text/text NOT NULL DEFAULT 'unknown'::text",
           "17 write_origin jsonb/jsonb NULL"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "trust_allow_rules": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('trust_allow_rules_id_seq'::regclass)",
+          "2 source_id text/text NOT NULL",
+          "3 uri_prefix text/text NULL",
+          "4 reason_family text/text NULL",
+          "5 created_by text/text NOT NULL",
+          "6 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "7 removed_at timestamp with time zone/timestamptz NULL",
+          "8 removed_by text/text NULL",
+          "9 reason text/text NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },

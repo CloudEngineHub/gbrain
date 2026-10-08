@@ -3,6 +3,7 @@ import type { BrainEngine } from '../engine.ts';
 import { opError, OperationError } from '../ops/contract.ts';
 import type { WriteAttribution } from './attribution.ts';
 import { isTrustTier, nestWriteTrust, trustRankSql, type TrustTier, type WriteTrust } from '../trust/tier.ts';
+import type { TrustTable } from '../trust/schema.ts';
 
 interface PublicationContext { brainId: string; sourceIds: ReadonlySet<string>; active: boolean; }
 const publication = new AsyncLocalStorage<PublicationContext>();
@@ -11,6 +12,7 @@ const ATTRIBUTION_SETTINGS = ['gbrain.write_request', 'gbrain.write_principal_ki
 const TRUST_SETTINGS = ['gbrain.write_trust_tier', 'gbrain.write_origin'] as const;
 const TRUST_PROMOTION_SETTING = 'gbrain.write_trust_promotion';
 const TRUST_BACKFILL_SETTING = 'gbrain.write_trust_backfill';
+const TRUST_KEEP_SETTING = 'gbrain.write_trust_keep';
 
 /**
  * Sets transaction-local settings around `fn` in one round trip each way. An
@@ -125,6 +127,15 @@ export async function currentWriteTrust(engine: Pick<BrainEngine, 'executeRaw'>)
  */
 export function withTrustPromotion<T>(engine: Pick<BrainEngine, 'executeRaw'>, ceiling: TrustTier, fn: () => Promise<T>): Promise<T> {
   return withTransactionSettings(engine, [TRUST_PROMOTION_SETTING], () => [ceiling], fn);
+}
+/**
+ * ENG-1: inside `fn`, a content rewrite of a row in `tables` keeps its stored
+ * tier (it can still lower, never raise). For gbrain-managed fence edits that
+ * rewrite a page body without authoring it (a remember or takes fence append,
+ * a forget or accept strike); the fence row itself carries the writer's tier.
+ */
+export function withTrustKeep<T>(engine: Pick<BrainEngine, 'executeRaw'>, tables: readonly TrustTable[], fn: () => Promise<T>): Promise<T> {
+  return withTransactionSettings(engine, [TRUST_KEEP_SETTING], outer => [[...new Set([...(outer[0] ? outer[0].split(',') : []), ...tables])].join(',')], fn);
 }
 /** CEO-10: the deterministic backfill may move rows from `unknown` to any tier below user_confirmed. */
 export function withTrustBackfill<T>(engine: Pick<BrainEngine, 'executeRaw'>, fn: () => Promise<T>): Promise<T> {

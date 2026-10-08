@@ -29,7 +29,7 @@ import { MAX_MATCH_CHARS, MAX_PRECEDING_CHARS, WRITE_GATE_PATTERNS, WRITE_GATE_R
 export type { WriteGateReasonFamily } from './write-gate-patterns.ts';
 
 /** Bumped whenever the pattern table changes meaning; stored on every receipt and hold. */
-export const WRITE_GATE_DETECTOR_VERSION = 1;
+export const WRITE_GATE_DETECTOR_VERSION = 2;
 
 /** The trust-tier vocabulary lives in `trust/tier.ts`; the gate takes the effective tier the writer computed there. */
 export { TRUST_TIERS as WRITE_GATE_TIERS } from './trust/tier.ts';
@@ -204,7 +204,8 @@ function matchesInContext(p: WriteGatePattern, window: string, atTextStart: bool
   rx.lastIndex = 0;
   for (let m = rx.exec(window); m; m = rx.exec(window)) {
     const at = m.index;
-    if (m[0].length === 0) rx.lastIndex++;
+    // Resume one character later, not at the match end: a rejected match can overlap the one that holds.
+    rx.lastIndex = at + 1;
     if (p.negatable && NEGATED_BEFORE_RE.test(window.slice(Math.max(0, at - 10), at))) continue;
     if (!p.preceded) return true;
     // The text start counts as a line start for `preceded` (a pattern may require one).
@@ -276,8 +277,14 @@ function anchorOccurrences(text: string): { at: number[]; key: number[]; needsNo
   return { at, key, needsNormalizing: normalize };
 }
 
-function hasAnchor(anchors: readonly string[], present: ReadonlySet<number>): boolean {
-  return anchors.some(a => { const k = ANCHOR_KEYS.get(a)!; return present.has(k === '@' ? AT_HASH : k); });
+const keysOf = (anchors: readonly string[]) => [...new Set(anchors.map(a => { const k = ANCHOR_KEYS.get(a)!; return k === '@' ? AT_HASH : k; }))];
+/** Per pattern (same order as WRITE_GATE_PATTERNS): the anchor keys, and the `requires` keys or null. */
+const PATTERN_KEYS: ReadonlyArray<{ anchors: number[]; requires: number[] | null }> =
+  WRITE_GATE_PATTERNS.map(p => ({ anchors: keysOf(p.anchors), requires: p.requires ? keysOf(p.requires) : null }));
+
+function hasAny(keys: readonly number[], present: ReadonlySet<number>): boolean {
+  for (const k of keys) if (present.has(k)) return true;
+  return false;
 }
 
 /** Pure detector: every (family, pattern, field) the pattern table finds in the fields. */
@@ -297,8 +304,10 @@ export function detectInstructionLike(fields: ReadonlyArray<readonly [WriteGateF
       while (first < occ.at.length && occ.at[first]! <= start) first++;
       const present = new Set<number>();
       for (let k = first; k < occ.at.length && occ.at[k]! <= end; k++) present.add(occ.key[k]!);
-      for (const p of WRITE_GATE_PATTERNS) {
-        if (found.has(p.name) || !hasAnchor(p.anchors, present) || (p.requires && !hasAnchor(p.requires, present))) continue;
+      for (let i = 0; i < WRITE_GATE_PATTERNS.length; i++) {
+        const p = WRITE_GATE_PATTERNS[i]!;
+        const keys = PATTERN_KEYS[i]!;
+        if (found.has(p.name) || !hasAny(keys.anchors, present) || (keys.requires && !hasAny(keys.requires, present))) continue;
         if (!(p.negatable || p.preceded ? matchesInContext(p, window, start === 0) : p.rx.test(window))) continue;
         found.add(p.name);
         hits.push({ family: p.family, pattern: p.name, field });

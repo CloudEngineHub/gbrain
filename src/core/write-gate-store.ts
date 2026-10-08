@@ -70,6 +70,17 @@ export async function recordPageGateReceipt(tx: Exec, input: {
   return rows[0] ? Number(rows[0].id) : null;
 }
 
+/**
+ * ENG-11 (L1b contract): a page rewrite the gate assessed again replaces the
+ * verdict of the content it replaced, so receipts on the page for any other
+ * content hash are removed (an allowed benign rewrite stops being suppressed).
+ */
+export async function clearStalePageGateReceipts(tx: Exec, input: { slug: string; sourceId: string; contentHash: string | null }): Promise<void> {
+  await tx.executeRaw(`DELETE FROM write_gate_receipts r USING pages p
+    WHERE r.target_table = 'pages' AND r.target_id = p.id::text AND p.source_id = $1 AND p.slug = $2 AND r.content_hash IS DISTINCT FROM $3`,
+  [input.sourceId, input.slug, input.contentHash]);
+}
+
 /** Dedupe key for a held row: its kind plus the normalized text of every gated field. */
 export function holdFingerprint(kind: WriteGateHoldKind, texts: ReadonlyArray<string | null | undefined>): string {
   return createHash('sha256').update(`${kind}\u0000${texts.map(t => normalizeForGate(t ?? '').toLowerCase().replace(/\s+/g, ' ').trim()).join('\u0001')}`).digest('hex');

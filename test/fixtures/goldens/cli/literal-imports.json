@@ -131,6 +131,7 @@
         "./commands/pricing.ts"
       ],
       "quarantine": [
+        "./commands/trust.ts",
         "./commands/quarantine.ts"
       ],
       "recall": [

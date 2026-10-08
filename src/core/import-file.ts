@@ -1,6 +1,6 @@
 import { assertUnmanagedCanonicalWriter } from './persistence/maintenance.ts';
 import { suffixedFrontmatterSlugHold } from './persistence/suffixed-slug.ts';
-import { maintenanceTransaction } from './persistence/attribution.ts';
+import { maintenanceTransaction, ownerSourceGateInput, trustMarkerChanged, writeTrustOfGate } from './persistence/attribution.ts';
 import { assertImportBase, sameCanonicalImport, sameContentAnyKeyOrder } from './page-state/import-guard.ts';
 import { stabilizeSafetyAssessments } from './persistence/reconcile-safety.ts';
 import { decideImportIdentity, collidingSlugOwner, fileOriginUri } from './import-identity.ts';
@@ -11,7 +11,7 @@ import { createHash } from 'crypto';
 import type { BrainEngine, FileSpec } from './engine.ts';
 import { classifyImportHold, parseMarkdown, resolveParsedSubtype, type ParseOpts, type ParsedMarkdown } from './markdown.ts';
 import { MAX_FILE_SIZE, screenImportContent, settleContentDisposition, stripGateOwnedMarkers, type ContentRefusal, type FenceScreen } from './import-screen.ts';
-import type { WriteGateInput } from './write-gate.ts';
+import type { WriteGateAssessment, WriteGateInput } from './write-gate.ts';
 import { applyImportFences } from './fence-repair/import-step.ts';
 import type { FenceIssueWire } from './fence-repair/tier1.ts';
 import type { FenceFix } from './fence-repair/types.ts';
@@ -128,14 +128,14 @@ export interface ImportResult {
    * Absent on early rejection before a page can be parsed.
    */
   parsedPage?: ParsedPage;
-  /** Content-quality gate (issue #1699): true when the page landed with a
-   *  `quarantine` marker (high-confidence junk, hidden from search). */
+  /** Content-quality gate (#1699): the page landed with a `quarantine` marker (hidden from search). */
   quarantined?: boolean;
   /** True when the page landed with a `content_flag` marker (fuzzy
    *  markup-heavy or oversize — stays searchable, agent warned). */
   flagged?: boolean;
   /** Which flag tier fired, when `flagged` (`instruction_like`: the #5575 write gate). */
   flag_reason?: 'markup_heavy' | 'oversized' | 'instruction_like';
+  gate?: WriteGateAssessment; // #5575: the write-gate assessment, when the caller passed writeGate
   /** #5050: unchanged content below the safe-chunk fence was re-sealed; chunks left to embed. */
   resealed?: { pendingChunks: number; pendingChars: number };
   /**
@@ -521,7 +521,7 @@ export async function importFromContent(
       timeline: parsed.timeline,
       frontmatter: parsed.frontmatter,
     });
-  const unchanged = !!existing && !existing.deleted_at && !opts.forceRechunk && !needsProjectionRebuild && !embedSkipChanged && (existing.content_hash === hash
+  const unchanged = !!existing && !existing.deleted_at && !opts.forceRechunk && !needsProjectionRebuild && !embedSkipChanged && !trustMarkerChanged(existing.frontmatter, parsed.frontmatter) && (existing.content_hash === hash
     ? !opts.prepare || sameCanonicalImport(existingSnapshot, parsedPage)
     : !legacyHashMatch && await sameContentAnyKeyOrder(engine, existing, existingSnapshot?.tags ?? null, parsedPage, sourceId ?? 'default'));
   if (existing && unchanged) {
@@ -841,11 +841,11 @@ export async function importFromContent(
   if (opts.prepare) return opts.prepare({
     slug, parsedPage, observedRevision: (existing as (typeof existing & { knowledge_revision?: string }) | null)?.knowledge_revision ?? null,
     noop: false, contentHash: hash, result: { slug, status: 'imported', chunks: chunks.length, parsedPage,
-      ...(pageQuarantined ? { quarantined: true } : {}), ...(pageFlagged ? { flagged: true, flag_reason: pageFlagReason } : {}), ...fences.fields },
+      ...(pageQuarantined ? { quarantined: true } : {}), ...(pageFlagged ? { flagged: true, flag_reason: pageFlagReason } : {}), ...(disposition.gate ? { gate: disposition.gate } : {}), ...fences.fields },
     validate: tx => assertPreparedFactWithdrawals(tx, txOpts.sourceId, parsed.compiled_truth, parsed.timeline || '', slug),
     apply: applyPrepared,
   });
-  await maintenanceTransaction(engine, applyPrepared).catch(async (err: unknown) => {
+  await maintenanceTransaction(engine, applyPrepared, writeTrustOfGate(opts.writeGate)).catch(async (err: unknown) => {
     // #4287: name the dimension-mismatch rollback instead of letting the bare
     // pgvector message ("expected N dimensions, not M") surface with no code,
     // no consequence and no fix. S2: name the registry-ACTIVE column the
@@ -1133,7 +1133,7 @@ export async function importFromFile(
   // filename `2024-03-15`.
   const fileBasename = basename(relativePath, '.md');
   const imported = await importFromContent(engine, resolvedSlug, content, {
-    ...opts, preserveGateMarkers: true,
+    ...opts, preserveGateMarkers: true, writeGate: await ownerSourceGateInput(engine, opts.sourceId ?? 'default', parsed.frontmatter),
     filename: fileBasename,
     sourcePath: relativePath,
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- walks up from the caller's own file path by the depth of its own relative path to recover the import root; import-identity confines every probe under that root

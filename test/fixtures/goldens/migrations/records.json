@@ -1,12 +1,11 @@
 {
   "golden": {
-    "count": 218,
+    "count": 219,
     "gaps": [
       17,
       18,
       19,
-      100,
-      223
+      100
     ],
     "helpers": {
       "ALIAS_TABLES": "cddd37c636af42d862c08ca7754a57dfe9d12576b769fa8f74a5f02c803f67a0",
@@ -3261,8 +3260,8 @@
         "idempotent": true,
         "name": "trust_tiers",
         "sql": {
-          "length": 20758,
-          "sha256": "4acbed408cd5f53dca48ef5381d98176b5979719dc988fe59d265af542bf333b"
+          "length": 20902,
+          "sha256": "7a9173b109dfce15adad60b4f0520e1ca7f086ef42333d3b5e7ff86fc1dc3a2a"
         },
         "sqlFor": "absent",
         "transaction": "absent",
@@ -3294,6 +3293,19 @@
         "transaction": "absent",
         "verify": "absent",
         "version": 222
+      },
+      {
+        "handler": "absent",
+        "idempotent": true,
+        "name": "trust_allow_rules",
+        "sql": {
+          "length": 889,
+          "sha256": "6c71ed5e5a86cb2b06ecf4430d6568fa32dcf89c2fa5fffa9a40dc694304ae5c"
+        },
+        "sqlFor": "absent",
+        "transaction": "absent",
+        "verify": "absent",
+        "version": 223
       },
       {
         "handler": "absent",
@@ -3527,6 +3539,7 @@
       220,
       221,
       222,
+      223,
       224
     ]
   },
