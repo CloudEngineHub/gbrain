@@ -7486,6 +7486,7 @@
           "savedSlug?: string | undefined",
           "synthesisOk?: boolean | undefined",
           "synthesis_status?: ThinkSynthesisStatus | undefined",
+          "taint_refs?: TaintRef[] | undefined",
           "takesGathered: number",
           "temporal?: { reference_date: string; time_zone: string; } | undefined",
           "unverified_quotes?: { text: string; reason: string; }[] | undefined",
