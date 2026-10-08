@@ -91,8 +91,10 @@ export interface ResolveEligibilityOpts {
 }
 
 /** Resolve the policy once at the operation or surface boundary. */
+export interface EligibilityCaller { engine: Pick<BrainEngine, 'getConfig'>; auth?: Pick<NonNullable<OperationContext['auth']>, 'minTrust'> }
+
 export async function resolveReadEligibility(
-  ctx: Pick<OperationContext, 'engine' | 'auth'>,
+  ctx: EligibilityCaller,
   opts: ResolveEligibilityOpts = {},
 ): Promise<ReadEligibility> {
   const param = parseMinTrustParam(opts.minTrust);

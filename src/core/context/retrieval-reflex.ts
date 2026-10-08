@@ -27,6 +27,11 @@
  */
 
 import type { BrainEngine } from '../engine.ts';
+import type { TrustTier } from '../trust/tier.ts';
+import type { ReadEligibility } from '../eligibility/policy.ts';
+import { proactiveEligibility } from '../eligibility/registry.ts';
+import { pageActivationVerdicts, pageKey } from '../eligibility/activation.ts';
+import { renderTrustedInline, trustFields } from '../eligibility/labels.ts';
 import { normalizeAlias } from '../search/alias-normalize.ts';
 import { CJK_SLUG_CHARS } from '../cjk.ts';
 import { escapeLikePattern } from '../search/sql-ranking.ts';
@@ -130,6 +135,9 @@ export interface ReflexPointer {
    * recover the source candidate.
    */
   matchedNorm?: string;
+  /** #5575 A6: the page's trust tier and short write origin (rendered as a compact label). */
+  trust_tier?: TrustTier;
+  origin?: string;
 }
 
 export interface PointerBlock {
@@ -184,6 +192,14 @@ export interface ResolvePointersOpts {
    * via resolveExcludePrivatePages) passes false.
    */
   excludePrivate?: boolean;
+  /**
+   * #5575 (CEO-20, ENG-8): the proactive eligibility the enclosing surface
+   * resolved (read floor plus activation control). Absent: the resolver
+   * applies the `retrieval_reflex` surface policy itself (fail-closed).
+   */
+  eligibility?: ReadEligibility;
+  /** #5575 DX-10: receives how many deliverable pointers activation control withheld. */
+  onWithheld?: (count: number) => void;
 }
 
 export interface PageRow {
@@ -536,12 +552,20 @@ export async function resolveEntitiesToPointers(
     rowByKey.set(keyOf(r.source_id, r.slug), r); push(r.slug, r.source_id, 'weak-title', (r.title ?? '').toLowerCase());
   }
 
+  // #5575: trust labels, read floor and activation control for every
+  // candidate page in one query; a page that cannot be checked is dropped.
+  const policy = opts.eligibility ?? await proactiveEligibility({ engine }, 'retrieval_reflex');
+  const verdicts = await pageActivationVerdicts(engine, resolved.map(r => ({ source_id: r.source_id, slug: r.slug })), policy).catch(() => null);
+  let withheld = 0;
+
   // Build pointers in confidence order, applying suppression + cap.
   const suppression = opts.suppression ?? 'slug-and-title';
   const pointers: ReflexPointer[] = [];
   for (const { slug, source_id, arm, matchedNorm } of resolved) {
     const row = rowByKey.get(keyOf(source_id, slug));
     if (!row) continue;
+    const verdict = verdicts?.get(pageKey({ source_id, slug }));
+    if (!verdict || verdict.belowFloor) continue;
     // Suppression: already present in PRIOR context. The current turn is
     // deliberately excluded from priorContextText. Under windowing
     // ('slug-only', codex D7) only the slug counts — a slug appears in prior
@@ -554,11 +578,14 @@ export async function resolveEntitiesToPointers(
         if (titleLc && wholeWordIncludes(priorLc, titleLc)) continue;
       }
     }
+    if (verdict.suppressed) { withheld++; continue; }
     const display = displayForRow(row, displayByNorm);
     const synopsis = safeSynopsis(row);
-    pointers.push({ display, slug, source_id, synopsis, arm, confidence: ARM_CONFIDENCE[arm], matchedNorm });
+    const trust = trustFields(verdict.tier, verdict.origin);
+    pointers.push({ display, slug, source_id, synopsis, arm, confidence: ARM_CONFIDENCE[arm], matchedNorm, ...trust });
     if (pointers.length >= maxPointers) break;
   }
+  if (withheld) opts.onWithheld?.(withheld);
 
   if (!pointers.length) return null;
   return { pointers, text: renderPointerBlock(pointers) };
@@ -636,11 +663,19 @@ export function renderPointerBlock(pointers: ReflexPointer[]): string {
     'details — do not answer from memory.',
     '',
   ];
-  for (const p of pointers) {
-    const syn = p.synopsis ? ` — ${p.synopsis}` : '';
-    lines.push(`- **${p.display}** → \`${p.slug}\`${syn} (use get_page before relying on details)`);
-  }
+  for (const p of pointers) lines.push(renderPointerLine(p));
   return lines.join('\n');
+}
+
+/**
+ * One pointer list item. #5575 A6: a labeled pointer carries its compact
+ * trust label before the synopsis (an external page's synopsis is wrapped
+ * inline as data); an unlabeled one renders as before.
+ */
+export function renderPointerLine(p: Pick<ReflexPointer, 'display' | 'slug' | 'synopsis' | 'trust_tier' | 'origin'>): string {
+  const trusted = p.trust_tier ? ` ${renderTrustedInline(p.synopsis, { trust_tier: p.trust_tier, origin: p.origin ?? 'legacy' })}` : '';
+  const syn = p.trust_tier ? (trusted ? ` —${trusted}` : '') : p.synopsis ? ` — ${p.synopsis}` : '';
+  return `- **${p.display}** → \`${p.slug}\`${syn} (use get_page before relying on details)`;
 }
 
 /**

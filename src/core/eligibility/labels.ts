@@ -82,3 +82,10 @@ export function withTrustLabel<T extends object>(row: T): T & TrustFields {
   const raw = row as { trust_tier?: unknown; write_origin?: unknown };
   return { ...row, ...trustFields(raw.trust_tier, raw.write_origin) };
 }
+
+/** One-line variant for list items (pointers, volunteered pages, fact lines): label, or an inline data envelope below `unknown`. */
+export function renderTrustedInline(text: string, fields: TrustFields, opts: LabelOpts = {}): string {
+  if (!needsDataEnvelope(fields.trust_tier)) return text ? `${compactTrustLabel(fields, opts)} ${text}` : compactTrustLabel(fields, opts);
+  const body = text.replace(new RegExp(`</?${ENVELOPE_TAG}`, 'gi'), m => m.replace('<', '&lt;'));
+  return `<${ENVELOPE_TAG} trust="${fields.trust_tier}" origin="${fields.origin}">${body}</${ENVELOPE_TAG}>`;
+}

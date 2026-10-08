@@ -1,4 +1,6 @@
-/**
+
+import type { TrustTier } from '../trust/tier.ts';
+import { trustAttributes } from '../eligibility/labels.ts';/**
  * v0.28: prompt-injection defense for take claims fed into `gbrain think`.
  *
  * The threat: a claim row in the takes table contains attacker-supplied text.
@@ -92,6 +94,9 @@ export interface TakeForPrompt {
   weight: number;
   source?: string | null;
   since_date?: string | null;
+  /** #5575 A6: the take's trust tier and short origin, rendered as attributes. */
+  trust_tier?: TrustTier;
+  origin?: string;
 }
 
 export function renderTakesBlock(takes: TakeForPrompt[]): { rendered: string; sanitizedCount: number } {
@@ -103,6 +108,7 @@ export function renderTakesBlock(takes: TakeForPrompt[]): { rendered: string; sa
     const meta = [`kind=${t.kind}`, `who=${t.holder}`, `weight=${t.weight.toFixed(2)}`];
     if (t.since_date) meta.push(`since=${t.since_date}`);
     if (t.source) meta.push(`source="${String(t.source).replace(/"/g, '\\"').slice(0, 80)}"`);
+    if (t.trust_tier) meta.push(trustAttributes({ trust_tier: t.trust_tier, origin: t.origin ?? 'legacy' }));
     lines.push(
       `<take id="${t.page_slug}#${t.row_num}" ${meta.join(' ')}>\n${text}\n</take>`,
     );

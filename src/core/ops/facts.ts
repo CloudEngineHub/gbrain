@@ -39,6 +39,8 @@ import { MEMORY_VERBS_VERSION } from '../verbs.ts';
 import type { SearchResult } from '../types.ts';
 import type { BrainEngine, FactRow } from '../engine.ts';
 import { MIN_TRUST_PARAM, resolveReadEligibility } from '../eligibility/policy.ts';
+import { proactiveEligibility } from '../eligibility/registry.ts';
+import { activationSuppressionNotice, suppressionSummary } from '../eligibility/activation.ts';
 import { stampPageTrust } from '../eligibility/stamp.ts';
 import { trustFields } from '../eligibility/labels.ts';
 import type { TrustTier } from '../trust/tier.ts';
@@ -648,6 +650,7 @@ const context_pack: Operation = {
     since: { type: 'string', description: 'Only open-thread events after this ISO time.' },
     session_id: { type: 'string', description: 'Opaque session id.' },
     include_private: { type: 'boolean', description: 'Local trusted callers only.' },
+    min_trust: MIN_TRUST_PARAM,
   },
   scope: 'read',
   verb: true,
@@ -678,6 +681,8 @@ const context_pack: Operation = {
       typeof p.budget_tokens === 'number' && Number.isFinite(p.budget_tokens) && p.budget_tokens > 0
         ? Math.floor(p.budget_tokens)
         : null;
+    // #5575 (CEO-20, CEO-18): a proactive surface under the connection's floor.
+    const eligibility = await proactiveEligibility(ctx, 'context_pack', { minTrust: p.min_trust });
     const res = entities.length === 0
       ? { cards: [], facts: [], text: '', pointers: [], factsCount: 0 } as unknown as Awaited<ReturnType<typeof assembleContextPack>>
       : await assembleContextPack(ctx.engine, {
@@ -687,15 +692,19 @@ const context_pack: Operation = {
         sessionId: typeof p.session_id === 'string' ? p.session_id : undefined,
         includePrivate,
         maxEntities: PACK_DEFAULT_MAX_ENTITIES,
+        eligibility,
       });
     // Always-loaded core tier (core-memory.ts): owner-designated pages of
     // `default` plus this source, inside the caller's grant; it packs first.
     const { loadCoreBlock } = await import('../core-memory.ts');
     const allowed = ctx.auth?.allowedSources?.length ? ctx.auth.allowedSources : null;
-    const core = await loadCoreBlock(ctx.engine, { sessionSourceId: sourceId, allowedSources: allowed, excludePrivate: !includePrivate })
+    const core = await loadCoreBlock(ctx.engine, { sessionSourceId: sourceId, allowedSources: allowed, excludePrivate: !includePrivate, eligibility })
       .catch(() => null);
     const coreText = core?.text ?? '';
     const coreTokens = estimateTokens(coreText);
+    const withheld = (res.suppressed?.withheld ?? 0) + (core?.activation_withheld ?? 0);
+    const suppressionNotice = activationSuppressionNotice(withheld, 'this context pack');
+    if (suppressionNotice) ctx.emitNotice?.(suppressionNotice);
 
     // Pack, price and render the redacted presentation sets (one echo
     // dictionary); local callers get the delivered facts back raw below.
@@ -757,8 +766,10 @@ const context_pack: Operation = {
         // #6146: recall's v1 names, so a packed fact traces back to its record.
         fact_id: String(f.id),
         provenance: f.provenance,
+        ...(f.trust_tier ? { trust_tier: f.trust_tier, origin: f.origin } : {}),
       })),
       text,
+      ...(withheld ? { suppressed: suppressionSummary(withheld) } : {}),
       ...(core && core.enabled ? { core: { text: core.text, chars_used: core.chars_used, chars_limit: core.chars_limit, pages: core.pages,
         truncated: core.truncated, revision: core.revision } } : {}),
       ...(res.degradedReason ? { degraded_reason: res.degradedReason } : {}),
@@ -783,6 +794,7 @@ const delta: Operation = {
     budget_tokens: { type: 'number', description: 'Token budget; pages pack first.' },
     session_id: { type: 'string', description: 'Session id; keeps a cursor.' },
     include_private: { type: 'boolean', description: 'Local trusted callers only.' },
+    min_trust: MIN_TRUST_PARAM,
   },
   scope: 'read',
   verb: true,
@@ -915,6 +927,7 @@ const delta: Operation = {
       sessionId: sessionId ?? undefined,
       includePrivate,
       maxEntities: PACK_DEFAULT_MAX_ENTITIES,
+      eligibility: await resolveReadEligibility(ctx, { minTrust: p.min_trust }),
     });
 
     // Pages arrive OLDEST first by (updated_at, slug), facts OLDEST first by
@@ -1059,6 +1072,7 @@ const delta: Operation = {
         // #6146: recall's v1 names, so a packed fact traces back to its record.
         fact_id: String(f.id),
         provenance: f.provenance,
+        ...(f.trust_tier ? { trust_tier: f.trust_tier, origin: f.origin } : {}),
       })),
       threads,
       text,

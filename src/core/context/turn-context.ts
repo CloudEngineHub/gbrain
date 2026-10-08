@@ -30,6 +30,7 @@ import type { OperationContext } from '../operations.ts';
 import type { GBrainConfig } from '../config.ts';
 import { extractCandidatesFromWindow, type WindowTurn } from './entity-salience.ts';
 import {
+  renderPointerLine,
   resolveEntitiesToPointers,
   DEFAULT_MAX_POINTERS,
   type ReflexPointer,
@@ -41,6 +42,11 @@ import type { ArmStatus, RawFactRef } from './delta-cursor.ts';
 import { buildEntityCard, type EntityCard, type EntityOpenThread } from '../verbs/entity-card.ts';
 import { estimateTokens } from '../search/token-budget.ts';
 import type { DecideSlotMeta } from '../search/decide-stage.ts';
+import type { TrustTier } from '../trust/tier.ts';
+import { resolveReadEligibility, type ReadEligibility } from '../eligibility/policy.ts';
+import { proactiveEligibility } from '../eligibility/registry.ts';
+import { pageActivationVerdicts, pageKey, suppressionSummary, type SuppressionSummary } from '../eligibility/activation.ts';
+import { renderTrustedInline, trustFields, type TrustFields } from '../eligibility/labels.ts';
 
 /**
  * v0.45.7 ambient recall (issue #1). The per-turn assembler is extended into the
@@ -87,6 +93,9 @@ export interface TurnContextFact {
   /** Who asserted the claim; rendered so an assistant suggestion never reads as the user's own claim. */
   attributed_to?: 'user' | 'assistant' | 'other' | null;
   confidence: number;
+  /** #5575 A6: the fact's trust tier and short write origin (rendered as a compact label; absent from older serves). */
+  trust_tier?: TrustTier;
+  origin?: string;
 }
 
 /** One page in a `delta` result (updated after the cursor). */
@@ -95,6 +104,9 @@ export interface DeltaPage {
   source_id: string;
   title: string;
   updated_at: string;
+  /** #5575 A6: the page's trust tier and short write origin. */
+  trust_tier?: TrustTier;
+  origin?: string;
 }
 
 export interface TurnContextResult {
@@ -161,6 +173,12 @@ export interface TurnContextResult {
   checkpointFlush?: { status: 'scheduled' | 'skipped'; reason?: string };
   /** System One (turn mode): present only when S6 recall_needed is not off — what it did this turn. */
   decide?: { recall_needed: DecideSlotMeta };
+  /**
+   * #5575 DX-10: authorized memories activation control withheld from this
+   * block (unconfirmed, agent-written, instruction-like): a count and the
+   * owner's review command, never the content.
+   */
+  suppressed?: SuppressionSummary;
 }
 
 export interface AssembleTurnContextOpts {
@@ -213,6 +231,13 @@ export interface AssembleTurnContextOpts {
    * push path passes ~TURN_CONTEXT_SERVER_BUDGET_MS so it never overruns.
    */
   deadlineMs?: number;
+  /**
+   * #5575: the read eligibility the calling surface resolved (token floor,
+   * min_trust, activation control). Absent: turn mode applies the
+   * `hook.user_prompt` surface policy, pack the `context_pack` policy, delta
+   * the brain's read policy.
+   */
+  eligibility?: ReadEligibility;
 }
 
 /** Default entity-card fan-out cap for pack mode. */
@@ -245,6 +270,10 @@ export async function assembleTurnContext(
   // unless S6 finishes in time and acts (src/core/context/recall-needed.ts,
   // loaded lazily so pack/delta and envelope importers stay light).
   const startedAt = Date.now();
+  // #5575 (CEO-20, DX-10): one proactive policy for every arm of this turn.
+  const policy = opts.eligibility ?? await proactiveEligibility({ engine }, 'hook.user_prompt').catch(() => ({ suppressFlagged: true }));
+  let withheld = 0;
+  const onWithheld = (n: number) => { withheld += n; };
   const s6Module = import('./recall-needed.ts');
   const recall = s6Module.then((m) => m.startRecallNeeded(engine, { sourceId: opts.sourceId, window, sessionId: opts.sessionId, startedAt }));
   recall.catch(() => {});
@@ -272,6 +301,8 @@ export async function assembleTurnContext(
           maxPointers: DEFAULT_MAX_POINTERS,
           lexicalArms: opts.lexicalArms,
           excludePrivate: true,
+          eligibility: policy,
+          onWithheld,
         });
         pointers = block?.pointers ?? [];
       }
@@ -294,6 +325,8 @@ export async function assembleTurnContext(
           // pointer arm above (ResolvePointersOpts.lexicalArms).
           lexicalArms: opts.lexicalArms,
           excludePrivate: true,
+          eligibility: policy,
+          onWithheld,
         });
       }
     } catch {
@@ -320,7 +353,8 @@ export async function assembleTurnContext(
         takesHoldersAllowList: ['world'],
       };
       const meta = await getBrainHotMemoryMeta('turn_context', metaCtx);
-      const hot = meta?.brain_hot_memory as { facts?: TurnContextFact[] } | undefined;
+      const hot = meta?.brain_hot_memory as { facts?: TurnContextFact[]; suppressed?: SuppressionSummary } | undefined;
+      onWithheld(hot?.suppressed?.withheld ?? 0);
       const all = Array.isArray(hot?.facts) ? [...hot.facts] : [];
       // Cross-turn dedupe, same contract as volunteered pages: a fact already
       // injected this session is not repeated. Matched without the trailing
@@ -354,6 +388,7 @@ export async function assembleTurnContext(
     factsCount: facts.length,
     ...(degradedReason ? { degradedReason } : {}),
     ...(s6 ? { decide: { recall_needed: s6.meta } } : {}),
+    ...(withheld ? { suppressed: suppressionSummary(withheld) } : {}),
   };
 }
 
@@ -409,15 +444,12 @@ function render(
   const lines: string[] = [TURN_CONTEXT_ENVELOPE];
   if (pointers.length) {
     lines.push('', '## Brain pages mentioned this turn');
-    for (const p of pointers) {
-      const syn = p.synopsis ? ` — ${p.synopsis}` : '';
-      lines.push(`- **${p.display}** → \`${p.slug}\`${syn} (use get_page before relying on details)`);
-    }
+    for (const p of pointers) lines.push(renderPointerLine(p));
   }
   if (volunteered.length) {
     lines.push('', '## Brain pages the brain volunteers');
     for (const v of volunteered) {
-      const syn = v.synopsis ? ` — ${v.synopsis}` : '';
+      const syn = v.trust_tier ? ` — ${renderTrustedInline(v.synopsis, labelOf(v))}` : v.synopsis ? ` — ${v.synopsis}` : '';
       lines.push(`- **${v.display}** → \`${v.slug}\` (${v.confidence.toFixed(2)}, ${v.rationale})${syn}`);
     }
   }
@@ -425,7 +457,7 @@ function render(
     lines.push('', '## Hot memory (recent facts)');
     for (const f of facts) {
       const ent = f.entity_slug ? ` [${f.entity_slug}]` : '';
-      lines.push(`- ${f.fact}${ent} (${f.confidence.toFixed(2)})`);
+      lines.push(`- ${f.trust_tier ? renderTrustedInline(f.fact, labelOf(f)) : f.fact}${ent} (${f.confidence.toFixed(2)})`);
     }
   }
   return lines.join('\n');
@@ -483,7 +515,7 @@ async function fetchHotFacts(
   engine: BrainEngine,
   opts: AssembleTurnContextOpts,
   remote: boolean,
-): Promise<TurnContextFact[]> {
+): Promise<{ facts: TurnContextFact[]; withheld: number }> {
   try {
     const metaCtx: OperationContext = {
       engine,
@@ -496,10 +528,10 @@ async function fetchHotFacts(
       takesHoldersAllowList: ['world'],
     };
     const meta = await getBrainHotMemoryMeta('turn_context', metaCtx);
-    const hot = meta?.brain_hot_memory as { facts?: TurnContextFact[] } | undefined;
-    return Array.isArray(hot?.facts) ? [...hot.facts] : [];
+    const hot = meta?.brain_hot_memory as { facts?: TurnContextFact[]; suppressed?: SuppressionSummary } | undefined;
+    return { facts: Array.isArray(hot?.facts) ? [...hot.facts] : [], withheld: hot?.suppressed?.withheld ?? 0 };
   } catch {
-    return [];
+    return { facts: [], withheld: 0 };
   }
 }
 
@@ -519,7 +551,9 @@ async function assemblePack(
     .filter((e) => typeof e === 'string' && e.trim())
     .slice(0, maxEntities);
 
-  const acc: { cards: EntityCard[]; facts: TurnContextFact[] } = { cards: [], facts: [] };
+  const acc: { cards: EntityCard[]; facts: TurnContextFact[]; withheld: number } = { cards: [], facts: [], withheld: 0 };
+  // #5575 (CEO-20): context_pack is a proactive surface.
+  const policy = opts.eligibility ?? await proactiveEligibility({ engine }, 'context_pack').catch(() => ({ suppressFlagged: true }));
   // Cooperative deadline (perf review): raceDeadline abandons but cannot stop
   // the build, and on PGLite's single connection orphaned card queries would
   // queue AHEAD of the caller's next work. Check between iterations so no new
@@ -530,14 +564,21 @@ async function assemblePack(
     for (const name of entities) {
       if (deadlineAt !== null && Date.now() >= deadlineAt) return;
       try {
-        const res = await buildEntityCard(engine, opts.sourceId, name, { remote });
-        if (res.found && res.card) acc.cards.push(res.card);
+        const res = await buildEntityCard(engine, opts.sourceId, name, { remote, eligibility: policy });
+        if (res.found && res.card) {
+          const verdict = (await pageActivationVerdicts(engine, [{ source_id: opts.sourceId, slug: res.card.entity.slug }], policy))
+            .get(pageKey({ source_id: opts.sourceId, slug: res.card.entity.slug }));
+          if (verdict?.suppressed) acc.withheld++;
+          else if (verdict && !verdict.belowFloor) acc.cards.push(res.card);
+        }
       } catch {
         /* fail-soft: skip this entity */
       }
     }
     if (deadlineAt !== null && Date.now() >= deadlineAt) return;
-    acc.facts = await fetchHotFacts(engine, opts, remote);
+    const hot = await fetchHotFacts(engine, opts, remote);
+    acc.facts = hot.facts;
+    acc.withheld += hot.withheld;
   })();
 
   const degradedReason = await raceDeadline(build, opts.deadlineMs);
@@ -564,6 +605,7 @@ async function assemblePack(
     mode: 'pack',
     ...(opts.checkpointLinks?.length ? { checkpointLinks: opts.checkpointLinks } : {}),
     ...(degradedReason ? { degradedReason } : {}),
+    ...(acc.withheld ? { suppressed: suppressionSummary(acc.withheld) } : {}),
   };
 }
 
@@ -582,6 +624,8 @@ async function assembleDelta(
 ): Promise<TurnContextResult> {
   const remote = opts.includePrivate !== true;
   const since = typeof opts.since === 'string' && opts.since.trim() ? opts.since : undefined;
+  // #5575: delta is an explicit read (labels, floor, quarantined-page hiding), not activation-controlled.
+  const policy: ReadEligibility = opts.eligibility ?? await resolveReadEligibility({ engine }).catch(() => ({}));
   // Each arm publishes its result in ONE assignment when it completes, so the
   // snapshot taken after the deadline race sees an arm either whole or absent
   // (`unknown`), never half-filled.
@@ -617,10 +661,15 @@ async function assembleDelta(
           limit: DELTA_PAGE_FETCH_LIMIT + 1,
           sort: 'updated_asc',
         });
+        const window = pages.slice(0, DELTA_PAGE_FETCH_LIMIT);
+        const verdicts = await pageActivationVerdicts(engine, window.map(p => ({ source_id: opts.sourceId, slug: p.slug })), { floor: policy.floor });
         acc.pages = {
           status: 'ok',
           overflow: pages.length > DELTA_PAGE_FETCH_LIMIT,
-          rows: pages.slice(0, DELTA_PAGE_FETCH_LIMIT).map((p) => ({
+          rows: window.flatMap((p) => {
+            const v = verdicts.get(pageKey({ source_id: opts.sourceId, slug: p.slug }));
+            return v && !v.belowFloor ? [{ p, trust: trustFields(v.tier, v.origin) }] : [];
+          }).map(({ p, trust }) => ({
             slug: p.slug,
             source_id: opts.sourceId,
             title: p.title,
@@ -628,6 +677,7 @@ async function assembleDelta(
             // re-selects every same-millisecond row on the next wake.
             updated_at:
               p.updated_at_iso ?? (p.updated_at instanceof Date ? p.updated_at.toISOString() : String(p.updated_at)),
+            ...trust,
           })),
         };
       } catch {
@@ -647,7 +697,7 @@ async function assembleDelta(
         const rows = await engine.listFactsKeyset(
           opts.sourceId,
           after ? { createdAt: after.at, id: after.id } : null,
-          { activeOnly: true, limit: DELTA_FACT_FETCH_LIMIT + 1, visibility, fingerprint: true },
+          { activeOnly: true, limit: DELTA_FACT_FETCH_LIMIT + 1, visibility, fingerprint: true, eligibility: { floor: policy.floor } },
         );
         const kept = rows.slice(0, DELTA_FACT_FETCH_LIMIT);
         const probe = rows.length > DELTA_FACT_FETCH_LIMIT ? rows[DELTA_FACT_FETCH_LIMIT] : null;
@@ -672,6 +722,7 @@ async function assembleDelta(
             context: r.context ?? null,
             confidence: r.confidence,
             ...(r.attributed_to ? { attributed_to: r.attributed_to } : {}),
+            ...trustFields(r.trust_tier, r.write_origin),
           })),
         };
       } catch {
@@ -691,7 +742,7 @@ async function assembleDelta(
     for (const name of entities) {
       if (pastDeadline()) return;
       try {
-        const res = await buildEntityCard(engine, opts.sourceId, name, { remote });
+        const res = await buildEntityCard(engine, opts.sourceId, name, { remote, eligibility: { floor: policy.floor } });
         if (res.found && res.card) {
           for (const t of res.card.open_threads ?? []) {
             if (!since || (t.date && isAfter(t.date, since))) items.push(t);
@@ -761,13 +812,19 @@ export const CHECKPOINT_LINKS_RENDER_CAP = 10;
 // #4761: ONE template per item, shared by the renderers below and the budget
 // packers in ops/facts.ts — the packer prices exactly the bytes the renderer
 // emits, so `text` honors budget_tokens instead of overshooting it.
+// #5575 A6: an item carrying a trust tier renders its compact label (an
+// external item is wrapped inline as data); an unlabeled item renders as before.
+const labelOf = (item: { trust_tier?: TrustTier; origin?: string }): TrustFields =>
+  ({ trust_tier: item.trust_tier ?? 'unknown', origin: item.origin ?? 'legacy' });
+const labeled = (item: { trust_tier?: TrustTier; origin?: string }, text: string): string =>
+  item.trust_tier ? renderTrustedInline(text, labelOf(item)) : text;
 export const renderCardLine = (c: EntityCard): string =>
-  `- **${c.entity.title}** → \`${c.entity.slug}\`${c.summary ? ` — ${c.summary}` : ''}${c.relationship_note ? ` [${c.relationship_note}]` : ''} (use get_page/entity before relying on details)`;
+  `- **${c.entity.title}** → \`${c.entity.slug}\`${c.summary ? ` — ${labeled(c, c.summary)}` : c.trust_tier ? ` — ${labeled(c, '')}` : ''}${c.relationship_note ? ` [${c.relationship_note}]` : ''} (use get_page/entity before relying on details)`;
 export const renderThreadLine = (t: EntityOpenThread): string =>
-  `- [${t.kind}] ${t.text}${t.date ? ` (${t.date})` : ''}`;
+  `- [${t.kind}] ${labeled(t, t.text)}${t.date ? ` (${t.date})` : ''}`;
 export const renderFactLine = (f: TurnContextFact): string =>
-  `- ${f.attributed_to === 'assistant' ? '(assistant said) ' : ''}${f.fact}${f.entity_slug ? ` [${f.entity_slug}]` : ''} (${f.confidence.toFixed(2)})`;
-export const renderPageLine = (p: DeltaPage): string => `- **${p.title}** → \`${p.slug}\` (${p.updated_at})`;
+  `- ${f.attributed_to === 'assistant' ? '(assistant said) ' : ''}${labeled(f, f.fact)}${f.entity_slug ? ` [${f.entity_slug}]` : ''} (${f.confidence.toFixed(2)})`;
+export const renderPageLine = (p: DeltaPage): string => `- **${labeled(p, p.title)}** → \`${p.slug}\` (${p.updated_at})`;
 
 const PACK_HEADERS = ['## Standing entities', '## Open threads', '## Hot memory (recent facts)'] as const;
 const deltaHeaders = (since?: string): readonly [string, string, string] => {

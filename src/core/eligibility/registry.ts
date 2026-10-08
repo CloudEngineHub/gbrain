@@ -19,8 +19,7 @@
  */
 import { opError, type AuthInfo, type Operation } from '../ops/contract.ts';
 import { trustLabel } from '../trust/tier.ts';
-import { resolveReadEligibility, type ReadEligibility, type TrustReadConfig } from './policy.ts';
-import type { OperationContext } from '../ops/contract.ts';
+import { resolveReadEligibility, type EligibilityCaller, type ReadEligibility, type TrustReadConfig } from './policy.ts';
 
 export type ReadTrustHandling = 'filtered' | 'labeled' | 'text_free';
 
@@ -31,7 +30,7 @@ export const OP_READ_TRUST: Readonly<Record<string, ReadTrustHandling>> = {
   get_chunks: 'filtered', get_timeline: 'filtered', takes_list: 'filtered', takes_search: 'filtered',
   assemble_evidence: 'filtered',
   entity: 'labeled', synthesize: 'labeled', think: 'labeled',
-  search_by_image: 'labeled', list_pages: 'labeled', volunteer_context: 'labeled',
+  search_by_image: 'labeled', list_pages: 'labeled', volunteer_context: 'filtered',
   get_versions: 'labeled', get_raw_data: 'labeled', resolve_slugs: 'labeled',
   get_recent_salience: 'labeled', find_anomalies: 'labeled', get_recent_transcripts: 'labeled',
   find_orphans: 'labeled', traverse_graph: 'labeled', get_links: 'labeled', get_backlinks: 'labeled',
@@ -75,7 +74,7 @@ export function enforceReadTrustFloor(auth: Pick<AuthInfo, 'minTrust'> | undefin
 
 export const PROACTIVE_SURFACES = {
   'hook.user_prompt': 'src/core/context/turn-context.ts',
-  context_engine: 'src/core/context-engine.ts',
+  context_engine: 'src/core/context/reflex.ts',
   context_pack: 'src/core/ops/facts.ts',
   volunteer: 'src/core/context/volunteer.ts',
   retrieval_reflex: 'src/core/context/retrieval-reflex.ts',
@@ -86,7 +85,7 @@ export type ProactiveSurface = keyof typeof PROACTIVE_SURFACES;
 
 /** The eligibility a proactive surface applies: the read floor plus activation control. */
 export async function proactiveEligibility(
-  ctx: Pick<OperationContext, 'engine' | 'auth'>,
+  ctx: EligibilityCaller,
   surface: ProactiveSurface,
   opts: { minTrust?: unknown; config?: TrustReadConfig } = {},
 ): Promise<ReadEligibility & { surface: ProactiveSurface }> {

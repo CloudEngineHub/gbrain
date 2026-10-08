@@ -109,3 +109,28 @@ export interface SuppressionSummary { withheld: number; review: string }
 export function suppressionSummary(withheld: number): SuppressionSummary | undefined {
   return withheld > 0 ? { withheld, review: TRUST_REVIEW_COMMAND.join(' ') } : undefined;
 }
+
+export interface PageKey { source_id: string; slug: string }
+
+/**
+ * Page variant for surfaces that hold (source_id, slug) rather than ids
+ * (retrieval reflex pointers, volunteered pages): verdicts per live page
+ * key, with the label fields. Missing pages are absent (callers drop them).
+ */
+export async function pageActivationVerdicts(engine: Exec, keys: readonly PageKey[], policy: ReadEligibility):
+  Promise<Map<string, ActivationVerdict & { origin: unknown }>> {
+  const out = new Map<string, ActivationVerdict & { origin: unknown }>();
+  if (keys.length === 0) return out;
+  const suppressedExpr = policy.suppressFlagged ? activationSuppressedSql('pages', 'a') : 'false';
+  const rows = await engine.executeRaw<{ source_id: string; slug: string; trust_tier: string; write_origin: unknown; suppressed: boolean }>(
+    `SELECT a.source_id, a.slug, a.trust_tier, a.write_origin, ${suppressedExpr} AS suppressed FROM pages a
+      WHERE a.deleted_at IS NULL AND (a.source_id, a.slug) IN (SELECT * FROM unnest($1::text[], $2::text[]))`,
+    [keys.map(k => k.source_id), keys.map(k => k.slug)]);
+  for (const row of rows) {
+    const tier = storedTrustTier(row.trust_tier);
+    out.set(pageKey(row), { tier, origin: row.write_origin, belowFloor: policy.floor ? !admitsTrust(tier, policy.floor) : false, suppressed: row.suppressed === true });
+  }
+  return out;
+}
+
+export const pageKey = (k: PageKey) => `${k.source_id}\u0000${k.slug}`;
