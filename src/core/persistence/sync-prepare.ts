@@ -6,6 +6,7 @@ import type { Page } from '../types.ts';
 import { OperationError, opError, type OpErrorOpts } from '../ops/contract.ts';
 import type { Action } from '../agent-output.ts';
 import type { RegistryCode } from '../error-registry.ts';
+import { ownerImportTrust } from '../trust/channel.ts';
 import { importFromContent, importCodeFile, verifyPageReadable } from '../import-file.ts';
 import { screenImportContent, screenNormalized, type ContentRefusal, type ImportScreenResult, type ImportSanityConfig } from '../import-screen.ts';
 import { ContentSanityBlockError } from '../content-sanity.ts';
@@ -354,7 +355,7 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
       `A canonical file now occupies the path of page ${row.slug}, written while ${row.source_id} was unbound; neither copy was overwritten. Rename or remove the file and commit, or copy what you need into the page first.`);
   }
   if (p.kind === 'managed_sync_delete') return { observedRevision: snapshot?.revision ?? null, noop: !snapshot || snapshot.page.deleted_at != null,
-    validate, apply: async (tx, preimage) => {
+    trust: await ownerImportTrust(engine, row, snapshot?.page.frontmatter, p.sourcePath), validate, apply: async (tx, preimage) => {
       if (snapshot && snapshot.page.deleted_at == null) { await tx.createVersion(row.slug, preimage ? { ...source, preimage } : source); await tx.softDeletePage(row.slug, source); }
       await releaseHold(tx);
       return { status: 'soft_deleted', slug: row.slug, source_id: row.source_id, noop: !snapshot || snapshot.page.deleted_at != null };
@@ -378,7 +379,7 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
     const ready = prepared;
     if (ready.observedRevision !== (snapshot?.revision ?? null)) throw syncPublicationRefusal('revision_conflict', 'The code page changed during preparation.', row, p,
       `Page ${row.slug} changed while this sync was being prepared.`);
-    return { observedRevision: ready.observedRevision,
+    return { observedRevision: ready.observedRevision, trust: await ownerImportTrust(engine, row, null, p.sourcePath),
       validate: async tx => { await validate(tx); await ready.validate(tx); },
       noop: ready.noop, deferEmbedding: true, apply: async tx => {
       await ready.apply(tx);
@@ -462,6 +463,7 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
   // A rename projects against the moved page (same id), so its pinned timeline rows carry over.
   const project = await prepareCanonicalProjections(engine, ready.parsedPage, row.slug, row.source_id, base, p.companyApproval ? 'immutable' : 'file');
   const preparedImport: PreparedMutation = { observedRevision: snapshot?.revision ?? null,
+    trust: await ownerImportTrust(engine, row, ready.parsedPage.frontmatter, p.sourcePath),
     // Tells the #5470 screen the content is unchanged; publication still queues its effects.
     contentUnchanged: ready.noop && !moved && !writeback,
     ...(renamed ? { additionalPageKeys: [{ sourceId: row.source_id, slug: renamed.slug }] } : {}),

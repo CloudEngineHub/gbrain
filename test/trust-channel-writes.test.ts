@@ -14,7 +14,8 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -35,6 +36,9 @@ import {
   frontmatterTrustCaps, ownerPageTrust, requestChannelTrust, sourceDefaultTier, stampTrustMarker,
 } from '../src/core/trust/channel.ts';
 import { listTrustProposals } from '../src/core/trust/proposals.ts';
+import { claimWorktree } from '../src/core/persistence/ownership.ts';
+import { performManagedSync } from '../src/core/persistence/sync-run.ts';
+import { renderFactsTable } from '../src/core/facts-fence.ts';
 
 const engines: BrainEngine[] = [];
 const home = mkdtempSync(join(tmpdir(), 'gbrain-trust-channel-'));
@@ -199,4 +203,61 @@ describe('channel tiers on journaled writes', () => {
       expect(await listTrustProposals(engine, { sourceId: b.sourceId, action: 'lower_page' })).toHaveLength(1);
     }
   }), 90_000);
+});
+
+describe('owner-source sync tiers and the git round trip (CEO-21)', () => {
+  test('owner sync is operator_curated (or the source default); an agent write-through stamps the marker that survives owner edits until the owner deletes it', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+    for (const engine of engines) {
+      const b = await brain(engine);
+      const sourceId = `trust-sync-${randomUUID().slice(0, 8)}`;
+      const root = join(home, sourceId);
+      const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const commit = (message: string) => { git('add', '-A'); git('-c', 'user.name=Example', '-c', 'user.email=example@example.invalid', 'commit', '-qm', message); };
+      const facts = renderFactsTable([{ rowNum: 1, claim: 'Alice works at acme-example', kind: 'fact', confidence: 1, visibility: 'world', notability: 'medium', active: true }] as never);
+      mkdirSync(join(root, 'people'), { recursive: true }); git('init', '-q');
+      writeFileSync(join(root, 'people/alice-example.md'), page('Alice', `Owner profile.\n\n## Facts\n\n${facts}`));
+      writeFileSync(join(root, 'people/bob-example.md'), page('Bob', 'Clipped from the web.', 'trust_tier: external_untrusted\n'));
+      commit('fixture');
+      await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
+      await engine.executeRaw(`INSERT INTO sources(id,name,local_path,config) VALUES($1,$1,$2,'{}')`, [sourceId, root]);
+      await claimWorktree(engine, sourceId, root);
+      await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
+      const sync = () => performManagedSync(engine, { sourceId, noPull: true });
+      const tier = async (slug: string) => (await engine.executeRaw<{ trust_tier: string }>('SELECT trust_tier FROM pages WHERE source_id=$1 AND slug=$2', [sourceId, slug]))[0]?.trust_tier;
+      await sync();
+      expect(await tier('people/alice-example')).toBe('operator_curated');
+      expect(await tier('people/bob-example')).toBe('external_untrusted');
+      const [fact] = await engine.executeRaw<{ trust_tier: string }>('SELECT trust_tier FROM facts WHERE source_id=$1', [sourceId]);
+      expect(fact?.trust_tier).toBe('operator_curated');
+
+      // An agent rewrite through write-through: tier drops and the canonical file carries the marker.
+      const local = { ...b.local, sourceId };
+      const current = await operationsByName.get_page.handler(local, { slug: 'people/alice-example', include_content: true }) as Record<string, any>;
+      await run(local, 'put_page', { slug: 'people/alice-example', content: page('Alice', 'Agent rewrite.'), expected_revision: current.revision });
+      expect(await tier('people/alice-example')).toBe('agent_written');
+      const path = join(root, 'people/alice-example.md');
+      expect(readFileSync(path, 'utf8')).toMatch(/trust_tier: agent_written/);
+      git('add', '-A'); try { commit('agent write'); } catch { /* the git effect may already have committed it */ }
+
+      // The owner edits another line and syncs: the marker keeps the page agent_written.
+      writeFileSync(path, readFileSync(path, 'utf8').replace('Agent rewrite.', 'Agent rewrite. Owner tweak.'));
+      commit('owner edit');
+      await sync();
+      expect(await tier('people/alice-example')).toBe('agent_written');
+
+      // Deleting the marker by hand is the owner act that restamps the page on the next sync.
+      writeFileSync(path, readFileSync(path, 'utf8').replace(/^trust_tier: agent_written\n/m, '').replace(/^source_kind: .*\n/m, '').replace(/^ingested_via: .*\n/m, ''));
+      commit('owner removes the marker');
+      await sync();
+      expect(await tier('people/alice-example')).toBe('operator_curated');
+
+      // sources set-trust: a per-source default below operator_curated applies to the next sync of a changed page.
+      await engine.transaction(tx => withCoordinatedWrite(tx, [sourceId], () => tx.executeRaw(
+        `UPDATE sources SET config = config || '{"trust_tier":"tool_observed"}'::jsonb WHERE id=$1`, [sourceId]), TEST_WRITE_ATTRIBUTION));
+      writeFileSync(path, readFileSync(path, 'utf8').replace('Owner tweak.', 'Owner tweak again.'));
+      commit('mirror edit');
+      await sync();
+      expect(await tier('people/alice-example')).toBe('tool_observed');
+    }
+  }), 120_000);
 });

@@ -3,6 +3,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { BrainEngine } from '../engine.ts';
 import type { GBrainConfig } from '../config.ts';
 import type { Page } from '../types.ts';
+import { ownerImportTrust } from '../trust/channel.ts';
 import { importCodeFile, importFromContent, importImageFile, isImageFilePath, MAX_FILE_SIZE, MAX_IMAGE_BYTES } from '../import-file.ts';
 import { parseMarkdown, serializePageToMarkdown } from '../markdown.ts';
 import { applyInference } from '../frontmatter-inference.ts';
@@ -200,7 +201,7 @@ export async function prepareManagedImportMutation(engine: BrainEngine, row: Wri
   } as Page, tags));
   const project = code || image ? undefined : await prepareCanonicalProjections(engine, ready.parsedPage!, row.slug, row.source_id, snapshot, 'file');
   return { observedRevision: ready.observedRevision, noop: ready.noop && p.targetHash === sha256(rendered),
-    deferEmbedding: image || p.noEmbed, validate: async tx => { await checkPaths(tx); await ready.validate(tx); },
+    trust: await ownerImportTrust(engine, row, ready.parsedPage?.frontmatter, p.sourcePath), deferEmbedding: image || p.noEmbed, validate: async tx => { await checkPaths(tx); await ready.validate(tx); },
     file: { root, path, content: rendered, expectedBeforeHash: p.targetHash },
     apply: async tx => {
       await ready.apply(tx);
