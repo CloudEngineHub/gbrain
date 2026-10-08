@@ -221,6 +221,7 @@ import { v217 } from './v217-persistence-request-claim-phase.ts';
 import { v218 } from './v218-purge-legacy-worktree-manifest-files.ts';
 import { v219 } from './v219-pages-reconcile-name-indexes.ts';
 import { v230 } from './v230-trust-tiers.ts';
+import { v232 } from './v232-memory-purge.ts';
 import { v233 } from './v233-trust-allow-rules.ts';
 
 // Array order is historical (see HISTORICAL_ARRAY_ORDER in the generator); the
@@ -441,5 +442,6 @@ export const MIGRATIONS: Migration[] = [
   v218,
   v219,
   v230,
+  v232,
   v233,
 ];

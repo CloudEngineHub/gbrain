@@ -11,10 +11,14 @@
 import type { BrainEngine } from './engine.ts';
 import { loadConfig, loadConfigWithEngine } from './config.ts';
 import { assessContentSanity, type ContentSanityResult } from './content-sanity.ts';
-import { withQuarantineOverride } from './quarantine-override.ts';
+import { dropClassifierMarkers, hasCurrentQuarantineOverride, QUARANTINE_OVERRIDE_KEY, withQuarantineOverride } from './quarantine-override.ts';
+import { CONTENT_FLAG_KEY, QUARANTINE_KEY } from './quarantine.ts';
+import { EMBED_SKIP_KEY } from './embed-skip.ts';
+import { ATOMS_SCAN_HASH_KEY } from './utils.ts';
 import { loadOperatorLiterals } from './content-sanity-literals.ts';
 import { classifyImportHold, contentSizeHold, parseMarkdown, type ContentHold, type ParseOpts, type ParsedMarkdown } from './markdown.ts';
 import { isCodeFilePath } from './sync.ts';
+import { contentHash } from './utils.ts';
 import { opError, type OperationError } from './ops/contract.ts';
 import type { Action } from './agent-output.ts';
 import { fenceFixText, fenceLocationFromMessage, fenceRefusal } from './fence-repair/refusal.ts';
@@ -57,6 +61,30 @@ export async function loadImportSanityConfig(engine: BrainEngine): Promise<Impor
   };
 }
 
+/** Frontmatter keys only the content-quality gate, the extract_atoms phase and the operator's clear may set. */
+export const GATE_OWNED_FRONTMATTER_KEYS = [QUARANTINE_KEY, CONTENT_FLAG_KEY, EMBED_SKIP_KEY, ATOMS_SCAN_HASH_KEY, QUARANTINE_OVERRIDE_KEY] as const;
+
+/**
+ * #1699/#6259 trust boundary, fail closed: incoming content loses every
+ * gate-owned marker unless an owner-tier path passes `preserveGateMarkers`
+ * (owner sync and file import, reindex, file repair, reconcile, the cycle
+ * derivers, `quarantine clear/scan`). Otherwise any writer, a local put_page,
+ * a connector or an ingest lane included, could hide a page from search
+ * (`quarantine`), inject text into the agent's warning channel
+ * (`content_flag.detail`), stop its embedding (`embed_skip`), suppress atom
+ * mining (`atoms_scan_hash`) or forge a cleared state (`quarantine_override`).
+ * A preserving path keeps its own override only while it binds the content,
+ * and a current override drops classifier markers the content still carries.
+ */
+export function stripGateOwnedMarkers(parsed: Pick<ParsedMarkdown, 'frontmatter' | 'title' | 'type' | 'compiled_truth' | 'timeline'>, opts: { preserveGateMarkers?: boolean }): void {
+  if (opts.preserveGateMarkers !== true) {
+    for (const key of GATE_OWNED_FRONTMATTER_KEYS) delete parsed.frontmatter[key];
+    return;
+  }
+  if (Object.hasOwn(parsed.frontmatter, QUARANTINE_OVERRIDE_KEY) && !hasCurrentQuarantineOverride(parsed)) delete parsed.frontmatter[QUARANTINE_OVERRIDE_KEY];
+  dropClassifierMarkers(parsed as ParsedMarkdown);
+}
+
 /** #6259: a page carrying a current `quarantine_override` keeps the classifier's verdict off (see quarantine-override.ts). */
 export function assessImportSanity(page: Pick<ParsedMarkdown, 'compiled_truth' | 'timeline' | 'title' | 'type'> & { frontmatter?: Record<string, unknown> }, cfg: ImportSanityConfig): ContentSanityResult {
   return withQuarantineOverride(assessContentSanity({
@@ -80,7 +108,7 @@ export function assessImportSanity(page: Pick<ParsedMarkdown, 'compiled_truth' |
  * with its location-only `fence`.
  */
 export interface ContentRefusal extends Omit<ContentHold, 'code' | 'reason'> {
-  code: ContentHold['code'] | 'content_rejected' | 'invalid_fence';
+  code: ContentHold['code'] | 'content_rejected' | 'invalid_fence' | 'purged_content';
   reason?: ContentHold['reason'] | FenceReason;
   fence?: FenceMessageLocation;
   /** #6188 (D18): every issue that blocks the write, location and class only. */
@@ -137,6 +165,8 @@ export interface ImportScreenInput {
   fences?: 'coordinated' | 'lenient';
   /** #6188: `fences.normalize`; false treats a fixable fence as residual. Default true. */
   normalize?: boolean;
+  /** #5575: the source's page purge tombstones (content hash -> purged slug), prefetched by the caller. */
+  purgedPages?: ReadonlyMap<string, string>;
 }
 
 export type ImportScreenResult =
@@ -158,6 +188,9 @@ export function screenImportContent(input: ImportScreenInput): ImportScreenResul
   const parsed = parseMarkdown(input.content, input.path, { validate: true, ...(input.activePack ? { activePack: input.activePack } : {}) });
   const hold = classifyImportHold(parsed, { expectedSlug: input.expectedSlug, slugExempt: input.slugExempt, slugConflictMessage: input.slugConflictMessage });
   if (hold) return { status: 'refused', refusal: hold };
+  const purgedAs = input.purgedPages?.size ? input.purgedPages.get(contentHash(parsed)) : undefined;
+  if (purgedAs !== undefined) return { status: 'refused', refusal: { code: 'purged_content',
+    message: `${input.path} carries the content of page ${purgedAs}, which the owner purged; it was not imported.` } };
   let fences: FenceScreen | undefined;
   if (input.fences) {
     const before = { compiled_truth: parsed.compiled_truth, timeline: parsed.timeline ?? '' };
@@ -209,7 +242,7 @@ export function contentRefusalFromReceipt(code: string | null | undefined, messa
   const typed = CONTENT_REFUSAL_CODES.has(code!) ? code as ContentRefusal['code']
     : /^Invalid YAML frontmatter/.test(text) ? 'invalid_frontmatter'
     : /slug/.test(text) ? 'frontmatter_slug_conflict'
-    : /PAGE_JUNK_PATTERN/.test(text) ? 'content_rejected' : 'file_too_large';
+    : /PAGE_JUNK_PATTERN/.test(text) ? 'content_rejected' : /which the owner purged/.test(text) ? 'purged_content' : 'file_too_large';
   const reason = typed !== 'invalid_frontmatter' ? undefined
     : /ambiguous protected key/.test(text) ? 'ambiguous_protected_key' as const
     : /ambiguous identity key/.test(text) ? 'ambiguous_identity_key' as const
@@ -218,17 +251,19 @@ export function contentRefusalFromReceipt(code: string | null | undefined, messa
   const suggestion = typed === 'invalid_frontmatter' ? `The content itself was refused, so resubmitting it unchanged refuses again. Correct ${where}: one line per key with its whole value quoted, then submit the corrected content with a new request_id.`
     : typed === 'frontmatter_slug_conflict' ? 'The content declares a slug that conflicts with its path. Remove the `slug:` line or make it match, then submit with a new request_id.'
     : typed === 'content_rejected' ? 'The content-sanity gate rejects this content under the operator\'s junk_disposition=reject setting. Remove the matched junk, then submit with a new request_id.'
+    : typed === 'purged_content' ? 'This content was purged by the owner and stays out of the brain. Do not resubmit it; write new content, or ask the user to clear the tombstone on the brain host (gbrain pages unpurge).'
     : 'The content is over the import size limit. Split it into smaller pages, then submit each with its own request_id.';
   return { code: typed, ...(reason ? { reason } : {}), ...(key ? { key } : {}), ...(line !== undefined ? { line } : {}), suggestion };
 }
 
-const CONTENT_REFUSAL_CODES = new Set(['invalid_frontmatter', 'frontmatter_slug_conflict', 'file_too_large', 'content_rejected']);
+const CONTENT_REFUSAL_CODES = new Set(['invalid_frontmatter', 'frontmatter_slug_conflict', 'file_too_large', 'content_rejected', 'purged_content']);
 const LEGACY_CONTENT_MESSAGES: Array<[code: string, pattern: RegExp]> = [
   ['invalid_params', /^Invalid YAML frontmatter(?::| at line \d| in )/],
   ['invalid_params', /^The frontmatter slug "[^"\n]*" in [^\n]+ conflicts with its path, which expects slug "[^"\n]*"\./],
   ['invalid_params', /^Frontmatter slug "[^"\n]*" does not match path-derived slug "[^"\n]*"/],
   ['invalid_params', /^Content too large \(\d+ bytes, max \d+\)/],
   ['invalid_params', /^File too large \(/],
+  ['invalid_params', /^[^\n]+ carries the content of page [^\n]+, which the owner purged; it was not imported\.$/],
   ['invalid_params', /^Code file too large \(\d+ bytes\)/],
   ['request_too_large', /^Sync file exceeds the bounded import size\.$/],
   ['storage_error', /^Publication failed \(PAGE_JUNK_PATTERN\)\. Inspect owner diagnostics\.$/],
