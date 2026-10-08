@@ -53,7 +53,7 @@ export interface ImportSanityConfig {
  * engine error falls back to file/env values. `GBRAIN_NO_SANITY=1` is read
  * directly because loadConfig() is null on config-less PGLite setups. The
  * write-gate keys ride the same lift; an unreadable value falls back to the
- * defaults (external quarantine, agent flag), never to `off`.
+ * defaults (flag for both), never to `off`.
  */
 export async function loadImportSanityConfig(engine: BrainEngine): Promise<ImportSanityConfig> {
   const baseCfg = loadConfig();

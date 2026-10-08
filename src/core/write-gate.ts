@@ -7,10 +7,12 @@
  * the bounded pattern table in `write-gate-patterns.ts`, run over windows of
  * normalized text. Precision comes from routing by trust tier, not from the
  * detector: the gate never runs on `user_confirmed`, `operator_curated` or
- * `tool_observed` writes. Defaults (`write_gate.*` config, DX-13):
- *   - `external_untrusted`: instruction-like -> `quarantine` (or `flag` /
- *     `reject` / `off` by `write_gate.external_mode`); a detector error ->
- *     `quarantine` (fail-closed).
+ * `tool_observed` writes. Defaults (`write_gate.*` config, DX-13), set by the
+ * preregistered paid eval (gbrain-evals docs/benchmarks/2026-10-08-memory-trust-results-paid.md:
+ * quarantine and suppression cut no attack success on top of trust labels):
+ *   - `external_untrusted`: instruction-like -> `flag` (or `quarantine` /
+ *     `reject` / `off` by `write_gate.external_mode`; quarantine is the owner's
+ *     opt-in); a detector error -> `quarantine` (fail-closed).
  *   - `agent_written` and `unknown`: instruction-like -> `flag` (or `off` by
  *     `write_gate.agent_mode`); a detector error -> `allow` (fail-open).
  *
@@ -46,7 +48,7 @@ export interface WriteGateConfig {
   agentMode: WriteGateAgentMode;
 }
 
-export const DEFAULT_WRITE_GATE_CONFIG: Readonly<WriteGateConfig> = { externalMode: 'quarantine', agentMode: 'flag' };
+export const DEFAULT_WRITE_GATE_CONFIG: Readonly<WriteGateConfig> = { externalMode: 'flag', agentMode: 'flag' };
 
 /** Structured origin of a write (`write_origin`); every string here is scanned as data. */
 export interface WriteGateOrigin {
@@ -106,9 +108,8 @@ const VALID_EXTERNAL: ReadonlySet<string> = new Set(['quarantine', 'flag', 'reje
 const VALID_AGENT: ReadonlySet<string> = new Set(['flag', 'off']);
 
 /**
- * Parse `write_gate.external_mode` / `write_gate.agent_mode`. An unreadable
- * or invalid external mode falls back to `quarantine` (fail-closed), an
- * invalid agent mode to `flag`.
+ * Parse `write_gate.external_mode` / `write_gate.agent_mode`. An unset,
+ * unreadable or invalid mode falls back to the default (`flag` for both).
  */
 export function parseWriteGateConfig(raw: { external_mode?: unknown; agent_mode?: unknown } = {}): WriteGateConfig {
   const ext = typeof raw.external_mode === 'string' ? raw.external_mode.trim().toLowerCase() : '';

@@ -34,8 +34,9 @@ Usage: gbrain trust backfill [--dry-run] [--resume] [--batch-size N] [--json]
 
 Usage: gbrain trust scan [--batch-size N] [--json]
   Runs the write gate's deterministic detector over agent-written and lower rows written before the gate,
-  recording a receipt for each instruction-like row so proactive surfaces stop injecting it until you confirm
-  it (gbrain trust review). Changes no row; resumable (rerun to continue); a detector upgrade rescans.
+  recording a receipt for each instruction-like row, so it reads as flagged (and, under trust.agent_activation
+  suppress, stays out of proactive context) until you confirm it (gbrain trust review). Changes no row;
+  resumable (rerun to continue); a detector upgrade rescans.
   Nothing runs it for you: an agent asks you first. Claim your own sources first (gbrain trust claim-sources)
   so your older notes are not treated as unverified.
 

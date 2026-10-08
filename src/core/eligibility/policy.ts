@@ -15,10 +15,14 @@
  *   labels rows, so ordering is byte-identical to a brain without tiers;
  *   `filter` also hides `external_untrusted` rows (floor `unknown`) from every
  *   read. There is no downrank mode (UC1).
- * - Activation control (`trust.agent_activation`, local config): `suppress`
- *   (default) keeps agent-written-or-lower rows carrying a write-gate flag in
- *   an instruction family out of proactive surfaces until the owner confirms
- *   them; `allow` opts out. Explicit reads still return them, labeled.
+ * - Activation control (`trust.agent_activation`, local config): `allow`
+ *   (default) lets proactive surfaces inject flagged rows, labeled
+ *   "unconfirmed, agent-written"; `suppress` (the owner's opt-in) keeps
+ *   agent-written-or-lower rows carrying a write-gate flag in an instruction
+ *   family out of proactive surfaces until the owner confirms them. Explicit
+ *   reads always return them, labeled. The default follows the preregistered
+ *   paid eval (gbrain-evals docs/benchmarks/2026-10-08-memory-trust-results-paid.md):
+ *   suppression cut no agent-relayed attack success on top of labels.
  *
  * SQL fragments live in eligibility/sql.ts; user-facing labels in labels.ts.
  */
@@ -57,15 +61,14 @@ function pick<T extends string>(value: string | null | undefined, allowed: reado
 
 /**
  * Reads both keys from the brain's config table. An unreadable config keeps
- * the defaults: label mode changes nothing, and suppression stays on
- * (fail-closed for the proactive path).
+ * the defaults: label mode (labels on every row) and activation `allow`.
  */
 export async function loadTrustReadConfig(engine: Pick<BrainEngine, 'getConfig'>): Promise<TrustReadConfig> {
   const read = async (key: string) => { try { return await engine.getConfig(key); } catch { return null; } };
   const [mode, activation] = await Promise.all([read(READ_POLICY_KEY), read(AGENT_ACTIVATION_KEY)]);
   return {
     mode: pick(mode, READ_POLICY_MODES, 'label'),
-    activation: pick(activation, AGENT_ACTIVATION_MODES, 'suppress'),
+    activation: pick(activation, AGENT_ACTIVATION_MODES, 'allow'),
   };
 }
 

@@ -76,7 +76,8 @@ describe('scanWriteGateExposure', () => {
   test('reports verdicts by projected tier and family inside a READ ONLY transaction, writing nothing', async () => {
     const report = await engine.transaction(async tx => {
       await tx.executeRaw('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      const r = await scanWriteGateExposure(tx);
+      // The opt-in quarantine mode, so the report counts holds too (the default, flag, is pinned below).
+      const r = await scanWriteGateExposure(tx, { cfg: { externalMode: 'quarantine', agentMode: 'flag' } });
       // The transaction really is read-only: any write the scan attempted would fail like this one.
       const blocked = await tx.executeRaw("INSERT INTO write_gate_holds (kind, source_id, fingerprint, detector_version, tier, payload) VALUES ('fact','default','x',1,'unknown','{}'::jsonb)").catch(e => String(e));
       expect(blocked).toContain('read-only');
@@ -96,6 +97,11 @@ describe('scanWriteGateExposure', () => {
     expect(report.tables.timeline_entries!.by_tier.unknown).toMatchObject({ rows: 1, detector_hits: 1 });
     expect(report.totals).toMatchObject({ rows: 9, quarantined: 2, rejected: 0 });
     expect(report.totals.flagged).toBe(4);
+    // The shipped default (paid eval): external instruction-like rows are flagged, none held.
+    const byDefault = await scanWriteGateExposure(engine);
+    expect(byDefault.config).toEqual({ externalMode: 'flag', agentMode: 'flag' });
+    expect(byDefault.tables.pages!.by_tier.external_untrusted.verdicts).toMatchObject({ allow: 1, flag: 2, quarantine: 0 });
+    expect(byDefault.totals).toMatchObject({ rows: 9, quarantined: 0, flagged: 6 });
     // Counts and pattern names only: no content, slugs or ids leave the scan.
     const text = JSON.stringify(report);
     for (const leak of ['attacker', 'notes/', 'inbox/', 'bicycle', 'deal closed']) expect(text).not.toContain(leak);

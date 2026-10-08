@@ -138,6 +138,8 @@ export interface ReflexPointer {
   /** #5575 A6: the page's trust tier and short write origin (rendered as a compact label). */
   trust_tier?: TrustTier;
   origin?: string;
+  /** #5575 CEO-20: the page carries an unconfirmed instruction-family flag (kept under `trust.agent_activation=allow`). */
+  unconfirmed?: true;
 }
 
 export interface PointerBlock {
@@ -595,7 +597,7 @@ async function gatePointerCandidates(engine: BrainEngine, resolved: ReadonlyArra
   for (const [key, v] of verdicts ?? []) {
     if (v.belowFloor) continue;
     if (v.suppressed) withheld.push(key.replace('\u0000', ':'));
-    else out.set(key, trustFields(v.tier, v.origin));
+    else out.set(key, { ...trustFields(v.tier, v.origin), ...(v.unconfirmed ? { unconfirmed: true as const } : {}) });
   }
   if (withheld.length) opts.onWithheld?.(withheld);
   return out;
@@ -682,8 +684,8 @@ export function renderPointerBlock(pointers: ReflexPointer[]): string {
  * trust label before the synopsis (an external page's synopsis is wrapped
  * inline as data); an unlabeled one renders as before.
  */
-export function renderPointerLine(p: Pick<ReflexPointer, 'display' | 'slug' | 'synopsis' | 'trust_tier' | 'origin'>): string {
-  const trusted = p.trust_tier ? ` ${renderTrustedInline(p.synopsis, { trust_tier: p.trust_tier, origin: p.origin ?? 'legacy' })}` : '';
+export function renderPointerLine(p: Pick<ReflexPointer, 'display' | 'slug' | 'synopsis' | 'trust_tier' | 'origin' | 'unconfirmed'>): string {
+  const trusted = p.trust_tier ? ` ${renderTrustedInline(p.synopsis, { trust_tier: p.trust_tier, origin: p.origin ?? 'legacy', ...(p.unconfirmed ? { unconfirmed: true as const } : {}) })}` : '';
   const syn = p.trust_tier ? (trusted ? ` —${trusted}` : '') : p.synopsis ? ` — ${p.synopsis}` : '';
   return `- **${p.display}** → \`${p.slug}\`${syn} (use get_page before relying on details)`;
 }

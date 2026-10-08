@@ -122,7 +122,13 @@ const GIT_ENV = {
 };
 
 /** Sets GBRAIN_HOME for the scenario phase (the local writer registration lives there); restores on close. */
-export async function createTrustBrain(): Promise<TrustBrain> {
+/**
+ * `protections`: true turns on the owner's opt-in protections (write_gate.external_mode=quarantine,
+ * trust.agent_activation=suppress) that the protection cells probe; false keeps the shipped defaults
+ * (flag / allow since the preregistered paid eval, gbrain-evals
+ * docs/benchmarks/2026-10-08-memory-trust-results-paid.md).
+ */
+export async function createTrustBrain(opts: { protections: boolean }): Promise<TrustBrain> {
   const root = mkdtempSync(join(tmpdir(), 'brainbench-trust-'));
   const priorHome = process.env.GBRAIN_HOME;
   const priorToken = process.env[CONNECTOR_TOKEN_ENV];
@@ -133,6 +139,10 @@ export async function createTrustBrain(): Promise<TrustBrain> {
   await engine.connect({});
   await engine.initSchema();
   await registerLocalWriter(engine, 'cli');
+  if (opts.protections) {
+    await engine.setConfig('write_gate.external_mode', 'quarantine');
+    await engine.setConfig('trust.agent_activation', 'suppress');
+  }
   return {
     engine, root,
     async close() {

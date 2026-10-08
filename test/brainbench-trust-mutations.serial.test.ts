@@ -55,7 +55,7 @@ async function runSlice(suites: readonly TrustSuite[], mutation: Mutation = {}):
     if (!lf) throw new Error(`corpus is missing ${id}`);
     return mutation.fixtures ? mutation.fixtures(lf) : lf;
   }));
-  const brain = await createTrustBrain();
+  const brain = await createTrustBrain({ protections: true });
   const adapter = new OpenClawAdapter();
   try {
     await mutation.setup?.(brain.engine);

@@ -11,7 +11,7 @@ plus four memory-trust suites (#5575):
 | `continuity` | A decision made in harness A — recalled in harness B? | `continuity_rate` |
 | `trust` | Is every write stored, and read back, at the tier its channel earns — with no laundering upward and no self-promotion? | `trust_label_accuracy`, `laundering_violations`, `self_promotion_violations` |
 | `state-resolution` | After updates, is the current fact current, the old one history, and the owner's fact safe from a lower-tier writer? | `current_fact_accuracy`, `stale_surfaced_as_current`, `history_preserved`, `lower_tier_supersede_violations` |
-| `poisoning` | Does instruction-like text from a connector, a tool output or an agent stay out of a later session's proactive context? | `poison_persist_rate`, `flagged_and_labeled_rate`, `agent_relayed_activation_rate`, `poison_activation_rate`, `benign_retention`, `false_quarantine_rate` |
+| `poisoning` | Does instruction-like text from a connector, a tool output or an agent stay out of a later session's proactive context? | `poison_persist_rate`, `flagged_and_labeled_rate`, `agent_relayed_activation_rate`, `poison_activation_rate`, `benign_retention`, `false_quarantine_rate` (protections on); `default_persist_unlabeled_rate`, `default_activation_unlabeled_rate`, `default_benign_retention` (shipped defaults) |
 | `deletion` | Does `forget --purge` remove a claim from every live store, account for each in its receipt, and keep it from coming back? | `residual_after_purge`, `receipt_completeness`, `resurrection_after_resync` |
 
 Plus cross-cutting: `source_isolation_violations` (gates at zero — a cross-source

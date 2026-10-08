@@ -26,8 +26,9 @@ export const TRUST_BACKFILL_USAGE = [
   '',
   'Usage: gbrain trust scan [--batch-size N] [--json]',
   '  Runs the write gate\'s deterministic detector over agent-written and lower rows written before the gate,',
-  '  recording a receipt for each instruction-like row so proactive surfaces stop injecting it until you confirm',
-  '  it (gbrain trust review). Changes no row; resumable (rerun to continue); a detector upgrade rescans.',
+  '  recording a receipt for each instruction-like row, so it reads as flagged (and, under trust.agent_activation',
+  '  suppress, stays out of proactive context) until you confirm it (gbrain trust review). Changes no row;',
+  '  resumable (rerun to continue); a detector upgrade rescans.',
   '  Nothing runs it for you: an agent asks you first. Claim your own sources first (gbrain trust claim-sources)',
   '  so your older notes are not treated as unverified.',
 ].join('\n');
@@ -94,7 +95,7 @@ export async function run(engine: BrainEngine, args: string[], ctx: CliDispatchC
     if (jsonRequested(args)) await writeStdoutFinal(`${JSON.stringify(scan, null, 2)}\n`);
     else console.log([`Trust scan (detector v${scan.detector_version}):`,
       ...scan.tables.map(t => `  ${t.table}: ${t.scanned} row(s) scanned, ${t.flagged} flagged${t.done ? '' : ' (more to scan)'}`),
-      scan.complete ? '  Complete. Flagged rows are withheld from proactive context until confirmed (gbrain trust review).' : `  Continue with: ${scan.resume_command}`].join('\n'));
+      scan.complete ? '  Complete. Flagged rows carry their flag wherever they are read (and stay out of proactive context under trust.agent_activation suppress) until confirmed (gbrain trust review).' : `  Continue with: ${scan.resume_command}`].join('\n'));
     return;
   }
   if (!dryRun) await ctx.completeStartup?.(engine);

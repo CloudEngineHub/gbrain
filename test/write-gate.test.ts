@@ -28,7 +28,9 @@ import { parseMarkdown } from '../src/core/markdown.ts';
 
 import { BENIGN_ROUTING, CONCEAL_OR_BYPASS, HELD_OUT, NEGATIVES, POSITIVES } from './helpers/write-gate-corpus.ts';
 
-const CFG: WriteGateConfig = { ...DEFAULT_WRITE_GATE_CONFIG };
+// The protections under test: external quarantine is the owner's opt-in since the paid eval set the default to flag
+// (gbrain-evals docs/benchmarks/2026-10-08-memory-trust-results-paid.md); the tests below pin both.
+const CFG: WriteGateConfig = { externalMode: 'quarantine', agentMode: 'flag' };
 const families = (text: string): string[] => [...new Set(detectInstructionLike([['body', text]]).map(h => h.family as string))].sort();
 
 afterEach(() => __setWriteGateDetectorForTests(null));
@@ -129,7 +131,9 @@ describe('verdict model by tier and mode (B2, ENG-20, DX-13)', () => {
     }
   });
 
-  test('external_untrusted instruction-like content is quarantined by default, flag/reject/off by mode', () => {
+  test('external_untrusted instruction-like content is flagged by default, quarantine/reject/off by mode', () => {
+    expect(DEFAULT_WRITE_GATE_CONFIG).toEqual({ externalMode: 'flag', agentMode: 'flag' });
+    expect(assessPageForGate(ATTACK, { tier: 'external_untrusted' }, DEFAULT_WRITE_GATE_CONFIG)).toMatchObject({ verdict: 'flag', ran: true, families: ['exfiltration'] });
     expect(assessPageForGate(ATTACK, { tier: 'external_untrusted' }, CFG)).toMatchObject({ verdict: 'quarantine', ran: true, families: ['exfiltration'] });
     expect(assessPageForGate(ATTACK, { tier: 'external_untrusted' }, { ...CFG, externalMode: 'flag' }).verdict).toBe('flag');
     expect(assessPageForGate(ATTACK, { tier: 'external_untrusted' }, { ...CFG, externalMode: 'reject' }).verdict).toBe('reject');
@@ -159,8 +163,9 @@ describe('verdict model by tier and mode (B2, ENG-20, DX-13)', () => {
   });
 
   test('config parsing: invalid or missing values fall back to the defaults, never to off', () => {
-    expect(parseWriteGateConfig({})).toEqual({ externalMode: 'quarantine', agentMode: 'flag' });
-    expect(parseWriteGateConfig({ external_mode: 'bogus', agent_mode: 'quarantine' })).toEqual({ externalMode: 'quarantine', agentMode: 'flag' });
+    expect(parseWriteGateConfig({})).toEqual({ externalMode: 'flag', agentMode: 'flag' });
+    expect(parseWriteGateConfig({ external_mode: 'bogus', agent_mode: 'quarantine' })).toEqual({ externalMode: 'flag', agentMode: 'flag' });
+    expect(parseWriteGateConfig({ external_mode: 'quarantine' })).toEqual({ externalMode: 'quarantine', agentMode: 'flag' });
     expect(parseWriteGateConfig({ external_mode: ' Reject ', agent_mode: 'OFF' })).toEqual({ externalMode: 'reject', agentMode: 'off' });
   });
 });

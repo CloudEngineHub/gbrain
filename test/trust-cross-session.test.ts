@@ -40,6 +40,7 @@ import { __setWriteGateDetectorForTests } from '../src/core/write-gate.ts';
 import { LEGACY_EMBEDDING_CONFIG } from './helpers/legacy-embedding-config.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { withEnv } from './helpers/with-env.ts';
+import { enableTrustProtections } from './helpers/trust-protections.ts';
 
 interface Backend { name: string; engine: BrainEngine; later: () => Promise<BrainEngine>; close?: () => Promise<void> }
 const backends: Backend[] = [];
@@ -50,11 +51,14 @@ beforeAll(async () => withEnv({ GBRAIN_HOME: home }, async () => {
   configureGateway({ ...LEGACY_EMBEDDING_CONFIG, env: {} });
   const lite = new PGLiteEngine(); await lite.connect({}); await lite.initSchema();
   await registerLocalWriter(lite, 'cli');
+  // C1 probes the opt-in protections (external quarantine, proactive suppression); see helpers/trust-protections.ts.
+  await enableTrustProtections(lite);
   // An in-memory PGLite has one connection: the later session is a fresh caller context on it.
   backends.push({ name: 'pglite', engine: lite, later: async () => lite });
   if (process.env.DATABASE_URL) {
     const pg = await isolatedPersistencePostgres(process.env.DATABASE_URL);
     await registerLocalWriter(pg.engine, 'cli');
+    await enableTrustProtections(pg.engine);
     const extra: PostgresEngine[] = [];
     backends.push({
       name: 'postgres', engine: pg.engine,

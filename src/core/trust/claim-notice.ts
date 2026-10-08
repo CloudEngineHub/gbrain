@@ -24,11 +24,11 @@ export async function trustClaimUpgradeNotice(engine: Pick<BrainEngine, 'execute
   if (!unclaimed.length) return null;
   const rows = unclaimed.reduce((n, s) => n + s.legacy_unknown, 0);
   return ['', ...agentBlock({
-    why: `${rows} row(s) written before trust tiers in ${unclaimed.length} unclaimed source(s) read as "unverified origin". New agent-written content is already held back `
-      + 'when it reads as instructions; older content is covered only after the user claims their sources and runs gbrain trust scan, which no agent starts.',
+    why: `${rows} row(s) written before trust tiers in ${unclaimed.length} unclaimed source(s) read as "unverified origin". New agent-written content is already flagged `
+      + 'when it reads as instructions; older content is flagged only after the user claims their sources and runs gbrain trust scan, which no agent starts.',
     actor: 'user', next: `tell_user_to_run: ${TRUST_CLAIM_COMMAND.join(' ')}`,
     if_yes: `The user runs ${TRUST_CLAIM_COMMAND.join(' ')} in a terminal on the brain host; it asks them to type each source id (--yes never claims). Preview: gbrain trust claim-sources --dry-run --json.`,
-    if_no: 'Run nothing; those rows stay "unverified origin" and nothing is withheld unless the user later runs gbrain trust scan.',
+    if_no: 'Run nothing; those rows stay "unverified origin" and nothing is flagged unless the user later runs gbrain trust scan.',
     verify,
   }, { showUser: CLAIM_USER_MESSAGE }).trimEnd().split('\n'), ''];
 }

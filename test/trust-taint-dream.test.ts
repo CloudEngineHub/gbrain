@@ -27,6 +27,7 @@ import { configureGateway, resetGateway, __setChatTransportForTests } from '../s
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { withEnv } from './helpers/with-env.ts';
 import { testBackends } from './helpers/test-backends.ts';
+import { enableTrustProtections } from './helpers/trust-protections.ts';
 
 const backends = testBackends();
 const engines: BrainEngine[] = [];
@@ -40,10 +41,13 @@ beforeAll(async () => {
     const engine = new PGLiteEngine();
     await engine.connect({ database_path: dataDir });
     await engine.initSchema();
+    // Probes the opt-in protections (external quarantine holds); see helpers/trust-protections.ts.
+    await enableTrustProtections(engine);
     engines.push(engine);
   }
   if (backends.includes('postgres')) {
     const pg = await isolatedPersistencePostgres(process.env.DATABASE_URL!);
+    await enableTrustProtections(pg.engine);
     engines.push(pg.engine);
     closePostgres = pg.close;
   }

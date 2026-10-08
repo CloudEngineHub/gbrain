@@ -212,6 +212,8 @@ export async function getBrainHotMemoryMeta(
   collapsed.sort((a, b) => effectiveConfidence(b, now) - effectiveConfidence(a, now));
   const { kept, withheld } = await partitionForActivation(ctx.engine, collapsed, r => ({ table: 'facts', id: r.id }), policy);
   const rows = kept.slice(0, topK).map(k => k.item);
+  // Under trust.agent_activation=allow (the default) a flagged fact stays in the block, labeled unconfirmed.
+  const unconfirmed = new Set(kept.filter(k => k.unconfirmed).map(k => k.item.id));
   const suppressed = suppressionSummary(withheld);
   if (rows.length === 0 && !suppressed) {
     store({ expiresAt: Date.now() + ttl, payload: undefined });
@@ -243,6 +245,7 @@ export async function getBrainHotMemoryMeta(
         confidence: Number(effectiveConfidence(r, now).toFixed(3)),
         ...(r.attributed_to ? { attributed_to: r.attributed_to } : {}),
         ...trustFields(r.trust_tier, r.write_origin),
+        ...(unconfirmed.has(r.id) ? { unconfirmed: true as const } : {}),
       })),
     },
   };

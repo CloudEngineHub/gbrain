@@ -110,6 +110,8 @@ export interface EntityCard {
   origin?: string;
   /** #5575 ENG-15 (additive): the page is quarantined; renderers wrap its summary as external data. */
   quarantined?: true;
+  /** #5575 CEO-20 (additive): the entity page carries an unconfirmed instruction-family write-gate flag. */
+  unconfirmed?: true;
 }
 
 export interface ReferenceGroupView {

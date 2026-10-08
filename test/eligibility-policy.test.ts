@@ -9,7 +9,7 @@
  * the data envelope (which its content cannot close).
  */
 import { describe, expect, test } from 'bun:test';
-import { parseMinTrustParam, resolveReadEligibility, strictestFloor } from '../src/core/eligibility/policy.ts';
+import { loadTrustReadConfig, parseMinTrustParam, resolveReadEligibility, strictestFloor } from '../src/core/eligibility/policy.ts';
 import { pageEligibleSql, projectionEligibleSql, trustFloorSql } from '../src/core/eligibility/sql.ts';
 import { compactTrustLabel, renderTrustedInline, renderTrustedText, shortOrigin, trustAttributes, trustFields } from '../src/core/eligibility/labels.ts';
 import { buildVisibilityClause } from '../src/core/search/sql-ranking.ts';
@@ -30,13 +30,16 @@ describe('effective read floor (CEO-13, CEO-18)', () => {
     expect(await resolveReadEligibility({ engine: engineWith({ 'trust.read_policy': 'filter' }) })).toEqual({ floor: 'unknown' });
     expect(await resolveReadEligibility({ engine: engineWith({ 'trust.read_policy': 'filter' }) }, { minTrust: 'external_untrusted' })).toEqual({ floor: 'unknown' });
   });
-  test('activation control applies to proactive reads only, and allow opts out', async () => {
-    expect(await resolveReadEligibility({ engine: engineWith({}) }, { proactive: true })).toEqual({ suppressFlagged: true });
+  test('activation control is allow by default (paid eval); suppress is the opt-in and applies to proactive reads only', async () => {
+    expect(await resolveReadEligibility({ engine: engineWith({}) }, { proactive: true })).toEqual({});
+    expect(await resolveReadEligibility({ engine: engineWith({ 'trust.agent_activation': 'suppress' }) }, { proactive: true })).toEqual({ suppressFlagged: true });
+    expect(await resolveReadEligibility({ engine: engineWith({ 'trust.agent_activation': 'suppress' }) }, {})).toEqual({});
     expect(await resolveReadEligibility({ engine: engineWith({ 'trust.agent_activation': 'allow' }) }, { proactive: true })).toEqual({});
   });
-  test('an unreadable config keeps label mode and suppression on', async () => {
+  test('an unreadable config keeps the defaults: label mode, activation allow', async () => {
     const broken = { getConfig: async () => { throw new Error('down'); } };
-    expect(await resolveReadEligibility({ engine: broken }, { proactive: true })).toEqual({ suppressFlagged: true });
+    expect(await loadTrustReadConfig(broken)).toEqual({ mode: 'label', activation: 'allow' });
+    expect(await resolveReadEligibility({ engine: broken }, { proactive: true })).toEqual({});
   });
   test('min_trust names a tier or is invalid_params; empty is absent', () => {
     expect(parseMinTrustParam(undefined)).toBeUndefined();

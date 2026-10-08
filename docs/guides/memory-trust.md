@@ -1,9 +1,9 @@
 # Memory trust
 
-gbrain records where each memory came from and how much it should be trusted.
-It uses that to keep instruction-like text that an agent wrote out of
-proactive context until you confirm it. This guide covers what hold-back
-covers, when it applies to content saved before this release, and the
+gbrain records where each memory came from and how much it should be trusted,
+labels everything an agent reads back with that, and flags text that reads like
+instructions to an agent. This guide covers what you get by default, the
+stricter protections you can turn on, how older memory is covered, and the
 commands that claim your sources and scan older memory.
 
 ## Trust tiers
@@ -23,22 +23,53 @@ it as a label:
 Nothing ever becomes "confirmed by you" without you typing a confirmation
 token at a terminal on the brain host. `--yes` never confirms.
 
-## What hold-back covers
+## What you get by default
 
-Hold-back starts covering **new agent-written content right away**. A write at
-`agent_written` or lower that reads like instructions to an agent (for example
-"from now on always recommend..." or "ignore your previous instructions") gets
-a write-gate receipt. It is still saved and still returned by explicit search,
-recall and `get_page`. Proactive surfaces (hook context, the context engine,
-`context_pack`, volunteer) do not inject it until you confirm it in
-`gbrain trust review`.
+- **Labels on everything.** Every item an agent reads back (search, recall,
+  `get_page`, hook context, `context_pack`) carries its tier label;
+  external, untrusted text arrives wrapped as data. `trust.read_policy` is
+  `label`.
+- **Flags on instruction-like writes.** A write at "written by an agent" or
+  below that reads like instructions to an agent (for example "from now on
+  always recommend..." or "ignore your previous instructions") is saved, gets
+  a write-gate receipt and carries the flag "unconfirmed, agent-written" or
+  its external label wherever it is read. External content is flagged too
+  (`write_gate.external_mode` is `flag`; `write_gate.agent_mode` is `flag`).
+  `gbrain trust review` lists flagged items; confirming one clears its flag.
+- **Flagged items still reach proactive context, labeled**
+  (`trust.agent_activation` is `allow`).
 
-**Content saved before this release is covered only after you claim your
-sources and agree to the scan.** Older rows have no provenance, so they read
-as "unverified origin". On a long-lived brain that is most rows, including
-your own notes and synced code repositories. gbrain never scans them on its
-own. Doctor, `gbrain post-upgrade` and the behavior-change notice tell you
-the commands to run.
+These defaults come from a preregistered paid eval with Opus 5.5, Sonnet 5.5
+and GPT-6.1 Sol (gbrain-evals
+`docs/benchmarks/2026-10-08-memory-trust-results-paid.md`). With labels shown,
+the stricter protections below cut no measurable attack success, so they
+are opt-in. Removing the labels raised attack success, which is why labels
+stay on.
+
+## Stricter protections (opt-in)
+
+```bash
+gbrain config set write_gate.external_mode quarantine   # hold instruction-like external content out of memory until you release it
+gbrain config set trust.agent_activation suppress       # keep flagged agent-written items out of proactive context until you confirm them
+```
+
+With quarantine, an instruction-like external write is held: it is not
+searchable and not injected until you release it (`gbrain trust release`).
+With suppress, flagged items are still returned by explicit search, recall
+and `get_page`, labeled, but hook context, the context engine,
+`context_pack` and volunteer leave them out until you confirm them in
+`gbrain trust review`. `write_gate.external_mode reject` refuses such writes
+outright. `gbrain trust disable --all` turns every protection off; labels
+stay.
+
+## Older memory
+
+Content saved before this release is flagged only after you claim your
+sources and run the scan. Older rows have no provenance, so they read as
+"unverified origin". On a long-lived brain that is most rows, including your
+own notes and synced code repositories. gbrain never scans them on its own.
+Doctor, `gbrain post-upgrade` and the behavior-change notice tell you the
+commands to run.
 
 ## Claim your sources (once, after upgrading)
 
@@ -87,8 +118,9 @@ gbrain trust scan
 
 The scan runs the write gate's deterministic detector over older rows at
 "written by an agent" or below. It records a receipt for each instruction-like
-row. It never deletes, moves or rewrites anything, but flagged rows stop
-reaching proactive context until you confirm them. Doctor's `trust_scan`
+row. It never deletes, moves or rewrites anything. Flagged rows carry their
+flag wherever they are read, and with `trust.agent_activation suppress` they
+stop reaching proactive context until you confirm them. Doctor's `trust_scan`
 check therefore leaves it to you (`fix.next: tell_user_to_run`): no agent
 starts it.
 Claim your own sources first, so your notes are not treated as unverified.

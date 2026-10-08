@@ -11,6 +11,11 @@
  * `beforeStep` and a caller-supplied `brain` are the mutation-probe seam
  * (test/brainbench-trust-mutations.serial.test.ts): break one protection,
  * rerun, and the gated metric must breach.
+ *
+ * The protection cells run on a brain with the owner's opt-in protections on
+ * (quarantine, suppress). Poisoning fixtures also run on a default-mode brain
+ * (flag, allow: the shipped defaults since the paid eval) and add its
+ * `default_*` metrics to the poisoning cell (metrics/poisoning.ts).
  */
 
 import { operationsByName } from '../../core/operations.ts';
@@ -18,8 +23,8 @@ import { createTrustBrain, runTrustSteps, type RunTrustStepsOpts, type TrustBrai
 import { emptyTrustCounts, scoreTrustFixture, trustMetrics, type SuiteScore, type TrustSuiteCounts } from './metrics/trust.ts';
 import { emptyStateCounts, scoreStateFixture, stateMetrics, type StateSuiteCounts } from './metrics/state-resolution.ts';
 import {
-  emptyPoisonCounts, observePoisonDurability, poisonMetrics, scorePoisonFixture,
-  type PoisonSuiteCounts, type ProactiveCapture,
+  emptyPoisonCounts, emptyPoisonDefaultCounts, observePoisonDefault, observePoisonDurability, poisonDefaultMetrics, poisonMetrics,
+  scorePoisonDefaultFixture, scorePoisonFixture, type PoisonDefaultCounts, type PoisonSuiteCounts, type ProactiveCapture,
 } from './metrics/poisoning.ts';
 import { deletionMetrics, emptyDeletionCounts, scoreDeletionFixture, type DeletionSuiteCounts } from './metrics/deletion.ts';
 import {
@@ -43,13 +48,15 @@ export interface TrustAgg {
   deletion: TrustCellAgg<DeletionSuiteCounts>;
   /** Poisoning activation is per harness (each seam's proactive surfaces differ). */
   poisoning: Map<HarnessName, TrustCellAgg<PoisonSuiteCounts>>;
+  /** The same poisoning fixtures on a default-mode brain (flag / allow), per harness. */
+  poisoningDefault: Map<HarnessName, TrustCellAgg<PoisonDefaultCounts>>;
   /** Poisoning later-session turn rows (one per harness, source and user turn). */
   turnRows: TurnRow[];
 }
 
 function newTrustAgg(): TrustAgg {
   const cell = <C>(counts: C): TrustCellAgg<C> => ({ counts, gold_total: 0, gold_failed: 0, fixtures: [], failed_items: [] });
-  return { trust: cell(emptyTrustCounts()), 'state-resolution': cell(emptyStateCounts()), deletion: cell(emptyDeletionCounts()), poisoning: new Map(), turnRows: [] };
+  return { trust: cell(emptyTrustCounts()), 'state-resolution': cell(emptyStateCounts()), deletion: cell(emptyDeletionCounts()), poisoning: new Map(), poisoningDefault: new Map(), turnRows: [] };
 }
 
 function addScore<C extends object>(agg: TrustCellAgg<C>, fixtureId: string, score: SuiteScore<C>, progress?: (note: string) => void): void {
@@ -119,7 +126,7 @@ export interface RunTrustSuitesOpts {
   harnesses: HarnessName[];
   adapterFor: (h: HarnessName) => Promise<HarnessAdapter>;
   progress?: (note: string) => void;
-  /** Use this brain instead of a fresh one (left open for the caller). */
+  /** Use this brain for the protection cells instead of a fresh one with protections on (left open for the caller). */
   brain?: TrustBrain;
   /** Called before each step of each fixture (mutation probes). */
   beforeStep?: RunTrustStepsOpts['beforeStep'];
@@ -129,7 +136,7 @@ export interface RunTrustSuitesOpts {
 export async function runTrustSuites(fixtures: LoadedFixture[], opts: RunTrustSuitesOpts): Promise<TrustAgg> {
   const agg = newTrustAgg();
   const progress = opts.progress ?? (() => {});
-  const brain = opts.brain ?? await createTrustBrain();
+  const brain = opts.brain ?? await createTrustBrain({ protections: true });
   try {
     for (const lf of fixtures) {
       progress(`trust ${lf.fixture.fixture_id}`);
@@ -137,6 +144,17 @@ export async function runTrustSuites(fixtures: LoadedFixture[], opts: RunTrustSu
     }
   } finally {
     if (!opts.brain) await brain.close();
+  }
+  const poisoning = fixtures.filter(lf => lf.fixture.suites.find(isTrustSuite) === 'poisoning');
+  if (poisoning.length === 0) return agg;
+  const defaults = await createTrustBrain({ protections: false });
+  try {
+    for (const lf of poisoning) {
+      progress(`trust ${lf.fixture.fixture_id} [default mode]`);
+      await runPoisonDefaultFixture(defaults, lf, opts, agg, progress);
+    }
+  } finally {
+    await defaults.close();
   }
   return agg;
 }
@@ -168,6 +186,23 @@ async function runTrustFixture(
   }
 }
 
+/** A poisoning fixture on the default-mode brain: labels and flags on every durable payload, none activated unlabeled. */
+async function runPoisonDefaultFixture(
+  brain: TrustBrain, lf: LoadedFixture, opts: RunTrustSuitesOpts, agg: TrustAgg, progress: (note: string) => void,
+): Promise<void> {
+  const items = lf.gold.trust?.items ?? [];
+  const run = await runTrustSteps(brain, lf.fixture);
+  const id = lf.fixture.fixture_id;
+  const durability = await observePoisonDefault(run, items);
+  const pack = await contextPackFor(run, lf);
+  for (const harness of opts.harnesses) {
+    const { capture } = await captureProactive(run, await opts.adapterFor(harness), lf, pack);
+    const cell = agg.poisoningDefault.get(harness) ?? { counts: emptyPoisonDefaultCounts(), gold_total: 0, gold_failed: 0, fixtures: [], failed_items: [] };
+    addScore(cell, id, scorePoisonDefaultFixture(id, durability, capture), (n) => progress(`${n} [${harness}]`));
+    agg.poisoningDefault.set(harness, cell);
+  }
+}
+
 export function assembleTrustCell(harness: HarnessName, suite: TrustSuite, agg: TrustAgg, seam: SeamKind): SuiteMetrics | null {
   // trust, state-resolution and deletion are harness-independent write/read paths (like write-back):
   // every harness cell carries the same once-computed numbers. Poisoning activation is per seam.
@@ -179,16 +214,19 @@ export function assembleTrustCell(harness: HarnessName, suite: TrustSuite, agg: 
   else if (suite === 'deletion') metrics = deletionMetrics(cell.counts as DeletionSuiteCounts);
   else {
     const rows = agg.turnRows.filter((r) => r.harness === harness);
+    const defaults = agg.poisoningDefault.get(harness);
     metrics = {
       ...poisonMetrics(cell.counts as PoisonSuiteCounts),
+      ...(defaults ? poisonDefaultMetrics(defaults.counts) : {}),
       source_isolation_violations: rows.reduce((n, r) => n + r.cross_source_slugs.length, 0),
       avg_injected_tokens: avg(rows.map((r) => r.injected_tokens)),
     };
   }
+  const defaultCell = suite === 'poisoning' ? agg.poisoningDefault.get(harness) : undefined;
   return {
     suite, harness, seam,
-    gold_total: cell.gold_total,
-    gold_failed: cell.gold_failed,
+    gold_total: cell.gold_total + (defaultCell?.gold_total ?? 0),
+    gold_failed: cell.gold_failed + (defaultCell?.gold_failed ?? 0),
     metrics: Object.fromEntries(Object.entries(metrics).map(([k, v]) => [k, round4(v)])),
     fixtures: [...cell.fixtures],
   };

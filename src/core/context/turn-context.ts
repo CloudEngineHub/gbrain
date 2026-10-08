@@ -586,7 +586,8 @@ async function assemblePack(
           const verdict = (await pageActivationVerdicts(engine, [{ source_id: opts.sourceId, slug: res.card.entity.slug }], policy))
             .get(pageKey({ source_id: opts.sourceId, slug: res.card.entity.slug }));
           if (verdict?.suppressed) acc.withheld++;
-          else if (verdict && !verdict.belowFloor) acc.cards.push(res.card);
+          // Under trust.agent_activation=allow (the default) a flagged entity page stays, labeled unconfirmed.
+          else if (verdict && !verdict.belowFloor) acc.cards.push(verdict.unconfirmed ? { ...res.card, unconfirmed: true as const } : res.card);
         }
       } catch {
         /* fail-soft: skip this entity */
@@ -684,14 +685,14 @@ async function assembleDelta(
           .catch((error: unknown) => {
             if (policy.floor) throw error;
             return new Map(window.map(p => [pageKey({ source_id: opts.sourceId, slug: p.slug }),
-              { tier: 'unknown' as const, origin: { channel: 'unrecorded' }, belowFloor: false, suppressed: false }]));
+              { tier: 'unknown' as const, origin: { channel: 'unrecorded' }, belowFloor: false, suppressed: false, unconfirmed: false }]));
           });
         acc.pages = {
           status: 'ok',
           overflow: pages.length > DELTA_PAGE_FETCH_LIMIT,
           rows: window.flatMap((p) => {
             const v = verdicts.get(pageKey({ source_id: opts.sourceId, slug: p.slug }));
-            return v && !v.belowFloor ? [{ p, trust: trustFields(v.tier, v.origin) }] : [];
+            return v && !v.belowFloor ? [{ p, trust: { ...trustFields(v.tier, v.origin), ...(v.unconfirmed ? { unconfirmed: true as const } : {}) } }] : [];
           }).map(({ p, trust }) => ({
             slug: p.slug,
             source_id: opts.sourceId,

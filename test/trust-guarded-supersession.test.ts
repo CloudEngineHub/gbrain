@@ -44,10 +44,11 @@ const quiet = { info() {}, warn() {}, error() {} };
 
 beforeAll(async () => withEnv({ GBRAIN_HOME: home }, async () => {
   configureGateway({ ...LEGACY_EMBEDDING_CONFIG, env: {} });
-  const lite = new PGLiteEngine(); await lite.connect({}); await lite.initSchema(); engines.push(lite);
+  // Probes the opt-in protections (external quarantine holds); see helpers/trust-protections.ts.
+  const lite = new PGLiteEngine(); await lite.connect({}); await lite.initSchema(); await enableTrustProtections(lite); engines.push(lite);
   if (process.env.DATABASE_URL) {
     const pg = await isolatedPersistencePostgres(process.env.DATABASE_URL);
-    engines.push(pg.engine); closePostgres = pg.close;
+    await enableTrustProtections(pg.engine); engines.push(pg.engine); closePostgres = pg.close;
   }
 }), 120_000);
 afterAll(async () => {
@@ -97,6 +98,7 @@ async function ownerPage(b: Brain, slug: string, body: string) {
 import { withTrustPromotion } from '../src/core/persistence/context.ts';
 import { decideTrustProposal } from '../src/core/trust/decide.ts';
 import { parseTrustProposalRef } from '../src/core/trust/proposals.ts';
+import { enableTrustProtections } from './helpers/trust-protections.ts';
 
 async function confirmFact(b: Brain, id: number) {
   await b.engine.transaction(tx => withCoordinatedWrite(tx, [b.sourceId], () => withTrustPromotion(tx, 'user_confirmed', () =>

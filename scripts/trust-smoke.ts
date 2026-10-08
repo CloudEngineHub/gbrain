@@ -6,7 +6,8 @@
  * (src/eval/brainbench/trust-scenario.ts):
  *
  *   tier stamp     an agent page lands agent_written, an owner-synced page operator_curated
- *   gate verdict   agent instruction-like text is flagged, tool output quarantined or held
+ *   gate verdict   agent instruction-like text is flagged; tool output is flagged under the shipped default
+ *                  (write_gate.external_mode=flag since the paid eval; quarantine is the owner's opt-in)
  *   owner confirm  the owner at a terminal raises an agent fact to user_confirmed; an agent cannot
  *   purge          forget --purge leaves no row anywhere and a re-sync does not bring it back
  *
@@ -55,7 +56,7 @@ async function tierOf(run: TrustFixtureRun, step: string, claim?: string): Promi
 }
 
 export async function runTrustSmoke(): Promise<SmokeCheck[]> {
-  const brain = await createTrustBrain();
+  const brain = await createTrustBrain({ protections: false });
   try {
     const run = await runTrustSteps(brain, SMOKE_FIXTURE);
     const out = (o: { ok: boolean; result?: Record<string, unknown>; code?: string }) => o.ok ? JSON.stringify((o.result as { gate?: unknown })?.gate ?? null) : o.code ?? 'error';
@@ -71,7 +72,7 @@ export async function runTrustSmoke(): Promise<SmokeCheck[]> {
 
     add('gate verdict', 'agent instruction-like fact is flagged', gate('agent_rule') === 'flag', out(step('agent_rule').outcome));
     const tool = step('tool_page').outcome;
-    add('gate verdict', 'tool-output instruction-like page is quarantined', gate('tool_page') === 'quarantine', out(tool));
+    add('gate verdict', 'tool-output instruction-like page is flagged (the default)', gate('tool_page') === 'flag', out(tool));
 
     const agentConfirm = step('agent_confirm').outcome;
     add('owner confirm', 'an agent connection cannot confirm', !agentConfirm.ok && agentConfirm.code === 'insufficient_scope', out(agentConfirm));

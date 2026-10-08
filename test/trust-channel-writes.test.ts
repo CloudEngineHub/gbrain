@@ -42,6 +42,7 @@ import { claimWorktree } from '../src/core/persistence/ownership.ts';
 import { performManagedSync } from '../src/core/persistence/sync-run.ts';
 import { renderFactsTable } from '../src/core/facts-fence.ts';
 import { runSetTrust } from '../src/commands/sources-trust.ts';
+import { enableTrustProtections } from './helpers/trust-protections.ts';
 
 const engines: BrainEngine[] = [];
 const home = mkdtempSync(join(tmpdir(), 'gbrain-trust-channel-'));
@@ -50,10 +51,11 @@ const quiet = { info() {}, warn() {}, error() {} };
 
 beforeAll(async () => withEnv({ GBRAIN_HOME: home }, async () => {
   configureGateway({ ...LEGACY_EMBEDDING_CONFIG, env: {} });
-  const lite = new PGLiteEngine(); await lite.connect({}); await lite.initSchema(); engines.push(lite);
+  // Probes the opt-in protections (external quarantine holds); see helpers/trust-protections.ts.
+  const lite = new PGLiteEngine(); await lite.connect({}); await lite.initSchema(); await enableTrustProtections(lite); engines.push(lite);
   if (process.env.DATABASE_URL) {
     const pg = await isolatedPersistencePostgres(process.env.DATABASE_URL);
-    engines.push(pg.engine); closePostgres = pg.close;
+    await enableTrustProtections(pg.engine); engines.push(pg.engine); closePostgres = pg.close;
   }
 }), 120_000);
 afterAll(async () => {

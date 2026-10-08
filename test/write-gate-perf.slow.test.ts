@@ -149,7 +149,7 @@ describe('write gate p95 (assessment + receipt insert)', () => {
     if (quiet.length) expect(Math.min(...quiet.map(r => r.gate.p95))).toBeLessThan(BUDGET_MS);
     else console.log(`[write-gate perf] absolute ${BUDGET_MS} ms check skipped for load: reference p95 above ${(QUIET_REFERENCE_P95_MS * QUIET_TOLERANCE).toFixed(2)} ms in every round`);
     const [{ verdict }] = await engine.executeRaw<{ verdict: string }>('SELECT verdict FROM write_gate_receipts');
-    expect(verdict).toBe('quarantine');
+    expect(verdict).toBe('flag'); // the shipped default (write_gate.external_mode=flag since the paid eval); quarantine costs the same assessment and receipt
   }, 120_000);
 
   test('300 KB of agent-instruction-dense docs (worst realistic prose) is reported', async () => {

@@ -285,7 +285,7 @@ async function activationNote(engine: BrainEngine, tier: TrustTier, gate: TrustE
   const label = trustLabel(tier);
   const flagged = gate.receipts.some(r => r.verdict === 'flag' && r.reason_families.some(f => ACTIVATION_FAMILIES.includes(f)));
   const lowTier = !['user_confirmed', 'operator_curated', 'tool_observed'].includes(tier);
-  const mode = await engine.getConfig('trust.agent_activation') ?? 'suppress';
+  const mode = await engine.getConfig('trust.agent_activation') ?? 'allow';
   if (lowTier && flagged && mode !== 'allow') {
     return `Withheld from proactive surfaces (hook user-prompt context, context engine, context_pack, volunteer) until you confirm it; returned on explicit query, search, recall and get_page labeled "${label}".`;
   }

@@ -29,11 +29,13 @@ import { loadCoreBlock } from '../src/core/core-memory.ts';
 import { runTrustScan, readTrustScanState } from '../src/core/eligibility/scan.ts';
 import { explainTrust } from '../src/core/eligibility/explain.ts';
 import { withEnv } from './helpers/with-env.ts';
+import { enableTrustProtections } from './helpers/trust-protections.ts';
 
 let engine: PGLiteEngine;
 const home = mkdtempSync(join(tmpdir(), 'gbrain-elig-'));
 const env = { GBRAIN_HOME: home, GBRAIN_AUDIT_DIR: home };
-beforeAll(async () => { engine = new PGLiteEngine(); await engine.connect({}); await engine.initSchema(); });
+// These probe the opt-in protections (external quarantine, proactive suppression); see helpers/trust-protections.ts.
+beforeAll(async () => { engine = new PGLiteEngine(); await engine.connect({}); await engine.initSchema(); await enableTrustProtections(engine); });
 afterAll(async () => { await engine.disconnect(); rmSync(home, { recursive: true, force: true }); });
 
 const op = (name: string) => operations.find(o => o.name === name)!;

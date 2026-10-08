@@ -32,6 +32,12 @@ export interface ActivationVerdict {
   belowFloor: boolean;
   /** Withheld by activation control (counted in the suppression notice). */
   suppressed: boolean;
+  /**
+   * Carries an instruction-family write-gate flag the owner has not confirmed, whatever the policy:
+   * under `trust.agent_activation=allow` (the default) a kept row is injected with the
+   * "unconfirmed, agent-written" label, so it never reaches proactive context unlabeled.
+   */
+  unconfirmed: boolean;
 }
 
 const TABLE_SQL: Readonly<Record<EligibilityTable, string>> = {
@@ -44,15 +50,16 @@ export async function activationVerdicts(engine: Exec, refs: readonly Activation
   const byTable = new Map<EligibilityTable, number[]>();
   for (const r of refs) if (Number.isFinite(r.id)) byTable.set(r.table, [...(byTable.get(r.table) ?? []), r.id]);
   for (const [table, ids] of byTable) {
-    const suppressedExpr = policy.suppressFlagged ? activationSuppressedSql(table, 'a') : 'false';
-    const rows = await engine.executeRaw<{ id: number | string; trust_tier: string; suppressed: boolean }>(
-      `SELECT a.id, a.trust_tier, ${suppressedExpr} AS suppressed FROM ${TABLE_SQL[table]} a WHERE a.id = ANY($1::bigint[])`, [[...new Set(ids)]]);
+    const rows = await engine.executeRaw<{ id: number | string; trust_tier: string; flagged: boolean }>(
+      `SELECT a.id, a.trust_tier, ${activationSuppressedSql(table, 'a')} AS flagged FROM ${TABLE_SQL[table]} a WHERE a.id = ANY($1::bigint[])`, [[...new Set(ids)]]);
     for (const row of rows) {
       const tier = storedTrustTier(row.trust_tier);
+      const flagged = row.flagged === true;
       out.set(`${table}:${Number(row.id)}`, {
         tier,
         belowFloor: policy.floor ? !admitsTrust(tier, policy.floor) : false,
-        suppressed: row.suppressed === true,
+        suppressed: policy.suppressFlagged === true && flagged,
+        unconfirmed: flagged,
       });
     }
   }
@@ -60,7 +67,8 @@ export async function activationVerdicts(engine: Exec, refs: readonly Activation
 }
 
 export interface ActivationPartition<T> {
-  kept: Array<{ item: T; tier: TrustTier }>;
+  /** `unconfirmed`: the kept row carries an unconfirmed instruction-family flag; render its label. */
+  kept: Array<{ item: T; tier: TrustTier; unconfirmed: boolean }>;
   /** Items activation control withheld (authorized for an explicit read, not for injection). */
   withheld: number;
 }
@@ -84,7 +92,7 @@ export async function partitionForActivation<T>(
     const v = verdicts.get(`${ref.table}:${ref.id}`);
     if (!v || v.belowFloor) continue;
     if (v.suppressed) { withheld++; continue; }
-    kept.push({ item, tier: v.tier });
+    kept.push({ item, tier: v.tier, unconfirmed: v.unconfirmed });
   }
   return { kept, withheld };
 }
@@ -121,14 +129,15 @@ export async function pageActivationVerdicts(engine: Exec, keys: readonly PageKe
   Promise<Map<string, ActivationVerdict & { origin: unknown }>> {
   const out = new Map<string, ActivationVerdict & { origin: unknown }>();
   if (keys.length === 0) return out;
-  const suppressedExpr = policy.suppressFlagged ? activationSuppressedSql('pages', 'a') : 'false';
-  const rows = await engine.executeRaw<{ source_id: string; slug: string; trust_tier: string; write_origin: unknown; suppressed: boolean }>(
-    `SELECT a.source_id, a.slug, a.trust_tier, a.write_origin, ${suppressedExpr} AS suppressed FROM pages a
+  const rows = await engine.executeRaw<{ source_id: string; slug: string; trust_tier: string; write_origin: unknown; flagged: boolean }>(
+    `SELECT a.source_id, a.slug, a.trust_tier, a.write_origin, ${activationSuppressedSql('pages', 'a')} AS flagged FROM pages a
       WHERE a.deleted_at IS NULL AND (a.source_id, a.slug) IN (SELECT * FROM unnest($1::text[], $2::text[]))`,
     [keys.map(k => k.source_id), keys.map(k => k.slug)]);
   for (const row of rows) {
     const tier = storedTrustTier(row.trust_tier);
-    out.set(pageKey(row), { tier, origin: row.write_origin, belowFloor: policy.floor ? !admitsTrust(tier, policy.floor) : false, suppressed: row.suppressed === true });
+    const flagged = row.flagged === true;
+    out.set(pageKey(row), { tier, origin: row.write_origin, belowFloor: policy.floor ? !admitsTrust(tier, policy.floor) : false,
+      suppressed: policy.suppressFlagged === true && flagged, unconfirmed: flagged });
   }
   return out;
 }
