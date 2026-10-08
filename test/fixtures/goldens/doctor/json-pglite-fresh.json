@@ -1750,6 +1750,11 @@
               "unknown": 0,
               "user_confirmed": 0
             },
+            "derived": {
+              "external_pct": 0,
+              "external_untrusted": 0,
+              "rows": 0
+            },
             "rows": 0,
             "tables": [
               {
@@ -1916,7 +1921,7 @@
         },
         {
           "category": "brain",
-          "message": "1 retrieval-affecting file(s) changed since HEAD: src/core/operations.ts. Re-run `gbrain eval run-all` after committing these changes.",
+          "message": "No retrieval-affecting files changed in working tree.",
           "name": "eval_drift",
           "status": "ok"
         },

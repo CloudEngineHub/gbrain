@@ -202,3 +202,21 @@ export function declaredWriteTrust(declaration: DerivationDeclaration | null, ce
 export function isExternalTier(tier: TrustTier): boolean {
   return compareTrust(tier, 'external_untrusted') <= 0;
 }
+
+/**
+ * CEO-24 diagnostic (never gated): how many derived rows (those whose
+ * `write_origin` carries `taint_inputs`) are stamped external_untrusted, across
+ * facts, takes, timeline entries and pages. One scan per table, like the tier
+ * counts beside it in doctor.
+ */
+export async function readDerivedTaintShare(engine: Sql): Promise<{ rows: number; external_untrusted: number; external_pct: number }> {
+  let rows = 0, external = 0;
+  for (const table of ['facts', 'takes', 'timeline_entries', 'pages'] as const) {
+    const [row] = await engine.executeRaw<{ derived: number | string; external: number | string }>(
+      `SELECT count(*) FILTER (WHERE write_origin ? 'taint_inputs') AS derived,
+              count(*) FILTER (WHERE write_origin ? 'taint_inputs' AND trust_tier = 'external_untrusted') AS external FROM ${table}`);
+    rows += Number(row?.derived ?? 0);
+    external += Number(row?.external ?? 0);
+  }
+  return { rows, external_untrusted: external, external_pct: rows === 0 ? 0 : Math.round((external / rows) * 10_000) / 100 };
+}

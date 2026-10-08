@@ -167,8 +167,8 @@ are stored. Names, operations and times are joined at read time by
 [write attribution](../mcp/ADMIN.md#write-attribution). `get_versions` returns
 attribution only to trusted local and `admin` callers. A NULL request with a
 principal is a maintenance write; all NULL is `unrecorded`: written before
-attribution existed or by one of the three writers listed under "unattributed"
-below. Attribution names the creator and the last writer; it is not an audit
+attribution existed (older releases also left `gbrain extract` timeline walks,
+meeting timeline extraction and enrichment unattributed). Attribution names the creator and the last writer; it is not an audit
 log of every write in between.
 
 Nothing is inferred for older rows. `gbrain repair attribution-backfill` fills
@@ -195,14 +195,12 @@ start `unrecorded`; version history is not copied).
   whole run. A row such a writer changes keeps its creator and moves its last
   writer. The maintenance principal is the local CLI registration
   (`local_cli`), else this host's identity (`application`, `host:<id>`), else
-  `host:unregistered`: attribution never creates an identity file. Only the
-  three writers listed under "unattributed" below write without an actor.
+  `host:unregistered`: attribution never creates an identity file. No direct
+  writer is left unattributed.
 
 Agents: treat `NULL` attribution on an unmanaged brain as "written before
-attribution existed or by `gbrain extract`, meeting timeline extraction or
-enrichment", not as evidence of tampering. To get attribution for those
-writers now, run the work on a managed brain or through a journaled
-operation. When you add a direct writer, run it in
+attribution existed, or before `gbrain extract`, meeting timeline extraction
+and enrichment were attributed (#5575)", not as evidence of tampering. When you add a direct writer, run it in
 `maintenanceTransaction(engine, fn)` (`persistence/attribution.ts`) or route it
 through the coordinator, then update these lists with the count
 `test/write-attribution-legacy.test.ts` reports. The test compares both lists
@@ -214,7 +212,7 @@ Attributed (inside a request, a coordinated scope or `maintenanceTransaction`,
 or a physical projection that leaves attribution untouched):
 
 <!-- write-attribution-covered:start -->
-- `src/commands/extract-conversation-facts.ts` (3): the conversation fact index writes through `writeDerivedFacts`: one `maintenanceTransaction` on unmanaged brains, `withDerivedFactsWrite` on managed brains.
+- `src/commands/extract-conversation-facts.ts` (2): the conversation fact index's audit rows write through `writeDerivedFacts` (one `maintenanceTransaction` on unmanaged brains, `withDerivedFactsWrite` on managed brains); its extracted rows go through `insertDerivedFacts` (`persistence/derived-facts.ts`), which stamps the page's taint and runs the write gate.
 - `src/commands/extract-timeline-db.ts` (2): `gbrain extract timeline --source db` commits one `maintenanceTransaction` per 100-row batch on unmanaged brains; managed brains publish per page through a maintenance request.
 - `src/commands/migrate-engine.ts` (5): engine copy keeps the source rows' attribution values verbatim.
 - `src/commands/sync/holds.ts` (1): a full sync's move of a held rename (`updateSlug` and its `source_path`) runs in one `maintenanceTransaction`; managed sources publish renames through the sync request preparer.
@@ -228,7 +226,9 @@ or a physical projection that leaves attribution untouched):
 - `src/core/cycle/extract-atoms-page-state.ts` (1): the atom completion stamp runs in `maintenanceTransaction`.
 - `src/core/cycle/extract-atoms.ts` (1): stale atom retirement soft-deletes in 500-page `maintenanceTransaction` chunks.
 - `src/core/cycle/extract-facts.ts` (7): the unmanaged page reconcile and the expiry of fence facts whose page was soft-deleted run in `maintenanceTransaction`; managed brains write through `withDerivedFactsWrite`.
-- `src/core/cycle/extract-takes.ts` (2): coordinated per page on managed brains; the unmanaged batch upsert runs in `maintenanceTransaction`.
+- `src/core/enrichment-service.ts` (2): the enrichment stub fallback write and its auto-timeline entry run in `maintenanceTransaction` at the source page's derived tier (the stub import is lowered to it afterwards).
+- `src/core/extract-timeline-from-meetings.ts` (1): each meeting timeline batch runs in `maintenanceTransaction`, one meeting tier per batch.
+- `src/core/cycle/extract-takes.ts` (1): one projected-takes writer stamps each page's tier and runs the write gate: coordinated per page on managed brains, one `maintenanceTransaction` per page tier for the unmanaged batch upsert.
 - `src/core/cycle/grade-takes.ts` (1): unmanaged take auto-resolution runs in `maintenanceTransaction`; managed brains publish a `takes_resolve` request.
 - `src/core/cycle/phantom-redirect.ts` (3): the unmanaged phantom fact move, canonical body refresh and phantom soft delete run in `maintenanceTransaction`; the managed redirect moves facts inside its coordinated write.
 - `src/core/cycle/phases/consolidate.ts` (4): unmanaged consolidation's take insert or re-promotion, consolidation marks and valid_until writeback run in one `derivedMaintenanceTransaction` per cluster at the cluster's derived tier; managed brains submit a maintenance consolidation request.
@@ -244,6 +244,7 @@ or a physical projection that leaves attribution untouched):
 - `src/core/facts/relink-publish.ts` (2): `relink_facts` request preparer.
 - `src/core/facts/unfenced-facts.ts` (2): the cycle and v0.32.2 fence of `row_num`-NULL facts: a maintenance request on managed brains; the unmanaged body mirror and row-number stamp run in `maintenanceTransaction`.
 - `src/core/facts/withdrawal.ts` (1): runs inside the `forget` request's coordinated write.
+- `src/core/trust/timeline-projection.ts` (2): `gbrain extract` timeline walks (file, incremental, stale) and the per-entry fallback write through it: one `maintenanceTransaction` per page tier.
 - `src/core/facts/write-single.ts` (2): the legacy single-fact insert and its supersession link each run in `maintenanceTransaction`; managed brains publish through the fact request.
 - `src/core/import-file.ts` (11): direct markdown, code and image imports, the moved-file rename (`updateSlug`) and the #3694 legacy-hash re-stamp run in `maintenanceTransaction`; managed imports go through the page request preparer.
 - `src/core/minions/handlers/ingest-capture.ts` (1): the capture ingest tombstone soft delete runs in `maintenanceTransaction`.
@@ -256,7 +257,7 @@ or a physical projection that leaves attribution untouched):
 - `src/core/persistence/canonical-projections.ts` (7): fence projection inside the request's publication.
 - `src/core/persistence/connector-google-receipts.ts` (2): request preparer.
 - `src/core/persistence/connector-sync.ts` (2): connector publication inside `withCoordinatedWrite`.
-- `src/core/persistence/derived-facts.ts` (1): `withDerivedFactsWrite` (managed derived facts); `writeDerivedFacts` runs legacy writers in `maintenanceTransaction` on unmanaged brains.
+- `src/core/persistence/derived-facts.ts` (1): `withDerivedFactsWrite` (managed derived facts); `writeDerivedFacts` runs legacy writers in `maintenanceTransaction` on unmanaged brains; the gated conversation fact insert stamps the page's taint.
 - `src/core/persistence/facts-prepare.ts` (3): managed `extract_facts` request preparer.
 - `src/core/persistence/file-repair.ts` (2): `managed_file_repair` request preparer (#5988).
 - `src/core/persistence/grandfather.ts` (2): request preparer.
@@ -287,14 +288,12 @@ or a physical projection that leaves attribution untouched):
 - `src/core/timeline-write-through.ts` (2): the timeline write-through's page row splice and entry insert run in one `maintenanceTransaction`.
 <!-- write-attribution-covered:end -->
 
-Unattributed (on unmanaged brains these write with `NULL` attribution). These
-three writers share the link-extraction and mention-linking code, and they are
-routed together with that code's rework:
+Unattributed (on unmanaged brains these would write with `NULL` attribution).
+The list is empty: `gbrain extract` timeline walks, enrichment and meeting
+timeline extraction run as tiered derivers since #5575 (I2). A new writer
+that cannot be attributed yet is declared here:
 
 <!-- write-attribution-unattributed:start -->
-- `src/commands/extract.ts` (4): `gbrain extract` timeline walks (file, incremental, stale) and the per-entry fallback.
-- `src/core/enrichment-service.ts` (2): enrichment page and auto-timeline entry.
-- `src/core/extract-timeline-from-meetings.ts` (1): meeting timeline batch.
 <!-- write-attribution-unattributed:end -->
 
 ## The privacy boundary
