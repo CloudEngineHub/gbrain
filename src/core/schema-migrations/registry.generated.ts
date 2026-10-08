@@ -220,7 +220,9 @@ import { v216 } from './v216-chronicle-campaign-stamps.ts';
 import { v217 } from './v217-persistence-request-claim-phase.ts';
 import { v218 } from './v218-purge-legacy-worktree-manifest-files.ts';
 import { v219 } from './v219-pages-reconcile-name-indexes.ts';
+import { v230 } from './v230-trust-tiers.ts';
 import { v231 } from './v231-write-gate.ts';
+import { v232 } from './v232-memory-purge.ts';
 
 // Array order is historical (see HISTORICAL_ARRAY_ORDER in the generator); the
 // runner sorts by version before applying.
@@ -439,5 +441,7 @@ export const MIGRATIONS: Migration[] = [
   v217,
   v218,
   v219,
+  v230,
   v231,
+  v232,
 ];

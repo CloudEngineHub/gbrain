@@ -3,7 +3,6 @@ import { suffixedFrontmatterSlugHold } from './persistence/suffixed-slug.ts';
 import { maintenanceTransaction } from './persistence/attribution.ts';
 import { assertImportBase, sameCanonicalImport, sameContentAnyKeyOrder } from './page-state/import-guard.ts';
 import { stabilizeSafetyAssessments } from './persistence/reconcile-safety.ts';
-import { settleGateOwnedMarkers } from './quarantine-override.ts';
 import { decideImportIdentity, collidingSlugOwner, fileOriginUri } from './import-identity.ts';
 import { readSourceFileSync } from './minions/source-filesystem.ts';
 import { readFileSync, statSync, lstatSync } from 'fs';
@@ -11,7 +10,7 @@ import { basename, extname, resolve } from 'path';
 import { createHash } from 'crypto';
 import type { BrainEngine, FileSpec } from './engine.ts';
 import { classifyImportHold, parseMarkdown, resolveParsedSubtype, type ParseOpts, type ParsedMarkdown } from './markdown.ts';
-import { MAX_FILE_SIZE, screenImportContent, settleContentDisposition, type ContentRefusal, type FenceScreen } from './import-screen.ts';
+import { MAX_FILE_SIZE, screenImportContent, settleContentDisposition, stripGateOwnedMarkers, type ContentRefusal, type FenceScreen } from './import-screen.ts';
 import type { WriteGateInput } from './write-gate.ts';
 import { applyImportFences } from './fence-repair/import-step.ts';
 import type { FenceIssueWire } from './fence-repair/tier1.ts';
@@ -292,20 +291,16 @@ export async function importFromContent(
     source_kind?: string | null;
     source_uri?: string | null;
     ingested_via?: string | null;
-    /**
-     * v0.42 (#1699 trust boundary). When `true` (untrusted caller — remote MCP
-     * put_page), gate-owned frontmatter markers (`quarantine`, `content_flag`,
-     * `embed_skip`) are STRIPPED from the incoming content before the content-
-     * sanity gate runs, so only the gate itself can set them. Without this, a
-     * write-scoped OAuth client could `put_page` clean content carrying a
-     * hand-crafted `quarantine` marker to hide arbitrary pages from search, or
-     * a `content_flag.detail` to inject text into the agent-trusted warning
-     * channel. `put_page` passes `ctx.remote !== false` (fail-closed: anything
-     * not strictly local is untrusted, matching the v0.26.9 F7b posture).
-     * Local/trusted callers (sync, capture, dream, `quarantine clear/scan`)
-     * leave it unset → markers preserved (the gate + CLI own them).
-     */
+    /** Untrusted caller (remote MCP put_page: `ctx.remote !== false`); drives the remote fence merge and hidden rows. */
     remote?: boolean;
+    /**
+     * #1699/#6259: gate-owned markers (`quarantine`, `content_flag`, `embed_skip`,
+     * `atoms_scan_hash`, `quarantine_override`) are stripped from incoming content
+     * unless an owner-tier path (owner sync/import, reindex, file repair,
+     * reconcile, cycle derivers, `quarantine clear/scan`) sets this
+     * (`stripGateOwnedMarkers`, import-screen.ts). Local put_page does not.
+     */
+    preserveGateMarkers?: boolean;
     /**
      * Threaded to `tx.putPage` as its empty-overwrite escape hatch (the
      * engine refuses to blank a non-empty body otherwise). Only two callers
@@ -348,8 +343,8 @@ export async function importFromContent(
   parsed.compiled_truth = sanitizeText(parsed.compiled_truth);
   parsed.timeline = sanitizeText(parsed.timeline);
 
-  // #1699 trust boundary: only the gate and trusted local callers set gate-owned markers (quarantine-override.ts).
-  settleGateOwnedMarkers(parsed, opts.remote === true);
+  // #1699/#6259 trust boundary: only the gate and owner-tier paths keep gate-owned markers (import-screen.ts).
+  stripGateOwnedMarkers(parsed, opts);
 
   // Vendor-neutral guardrail seam (observe-only, fail-open). Runs AFTER
   // parseMarkdown and the size guard, BEFORE content-sanity, hash compute,
@@ -372,7 +367,7 @@ export async function importFromContent(
   });
 
   // Content-sanity (#1699) and write-gate (#5575) disposition before the hash (import-screen.ts).
-  const disposition = await settleContentDisposition(engine, parsed, { slug, sourceId, remote: opts.remote === true, ...(opts.writeGate ? { writeGate: opts.writeGate } : {}) });
+  const disposition = await settleContentDisposition(engine, parsed, { slug, sourceId, stripped: opts.preserveGateMarkers !== true, ...(opts.writeGate ? { writeGate: opts.writeGate } : {}) });
   const { quarantined: pageQuarantined, flagged: pageFlagged, flagReason: pageFlagReason } = disposition;
 
   // v0.39.3.0 CV8 — DB content_hash excludes timestamp-bearing frontmatter
@@ -1138,7 +1133,7 @@ export async function importFromFile(
   // filename `2024-03-15`.
   const fileBasename = basename(relativePath, '.md');
   const imported = await importFromContent(engine, resolvedSlug, content, {
-    ...opts,
+    ...opts, preserveGateMarkers: true,
     filename: fileBasename,
     sourcePath: relativePath,
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- walks up from the caller's own file path by the depth of its own relative path to recover the import root; import-identity confines every probe under that root

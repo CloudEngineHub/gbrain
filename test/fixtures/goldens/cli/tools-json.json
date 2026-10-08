@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 208650,
-    "stdoutSha256": "85819a6dd610e66bca99074a566a435bb0d29f352391b90b3ef306e17407fbb9",
+    "stdoutBytes": 213467,
+    "stdoutSha256": "83e5d4ddae14a328b39704f90910d02986cbe8106e72174266310f705ccb4561",
     "toolNames": [
       "remember",
       "entity",
@@ -138,6 +138,9 @@
       "context_pack",
       "delta",
       "forget_fact",
+      "purge_fact",
+      "list_page_purges",
+      "unpurge_page",
       "find_contradictions",
       "find_experts",
       "find_trajectory",
@@ -361,7 +364,7 @@
         "scope": "write"
       },
       {
-        "description": "Read a page by slug (fuzzy optional; renamed slugs redirect). To edit, pass include_content:true and send `content` to put_page, or use edit_page. Timeline rows need include_timeline_entries.",
+        "description": "Read a page by slug. To edit, pass include_content:true and send `content` to put_page, or use edit_page.",
         "idempotent": true,
         "local_only": false,
         "mutating": false,
@@ -371,6 +374,7 @@
           "fuzzy": "boolean?",
           "include_content": "boolean?",
           "include_deleted": "boolean?",
+          "include_quarantined": "boolean?",
           "include_timeline_entries": "boolean?",
           "slug": "string",
           "source_id": "string?"
@@ -392,6 +396,10 @@
             },
             "include_deleted": {
               "description": "Include soft-deleted pages.",
+              "type": "boolean"
+            },
+            "include_quarantined": {
+              "description": "Admin: quarantined body.",
               "type": "boolean"
             },
             "include_timeline_entries": {
@@ -773,7 +781,8 @@
         "mutating": false,
         "name": "fetch",
         "parameters": {
-          "id": "string"
+          "id": "string",
+          "include_quarantined": "boolean?"
         },
         "required_scopes": [],
         "schema": {
@@ -781,6 +790,10 @@
             "id": {
               "description": "Opaque result id from a prior `search` call. Pass unchanged. Unambiguous legacy slugs are also accepted.",
               "type": "string"
+            },
+            "include_quarantined": {
+              "description": "Admin: quarantined body.",
+              "type": "boolean"
             }
           },
           "required": [
@@ -2249,7 +2262,7 @@
         "scope": "admin"
       },
       {
-        "description": "Admin read: who created and who last changed a page, or one of its facts, takes or timeline entries. Each attribution names the request id, operation, principal (kind, id, current name), time and origin (request, maintenance or unrecorded). Remote callers stay inside their source grant and see only world facts.",
+        "description": "Admin read: who created and who last changed a page, or one of its facts, takes or timeline entries. Each attribution names the request id, operation, principal (kind, id, current name), time and origin (request, maintenance or unrecorded), plus the row's trust_tier and write_origin (for derived rows, the inputs that set the tier). Remote callers stay inside their source grant and see only world facts.",
         "idempotent": true,
         "local_only": false,
         "mutating": false,
@@ -5631,6 +5644,134 @@
           "type": "object"
         },
         "scope": "write"
+      },
+      {
+        "description": "Owner-only, trusted local CLI on the brain host (`gbrain forget <id> --purge`). Removes a fact's claim from every live store the deletion inventory sweeps (fact rows, verbatim takes, fence rows in page bodies and versions, chunks, stored write intents, review rows), blocks it from returning (text-free tombstone), hides model-derived rows for re-derivation, and returns a receipt listing residuals first. Not a mode of forget: forget expires, purge deletes. dry_run returns the receipt and a confirmation token; a real run needs confirm equal to that token. Purge removes content from live stores; it never claims physical erasure.",
+        "idempotent": true,
+        "local_only": false,
+        "mutating": true,
+        "name": "purge_fact",
+        "parameters": {
+          "all_subjects": "boolean?",
+          "confirm": "string?",
+          "dry_run": "boolean?",
+          "expected_revision": "string?",
+          "id": "number?",
+          "match": "string?",
+          "reason": "string?",
+          "request_id": "string?",
+          "source_id": "string?",
+          "status": "boolean?",
+          "vacuum": "boolean?"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "all_subjects": {
+              "description": "Purge the same claim about every entity in the source (default: only the fact's own entity, like forget).",
+              "type": "boolean"
+            },
+            "confirm": {
+              "description": "The confirmation token from the dry run (first 8 hex of the claim fingerprint).",
+              "type": "string"
+            },
+            "dry_run": {
+              "description": "Return the receipt with would-remove counts and the confirmation token; changes nothing.",
+              "type": "boolean"
+            },
+            "expected_revision": {
+              "description": "The expected_revision from the dry run; refuses when the target set changed since.",
+              "type": "string"
+            },
+            "id": {
+              "description": "Fact id to purge (from recall or remember).",
+              "type": "number"
+            },
+            "match": {
+              "description": "List candidate fact ids whose text contains this; never purges.",
+              "type": "string"
+            },
+            "reason": {
+              "description": "Optional short reason stored in the text-free purge ledger.",
+              "type": "string"
+            },
+            "request_id": {
+              "description": "UUID; retry with it on timeout.",
+              "type": "string"
+            },
+            "source_id": {
+              "description": "Source holding the fact (default: the routed source).",
+              "type": "string"
+            },
+            "status": {
+              "description": "Report the stored receipt and completion of the purge named by request_id.",
+              "type": "boolean"
+            },
+            "vacuum": {
+              "description": "PGLite only: VACUUM the touched tables after the purge.",
+              "type": "boolean"
+            }
+          },
+          "required": [],
+          "type": "object"
+        },
+        "scope": "admin"
+      },
+      {
+        "description": "Owner-only (`gbrain pages purges list`). Lists page purge tombstones: slug, content hash prefix, request and time. Never returns content.",
+        "idempotent": true,
+        "local_only": false,
+        "mutating": false,
+        "name": "list_page_purges",
+        "parameters": {
+          "limit": "number?",
+          "source_id": "string?"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "limit": {
+              "description": "Maximum rows (default 100).",
+              "type": "number"
+            },
+            "source_id": {
+              "description": "Limit to one source.",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        },
+        "scope": "admin"
+      },
+      {
+        "description": "Owner-only (`gbrain pages unpurge <slug>`). Clears the purge tombstones recorded for a slug so the same content can be imported again. Restores nothing.",
+        "idempotent": true,
+        "local_only": false,
+        "mutating": true,
+        "name": "unpurge_page",
+        "parameters": {
+          "slug": "string",
+          "source_id": "string?"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "slug": {
+              "description": "Slug of the purged page.",
+              "type": "string"
+            },
+            "source_id": {
+              "description": "Source of the purged page (default: the routed source).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "slug"
+          ],
+          "type": "object"
+        },
+        "scope": "admin"
       },
       {
         "description": "Stored contradiction reports are temporarily available only to trusted local callers without a source filter. Remote or source-scoped callers receive {contradictions: [], note} with an availability note. For eligible local callers, return suspected-contradiction findings from the most recent `gbrain eval suspected-contradictions` probe run, optionally filtered by slug and/or severity. Use this when the user asks 'what's inconsistent in my brain', 'show me contradictions about Acme', 'high-severity issues only', or wants to act on the probe's findings without re-running it. Returns {contradictions: [{a, b, severity, axis, confidence, resolution_command}]}. An eligible read loads the stored run without triggering a new probe; users run `gbrain eval suspected-contradictions` for that.",

@@ -23,6 +23,7 @@
 import { createHash } from 'node:crypto';
 import type { Action } from './agent-output.ts';
 import { opError, type OperationError } from './ops/contract.ts';
+import { isTrustTier, type TrustTier } from './trust/tier.ts';
 import { MAX_MATCH_CHARS, MAX_PRECEDING_CHARS, WRITE_GATE_PATTERNS, WRITE_GATE_REASON_FAMILIES, type WriteGatePattern, type WriteGateReasonFamily } from './write-gate-patterns.ts';
 
 export type { WriteGateReasonFamily } from './write-gate-patterns.ts';
@@ -30,9 +31,9 @@ export type { WriteGateReasonFamily } from './write-gate-patterns.ts';
 /** Bumped whenever the pattern table changes meaning; stored on every receipt and hold. */
 export const WRITE_GATE_DETECTOR_VERSION = 1;
 
-/** The trust-tier vocabulary (#5575 A1), highest first. Must match `trust/tier.ts`. */
-export const WRITE_GATE_TIERS = ['user_confirmed', 'operator_curated', 'tool_observed', 'agent_written', 'unknown', 'external_untrusted'] as const;
-export type WriteGateTier = typeof WRITE_GATE_TIERS[number];
+/** The trust-tier vocabulary lives in `trust/tier.ts`; the gate takes the effective tier the writer computed there. */
+export { TRUST_TIERS as WRITE_GATE_TIERS } from './trust/tier.ts';
+export type WriteGateTier = TrustTier;
 
 export type WriteGateVerdict = 'allow' | 'flag' | 'quarantine' | 'reject';
 export type WriteGateExternalMode = 'quarantine' | 'flag' | 'reject' | 'off';
@@ -54,7 +55,10 @@ export interface WriteGateOrigin {
   ingested_via?: string | null;
 }
 
-/** What a caller passes to gate one write. Absent on a write path means the gate does not run there. */
+/**
+ * What a caller passes to gate one write (a `trust/tier.ts` `WriteTrust` fits as is). Absent on a write
+ * path means the gate does not run there.
+ */
 export interface WriteGateInput {
   tier: WriteGateTier;
   origin?: WriteGateOrigin | null;
@@ -113,9 +117,7 @@ export function parseWriteGateConfig(raw: { external_mode?: unknown; agent_mode?
   };
 }
 
-export function isWriteGateTier(value: unknown): value is WriteGateTier {
-  return typeof value === 'string' && (WRITE_GATE_TIERS as readonly string[]).includes(value);
-}
+export const isWriteGateTier: (value: unknown) => value is WriteGateTier = isTrustTier;
 
 /** True when a write at `tier` is assessed under `cfg` (owner tiers and `off` modes are not). */
 export function writeGateApplies(tier: WriteGateTier, cfg: WriteGateConfig): boolean {

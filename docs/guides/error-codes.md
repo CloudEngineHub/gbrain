@@ -912,7 +912,7 @@ More: [docs/guides/write-refusals.md#facts_absorb_write_refused](../../docs/guid
 |---|---|---|---|---|---|---|
 | A page write queued no automatic fact extraction; the receipt's `facts_backstop.skipped` reason says why (a `kind:<type>` reason names a page type that is not extracted). | A capability this request needs is not configured or not reachable on this brain. | Nothing failed. `opted_out` means the page frontmatter sets `facts_backstop: false`; remove that line and save the page to extract it. Run: gbrain get --source '{source_id}' -- '{slug}' | agent | `gbrain doctor --json` | 1 | no |
 
-Reasons: `opted_out`, `body_unchanged`, `extraction_disabled`, `dream_generated`, `subagent_namespace`, `too_short`, `no_parsed_page`, `slug_bound_client`, `operation_bound_client`, `not_imported`, `backstop_error`.
+Reasons: `opted_out`, `quarantined`, `body_unchanged`, `extraction_disabled`, `dream_generated`, `subagent_namespace`, `too_short`, `no_parsed_page`, `slug_bound_client`, `operation_bound_client`, `not_imported`, `backstop_error`.
 
 More: [docs/guides/concurrent-writes.md#facts-backstop](../../docs/guides/concurrent-writes.md#facts-backstop)
 
@@ -1942,6 +1942,26 @@ More: [docs/guides/repair.md#projection-owner-resident](../../docs/guides/repair
 |---|---|---|---|---|---|---|
 | The catalog adoption is accepted but not fully committed. | A temporary condition (a lock, a pending write, a rate limit); the same request can succeed later. | Wait briefly, then retry the same request (writes: reuse the same request_id). | agent | `repeat the read that failed` | 1 | yes |
 
+### purge_blocked_pending_recovery
+
+<a id="purge_blocked_pending_recovery"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A purge was refused because a pending, running or recovering write still needs the content it would remove; nothing was purged. | Purge redacts stored write intents and rewrites pages; doing that under an unfinished publication or recovery would lose or resurrect content. | Wait for the named write to finish or recover (gbrain write-request <id>), then retry the purge with the same request id. | agent | `repeat the read that failed` | 1 | yes |
+
+More: [docs/guides/memory-boundaries.md#purge](../../docs/guides/memory-boundaries.md#purge)
+
+### purged_content
+
+<a id="purged_content"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The content matches a purged fact, take or page in this source, so it was not saved. | A purge leaves a text-free tombstone (the claim fingerprint or the page content hash) so stale files, re-syncs, reverts and re-extraction cannot bring purged content back. | Do not retry the same content. Write it in new words if it is still true, or ask the user to clear the tombstone on the brain host (gbrain pages purges list, then gbrain pages unpurge <slug> for a page). | agent | `repeat the read that failed` | 1 | no |
+
+More: [docs/guides/memory-boundaries.md#purge](../../docs/guides/memory-boundaries.md#purge)
+
 ### queue_capacity
 
 <a id="queue_capacity"></a>
@@ -2515,6 +2535,14 @@ More: [docs/guides/data-ingestion.md#credential-redaction](../../docs/guides/dat
 | Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
 |---|---|---|---|---|---|---|
 | Dream triage did not re-judge a transcript because its last judge verdict was truncated, refused or unparseable and its backoff has not ended. | An unreliable verdict is never cached, so without a backoff the same input was paid for every cycle; it waits 24h, doubling per repeat up to 7 days, and a content or triage-model change re-judges at once. | Leave it (it is retried after the backoff), or ask the user before `gbrain dream retriage --force`, which re-judges every transcript now and pays per file. Run: gbrain dream retriage --dry-run --json | agent | `repeat the read that failed` | 1 | yes |
+
+### trust_raise_refused
+
+<a id="trust_raise_refused"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A write tried to raise the trust tier of a fact, take, page or timeline entry without the owner's confirmation, so nothing was changed. | Only the owner can make memory more trusted: confirming on an interactive terminal, or through a connection that holds the memory_confirm scope. The database refuses any other raise so a bug or an agent write cannot promote its own content. | Do not retry. Ask the user to confirm the row themselves on the brain host (gbrain trust confirm <ref>), or leave its tier as it is. | user | `repeat the read that failed` | 3 | no |
 
 ### trusted_local_only
 

@@ -105,11 +105,11 @@ describe('importFromContent with opts.writeGate', () => {
     expect(detector_error).toBe(true);
   });
 
-  test('a stale instruction_like marker is dropped when the gate allows the new content; no writeGate keeps today\'s behavior', async () => {
+  test('on a marker-preserving path, a stale instruction_like marker is dropped when the gate allows the new content; no writeGate keeps it', async () => {
     const stale = "quarantine:\n  reason: instruction_like\n  detail: write gate\n  assessed_at: '2026-01-01T00:00:00.000Z'\n";
-    await importFromContent(engine, 'notes/kept', page('Clean body now.', stale), { sourceId: 'default', noEmbed: true });
+    await importFromContent(engine, 'notes/kept', page('Clean body now.', stale), { sourceId: 'default', noEmbed: true, preserveGateMarkers: true });
     expect(isQuarantined((await pageRow('notes/kept')).page.frontmatter)).toBe(true);
-    await importFromContent(engine, 'notes/cleared', page('Clean body now.', stale), { sourceId: 'default', noEmbed: true, writeGate: ext });
+    await importFromContent(engine, 'notes/cleared', page('Clean body now.', stale), { sourceId: 'default', noEmbed: true, preserveGateMarkers: true, writeGate: ext });
     expect(isQuarantined((await pageRow('notes/cleared')).page.frontmatter)).toBe(false);
   });
 

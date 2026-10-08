@@ -23,6 +23,7 @@ import {
   type WriteGateAssessment, type WriteGateConfig, type WriteGateTier, type WriteGateVerdict,
 } from './write-gate.ts';
 import { WRITE_GATE_REASON_FAMILIES, type WriteGateReasonFamily } from './write-gate-patterns.ts';
+import { minTrust } from './trust/tier.ts';
 
 export type WriteGateScanTable = 'pages' | 'facts' | 'takes' | 'timeline_entries';
 export const WRITE_GATE_SCAN_TABLES: readonly WriteGateScanTable[] = ['pages', 'facts', 'takes', 'timeline_entries'];
@@ -75,15 +76,10 @@ export interface WriteGateScanOptions {
 
 type Exec = Pick<BrainEngine, 'executeRaw'>;
 
-const TIER_RANK: Readonly<Record<WriteGateTier, number>> = {
-  user_confirmed: 5, operator_curated: 4, tool_observed: 3, agent_written: 2, unknown: 1, external_untrusted: 0,
-};
-
 /** Lowest of the present signals; `unknown` when none. */
 export function projectTier(signals: ReadonlyArray<string | null | undefined>): WriteGateTier {
-  const tiers = signals.filter(isWriteGateTier);
-  if (!tiers.length) return 'unknown';
-  return tiers.reduce((low, t) => TIER_RANK[t] < TIER_RANK[low] ? t : low);
+  const [first, ...rest] = signals.filter(isWriteGateTier);
+  return first ? minTrust(first, ...rest) : 'unknown';
 }
 
 /** Page-level signal on alias `pg` (with sources alias `src`): connector/webhook/clipper -> external, agent channels -> agent. */
