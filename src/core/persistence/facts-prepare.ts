@@ -19,6 +19,8 @@ import type { WriteRequest } from './model.ts';
 import type { ManagedFactIntent, FrozenExtractedFact } from './facts-maintenance.ts';
 import { assertManagedFactsEmbedding } from './facts-maintenance.ts';
 import { normalizeTargetFences } from '../fence-repair/import-step.ts';
+import { fenceAppendPendingTier, withPendingFenceRows } from '../eligibility/fence-overlay.ts';
+import { withPageTierKept } from '../trust/fence-append.ts';
 import { pageFencesNormalized } from '../fence-repair/report.ts';
 
 const requestFix = (row: WriteRequest): Action => row.principal_kind === 'local_cli'
@@ -159,8 +161,11 @@ export async function prepareManagedFactsMutation(engine: BrainEngine, row: Writ
   }
   let page: PreparedMutation | undefined;
   if (snapshot && entries.some(entry => entry.rowNum !== undefined)) {
-    page = await preparePageMutation(engine, { ...row, intent: { ...p,
-      content: serializePageToMarkdown({ ...snapshot.page, compiled_truth: body, timeline: target!.page.timeline }, snapshot.tags) } }, config);
+    // #5575 ENG-1: the appended rows have no facts rows yet; their chunks are cut at the append's tier.
+    const rowNums = entries.flatMap(entry => entry.rowNum === undefined ? [] : [entry.rowNum]);
+    page = await withPendingFenceRows({ sourceId: row.source_id, slug: row.slug, rowNums, tier: fenceAppendPendingTier() },
+      () => preparePageMutation(engine, { ...row, intent: { ...p,
+        content: serializePageToMarkdown({ ...snapshot.page, compiled_truth: body, timeline: target!.page.timeline }, snapshot.tags) } }, config));
     if (page.observedRevision !== snapshot.revision) throw factsRefusal('revision_conflict', 'The fact entity changed during preparation.', row,
       `Entity page ${row.slug} changed while its ## Facts table was being prepared, so none of these facts were published.`);
   }
@@ -176,7 +181,7 @@ export async function prepareManagedFactsMutation(engine: BrainEngine, row: Writ
           `A matching fact in source ${row.source_id} was added or retired before publication, so the deduplication decision for ${row.slug} is stale and none of these facts were published.`);
       }
     }, apply: async tx => {
-      await page?.apply(tx);
+      if (page) await withPageTierKept(tx, { sourceId: row.source_id, slug: row.slug }, () => page!.apply(tx));
       const ids: number[] = [];
       let inserted = 0;
       let superseded = 0;
