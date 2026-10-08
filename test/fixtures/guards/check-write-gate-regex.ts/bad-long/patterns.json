@@ -1,7 +1,7 @@
 [
   {
     "name": "long",
-    "source": "\\bsend[^.]{0,200}[^.]{0,200}to\\b",
+    "source": "\\bsend[^.]{0,170}[^.]{0,170}[^.]{0,170}to\\b",
     "anchors": [
       "send"
     ]
