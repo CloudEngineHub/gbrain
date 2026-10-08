@@ -1767,6 +1767,11 @@
               "unknown": 0,
               "user_confirmed": 0
             },
+            "derived": {
+              "external_pct": 0,
+              "external_untrusted": 0,
+              "rows": 0
+            },
             "rows": 0,
             "tables": [
               {

@@ -317,7 +317,7 @@ const think: Operation = {
     if (remote && (Boolean(p.save) || Boolean(p.take))) ctx.emitNotice?.(thinkNotSavedNotice());
     const { recordThinkAnswer, feedbackMetaFields } = await import('../feedback/record.ts');
     const feedbackMeta = feedbackMetaFields(await recordThinkAnswer(ctx, 'think', result));
-    delete result.feedback_evidence;
+    delete result.feedback_evidence; delete result.taint_refs;
     const { persist: _persist, ...visible } = result;
     return {
       ...visible,
