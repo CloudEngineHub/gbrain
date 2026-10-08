@@ -399,7 +399,7 @@ const delete_page: Operation = {
       }
       return { dry_run: true, action: p.purge === true ? 'purge_page' : 'delete_page', slug: p.slug };
     }
-    return (await import('../persistence/page-purge.ts')).finishPagePurge(ctx.config, await submitPageMutation(ctx, { operation: 'delete_page', params: p }));
+    return (await import('../persistence/page-purge.ts')).finishPagePurge(ctx, await submitPageMutation(ctx, { operation: 'delete_page', params: p }));
   },
   cliHints: { name: 'delete', positional: ['slug'] },
 };
