@@ -16,14 +16,20 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }));
  */
 function nestedTickDuring<T>(work: () => Promise<T>[]): Promise<T[]> {
   let nested = false;
+  // Resolved with the tick's own promise, so it settles when the tick has run.
+  let tick!: (done: unknown) => void;
+  const ticked = new Promise(resolve => { tick = resolve; });
+  const exits: Promise<number>[] = [];
   for (let i = 0; i < 20; i++) {
-    Bun.spawn(['true'], { stdio: ['ignore', 'ignore', 'ignore'], onExit() {
+    exits.push(Bun.spawn(['true'], { stdio: ['ignore', 'ignore', 'ignore'], onExit() {
       if (nested) return;
       nested = true;
-      void expect(Bun.sleep(1)).resolves.toBeUndefined();
-    } });
+      tick(expect(Bun.sleep(1)).resolves.toBeUndefined());
+    } }).exited);
   }
-  return Promise.all(work());
+  // Settle only after the re-entrant tick and every child: one that fires later lands in the next test
+  // and drops that test's child events instead.
+  return Promise.all([Promise.all(work()), ticked, ...exits]).then(([results]) => results);
 }
 
 function within<T>(ms: number, promise: Promise<T>): Promise<T | 'unsettled'> {
