@@ -215,7 +215,7 @@ export function contentRefusalFromReceipt(code: string | null | undefined, messa
   const typed = CONTENT_REFUSAL_CODES.has(code!) ? code as ContentRefusal['code']
     : /^Invalid YAML frontmatter/.test(text) ? 'invalid_frontmatter'
     : /slug/.test(text) ? 'frontmatter_slug_conflict'
-    : /PAGE_JUNK_PATTERN/.test(text) ? 'content_rejected' : 'file_too_large';
+    : /PAGE_JUNK_PATTERN/.test(text) ? 'content_rejected' : /which the owner purged/.test(text) ? 'purged_content' : 'file_too_large';
   const reason = typed !== 'invalid_frontmatter' ? undefined
     : /ambiguous protected key/.test(text) ? 'ambiguous_protected_key' as const
     : /ambiguous identity key/.test(text) ? 'ambiguous_identity_key' as const
@@ -224,17 +224,19 @@ export function contentRefusalFromReceipt(code: string | null | undefined, messa
   const suggestion = typed === 'invalid_frontmatter' ? `The content itself was refused, so resubmitting it unchanged refuses again. Correct ${where}: one line per key with its whole value quoted, then submit the corrected content with a new request_id.`
     : typed === 'frontmatter_slug_conflict' ? 'The content declares a slug that conflicts with its path. Remove the `slug:` line or make it match, then submit with a new request_id.'
     : typed === 'content_rejected' ? 'The content-sanity gate rejects this content under the operator\'s junk_disposition=reject setting. Remove the matched junk, then submit with a new request_id.'
+    : typed === 'purged_content' ? 'This content was purged by the owner and stays out of the brain. Do not resubmit it; write new content, or ask the user to clear the tombstone on the brain host (gbrain pages unpurge).'
     : 'The content is over the import size limit. Split it into smaller pages, then submit each with its own request_id.';
   return { code: typed, ...(reason ? { reason } : {}), ...(key ? { key } : {}), ...(line !== undefined ? { line } : {}), suggestion };
 }
 
-const CONTENT_REFUSAL_CODES = new Set(['invalid_frontmatter', 'frontmatter_slug_conflict', 'file_too_large', 'content_rejected']);
+const CONTENT_REFUSAL_CODES = new Set(['invalid_frontmatter', 'frontmatter_slug_conflict', 'file_too_large', 'content_rejected', 'purged_content']);
 const LEGACY_CONTENT_MESSAGES: Array<[code: string, pattern: RegExp]> = [
   ['invalid_params', /^Invalid YAML frontmatter(?::| at line \d| in )/],
   ['invalid_params', /^The frontmatter slug "[^"\n]*" in [^\n]+ conflicts with its path, which expects slug "[^"\n]*"\./],
   ['invalid_params', /^Frontmatter slug "[^"\n]*" does not match path-derived slug "[^"\n]*"/],
   ['invalid_params', /^Content too large \(\d+ bytes, max \d+\)/],
   ['invalid_params', /^File too large \(/],
+  ['invalid_params', /^[^\n]+ carries the content of page [^\n]+, which the owner purged; it was not imported\.$/],
   ['invalid_params', /^Code file too large \(\d+ bytes\)/],
   ['request_too_large', /^Sync file exceeds the bounded import size\.$/],
   ['storage_error', /^Publication failed \(PAGE_JUNK_PATTERN\)\. Inspect owner diagnostics\.$/],
