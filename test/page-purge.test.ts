@@ -20,6 +20,8 @@ import { _resetWriteThroughCacheForTest } from '../src/core/write-through.ts';
 import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
 import { TEST_WRITE_ATTRIBUTION } from './helpers/write-attribution.ts';
 import { withEnv } from './helpers/with-env.ts';
+import { screenImportContent } from '../src/core/import-screen.ts';
+import { readPagePurgeTombstones } from '../src/core/persistence/page-purge.ts';
 
 let engine: PGLiteEngine;
 let storageDir: string;
@@ -92,6 +94,9 @@ describe('page purge', () => {
     await runExtractFacts(engine, { slugs: [SLUG] });
     await purgePage();
     expect(await errorText(importFromContent(engine, SLUG, CONTENT, { noEmbed: true, sourceId: 'default' }))).toContain('purged_content');
+    // The prefetched tombstones match the stale file's own bytes, so sync holds it at screen time.
+    const screen = screenImportContent({ content: CONTENT, path: `${SLUG}.md`, purgedPages: await readPagePurgeTombstones(engine, 'default') });
+    expect(screen.status === 'refused' && screen.refusal.code).toBe('purged_content');
     expect(await errorText(importFromContent(engine, 'notes/renamed-copy', CONTENT, { noEmbed: true, sourceId: 'default' }))).toContain('purged_content');
     expect(await errorText(call('put_page', { slug: SLUG, content: CONTENT, request_id: randomUUID() }))).toContain('purged_content');
     await importFromContent(engine, 'notes/edited', CONTENT.replace('AKIA-EXAMPLE-NOT-REAL', 'rotated'), { noEmbed: true, sourceId: 'default' });

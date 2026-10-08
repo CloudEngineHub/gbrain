@@ -15,6 +15,7 @@ import { withQuarantineOverride } from './quarantine-override.ts';
 import { loadOperatorLiterals } from './content-sanity-literals.ts';
 import { classifyImportHold, contentSizeHold, parseMarkdown, type ContentHold, type ParseOpts, type ParsedMarkdown } from './markdown.ts';
 import { isCodeFilePath } from './sync.ts';
+import { contentHash } from './utils.ts';
 import { opError, type OperationError } from './ops/contract.ts';
 import type { Action } from './agent-output.ts';
 import { fenceFixText, fenceLocationFromMessage, fenceRefusal } from './fence-repair/refusal.ts';
@@ -80,7 +81,7 @@ export function assessImportSanity(page: Pick<ParsedMarkdown, 'compiled_truth' |
  * with its location-only `fence`.
  */
 export interface ContentRefusal extends Omit<ContentHold, 'code' | 'reason'> {
-  code: ContentHold['code'] | 'content_rejected' | 'invalid_fence';
+  code: ContentHold['code'] | 'content_rejected' | 'invalid_fence' | 'purged_content';
   reason?: ContentHold['reason'] | FenceReason;
   fence?: FenceMessageLocation;
   /** #6188 (D18): every issue that blocks the write, location and class only. */
@@ -137,6 +138,8 @@ export interface ImportScreenInput {
   fences?: 'coordinated' | 'lenient';
   /** #6188: `fences.normalize`; false treats a fixable fence as residual. Default true. */
   normalize?: boolean;
+  /** #5575: the source's page purge tombstones (content hash -> purged slug), prefetched by the caller. */
+  purgedPages?: ReadonlyMap<string, string>;
 }
 
 export type ImportScreenResult =
@@ -158,6 +161,9 @@ export function screenImportContent(input: ImportScreenInput): ImportScreenResul
   const parsed = parseMarkdown(input.content, input.path, { validate: true, ...(input.activePack ? { activePack: input.activePack } : {}) });
   const hold = classifyImportHold(parsed, { expectedSlug: input.expectedSlug, slugExempt: input.slugExempt, slugConflictMessage: input.slugConflictMessage });
   if (hold) return { status: 'refused', refusal: hold };
+  const purgedAs = input.purgedPages?.size ? input.purgedPages.get(contentHash(parsed)) : undefined;
+  if (purgedAs !== undefined) return { status: 'refused', refusal: { code: 'purged_content',
+    message: `${input.path} carries the content of page ${purgedAs}, which the owner purged; it was not imported.` } };
   let fences: FenceScreen | undefined;
   if (input.fences) {
     const before = { compiled_truth: parsed.compiled_truth, timeline: parsed.timeline ?? '' };
