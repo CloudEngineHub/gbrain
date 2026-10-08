@@ -1,6 +1,6 @@
 {
   "golden": {
-    "count": 215,
+    "count": 217,
     "gaps": [
       17,
       18,
@@ -15,9 +15,7 @@
       226,
       227,
       228,
-      229,
-      230,
-      231
+      229
     ],
     "helpers": {
       "ALIAS_TABLES": "cddd37c636af42d862c08ca7754a57dfe9d12576b769fa8f74a5f02c803f67a0",
@@ -2242,8 +2240,8 @@
         "idempotent": true,
         "name": "durable_concurrent_persistence",
         "sql": {
-          "length": 10185,
-          "sha256": "5c29e2ba0eed52dbab814e8bb2e99eda48c9ccd26f4d97f2274adc5c1712a8b7"
+          "length": 10481,
+          "sha256": "b8b1d396e74ec20db357eec5d2937d28d22530f3b47ad261e1ae1681b81a7d1e"
         },
         "sqlFor": "absent",
         "transaction": "absent",
@@ -2307,8 +2305,8 @@
         "idempotent": true,
         "name": "managed_alias_and_source_checkpoint_guards",
         "sql": {
-          "length": 5336,
-          "sha256": "0791cfc72706a9fad3c32e54842d1aa1238a57172425e552134517421223c675"
+          "length": 5632,
+          "sha256": "7cdd67f6734a0f3963b243420d4c0097700d756339e86b36dd8a19a39a20b0b2"
         },
         "sqlFor": "absent",
         "transaction": "absent",
@@ -2466,8 +2464,8 @@
         "idempotent": true,
         "name": "fact_embedding_identity",
         "sql": {
-          "length": 5481,
-          "sha256": "a9418ca9a8c10990b77eddc16e2e38eee1ba77d53e802936247c94eccadacff7"
+          "length": 5777,
+          "sha256": "9b2ba4919832da41e48e8688bb31c24ea2d27197b9143cde1077b7701621ea40"
         },
         "sqlFor": "absent",
         "transaction": "absent",
@@ -2865,8 +2863,8 @@
         "idempotent": true,
         "name": "take_embedding_identity",
         "sql": {
-          "length": 5481,
-          "sha256": "98409b6776bdc98d65db3bff2afce7adb9ecb34bab5ddf8bd364e528ee4f4eea"
+          "length": 5777,
+          "sha256": "f859485119a29379245109e95303a7de53584c023633f38d0287804138b00282"
         },
         "sqlFor": "absent",
         "transaction": "absent",
@@ -2878,8 +2876,8 @@
         "idempotent": true,
         "name": "f1_write_attribution",
         "sql": {
-          "length": 14327,
-          "sha256": "b33d4cab4dd9f1bed8e7847e800b632c7c6b1ac800c19ddf12d176f83b8b0cd0"
+          "length": 14623,
+          "sha256": "ad09591c350cddb3d863c3d36c8b6784b41dafc526cf9eb3023504eec7f8e1c6"
         },
         "sqlFor": "absent",
         "transaction": "absent",
@@ -2936,8 +2934,8 @@
         "idempotent": true,
         "name": "managed_guard_null_source_fallback",
         "sql": {
-          "length": 4838,
-          "sha256": "d42aecea4f34cc10bdc8201268a284c353d71e389d423c4891a4953a26eaf3c0"
+          "length": 5134,
+          "sha256": "6d014f2104fe4f938d470329a75320f13a1a0153f21076f315ba6c85e6f84d04"
         },
         "sqlFor": "absent",
         "transaction": "absent",
@@ -2949,8 +2947,8 @@
         "idempotent": true,
         "name": "publication_failure_detail",
         "sql": {
-          "length": 4929,
-          "sha256": "7eed76362cdf4a94019b53229c4fa56c88be9aea371db497d6614ea5eba3cd7a"
+          "length": 5225,
+          "sha256": "8e6bd0354bd0334b1dd3fb443c1a92d3e1397ffbf3162c4eea6dbd03fbf12da3"
         },
         "sqlFor": "absent",
         "transaction": "absent",
@@ -3270,6 +3268,32 @@
       {
         "handler": "absent",
         "idempotent": true,
+        "name": "trust_tiers",
+        "sql": {
+          "length": 20422,
+          "sha256": "b3e7750c08d970c587250a270434dc4e2ac54e3568240b58b9ecc2c4d0168cd9"
+        },
+        "sqlFor": "absent",
+        "transaction": "absent",
+        "verify": "absent",
+        "version": 230
+      },
+      {
+        "handler": "absent",
+        "idempotent": true,
+        "name": "write_gate",
+        "sql": {
+          "length": 2385,
+          "sha256": "0cc73b39636c3ed0345fc7fffbc886f9d7cc5bcab58bd4b7d99a1a4aef102d26"
+        },
+        "sqlFor": "absent",
+        "transaction": "absent",
+        "verify": "absent",
+        "version": 231
+      },
+      {
+        "handler": "absent",
+        "idempotent": true,
         "name": "memory_purge",
         "sql": {
           "length": 5827,
@@ -3496,6 +3520,8 @@
       217,
       218,
       219,
+      230,
+      231,
       232
     ]
   },

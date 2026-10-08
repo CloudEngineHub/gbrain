@@ -138,9 +138,10 @@ function syncContentRefusal(refusal: ContentRefusal, row: WriteRequest, p: SyncI
     : refusal.code === 'file_too_large' ? `${p.sourcePath} is over the import size limit; split it into smaller files or add it to sync.exclude, then commit.`
     : refusal.code === 'content_rejected' ? `The content-sanity gate rejects ${p.sourcePath} under junk_disposition=reject; remove the matched junk and commit.`
     : refusal.code === 'purged_content' ? `${p.sourcePath} still carries purged content; delete or edit the file and commit, or the owner clears the tombstone with gbrain pages unpurge.`
+    : refusal.code === 'write_gate_rejected' ? `The write gate refuses ${p.sourcePath}: external instruction-like content under write_gate.external_mode=reject. Tell the user; changing that setting or the file is their decision.`
     : `Fix ${where} (one line per key, the whole value quoted) and commit the change; gbrain repair frontmatter --source ${row.source_id} previews the exact line fix and writes it only after the preview hash is approved.`;
   const error = syncPublicationRefusal(refusal.code, refusal.message, row, p, cause, false, {
-    ...(refusal.code === 'content_rejected' ? {} : { legacy_error: 'invalid_params' }),
+    ...(refusal.code === 'content_rejected' || refusal.code === 'write_gate_rejected' ? {} : { legacy_error: 'invalid_params' }),
     ...(refusal.reason ? { reason: refusal.reason } : {}),
     ...(refusal.key || refusal.line !== undefined ? { detail: [refusal.key ? `key ${refusal.key}` : '', refusal.line !== undefined ? `line ${refusal.line}` : ''].filter(Boolean).join(', ') } : {}),
   });
