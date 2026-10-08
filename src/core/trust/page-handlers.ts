@@ -242,7 +242,7 @@ async function publishOwnerPage(engine: BrainEngine, input: PageActionInput, int
       if ((await tx.readPageSnapshot(input.slug, { sourceId: input.sourceId }))?.revision !== input.expectedRevision) {
         throw changedSincePreview(pageRef(input.sourceId, input.slug), intent.mode === 'confirm' ? 'its confirmation' : 'the revert');
       }
-      await importFromContent(tx, input.slug, markdown, { sourceId: input.sourceId, noEmbed: true, forceRechunk: intent.mode === 'revert', allowEmptyOverwrite: intent.mode === 'revert' });
+      await importFromContent(tx, input.slug, markdown, { sourceId: input.sourceId, noEmbed: true, preserveGateMarkers: intent.mode === 'confirm', forceRechunk: intent.mode === 'revert', allowEmptyOverwrite: intent.mode === 'revert' });
       await closeProposal(tx, intent.proposal, input.by);
     }))));
 }
@@ -290,17 +290,18 @@ export async function prepareTrustOwnerPageMutation(engine: BrainEngine, row: Wr
   const state = await readPageTrustState(engine, row.source_id, row.slug);
   if (!state || state.revision !== intent.expected_revision) throw changedSincePreview(ref, intent.mode === 'confirm' ? 'its confirmation' : 'the revert');
   let content: string;
+  let tags: string[] | undefined;
   let tier: TrustTier = 'user_confirmed';
   if (intent.mode === 'revert') {
     const version = Number.isSafeInteger(intent.version_id) ? await readPageVersion(engine, state.pageId, intent.version_id!) : null;
     if (!version) throw opError('not_found', `Version ${String(intent.version_id)} is not in the history of ${ref}.`, `List versions with gbrain history ${row.slug}.`);
     content = versionMarkdown(state.snapshot, version);
+    tags = version.tags ?? undefined;
     tier = versionTier(version);
   } else content = markdownWithoutMarker(state.snapshot);
+  // The request keeps its own operation, so page-prepare stamps no CEO-21 marker and files no lower_page item for it.
   const { preparePageMutation } = await import('../persistence/page-prepare.ts');
-  const page = await preparePageMutation(engine, { ...row, operation: intent.mode === 'revert' ? 'revert_version' : 'put_page',
-    intent: { ...(intent as unknown as Record<string, unknown>), version_id: intent.version_id } }, config,
-    intent.mode === 'revert' ? undefined : { content, expectedRevision: intent.expected_revision });
+  const page = await preparePageMutation(engine, row, config, { content, expectedRevision: intent.expected_revision, ...(tags ? { tags } : {}) });
   const apply = page.apply;
   page.trust = ownerTrust(tier, intent.mode, intent.via);
   page.apply = (tx, preimage) => withTrustPromotion(tx, tier, () => withTrustKeep(tx, FENCE_TABLES, async () => {

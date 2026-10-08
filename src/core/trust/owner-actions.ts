@@ -33,6 +33,7 @@ import {
 } from './page-handlers.ts';
 import { formatTrustRef, pageRef, parseTrustRef, resolvePageRef, type TrustRef } from './refs.ts';
 import { storedTrustTier, trustLabel, type TrustTier } from './tier.ts';
+import { isQuarantined } from '../quarantine.ts';
 import {
   addTrustAllowRule, getTrustAllowRule, normalizeTrustAllowRule, parseAllowRuleRef, principalLabel, removeTrustAllowRule, type TrustAllowRule,
 } from './allow-rules.ts';
@@ -213,6 +214,13 @@ function unsupported(action: OwnerActionName, ref: TrustRef): Error {
     'confirm takes f<id>, t<id>, p:<source>/<slug>, tp<id> or h<id>; drop takes tp<id> or h<id>; release takes h<id>; revert takes tp<id> (an agent-edit item) or a page; allow --remove takes a<id>.');
 }
 
+async function pendingProposal(engine: BrainEngine, id: number): Promise<TrustProposalRow> {
+  const p = await getTrustProposal(engine, id);
+  if (!p) throw notFound(trustProposalRef(id), 'trust proposal');
+  if (p.status !== 'pending') throw opError('invalid_params', `${trustProposalRef(id)} is already ${p.status}; there is nothing to decide.`, 'gbrain trust review lists what is still pending.');
+  return p;
+}
+
 function proposalSummary(p: TrustProposalRow, verb: 'Accept' | 'Dismiss' | 'Revert'): string {
   if (p.action === 'lower_page') {
     const s = lowerPageState(p);
@@ -247,13 +255,16 @@ async function previewConfirm(engine: BrainEngine, ref: TrustRef, input: OwnerAc
     const label = pageRef(sourceId, slug);
     const state = await readPageTrustState(engine, sourceId, slug);
     if (!state) throw notFound(label, 'page');
+    if (isQuarantined(state.snapshot.page.frontmatter)) {
+      throw opError('invalid_params', `${label} is quarantined; confirming it would not make it visible.`,
+        `Review it first; clearing the quarantine is a separate owner step: gbrain quarantine clear ${slug} --source-id ${sourceId}.`);
+    }
     return { action: 'confirm', ref: label, token: hash8(`${label}@${state.revision}`), command: trustCommand('confirm', label),
       raises: state.tier !== 'user_confirmed' || state.hasMarker, binding: state.revision, tier: state.tier, target_tier: 'user_confirmed', revision: state.revision,
       summary: `Raise page ${label} from "${trustLabel(state.tier)}" to "confirmed by you"${state.hasMarker ? ' and remove its trust_tier marker' : ''}` };
   }
   if (ref.kind === 'proposal') {
-    const p = await getTrustProposal(engine, ref.id);
-    if (!p) throw notFound(trustProposalRef(ref.id), 'trust proposal');
+    const p = await pendingProposal(engine, ref.id);
     return { action: 'confirm', ref: trustProposalRef(p.id), token: trustProposalRef(p.id), command: trustCommand('confirm', trustProposalRef(p.id)),
       raises: true, binding: await proposalBinding(engine, p), target_tier: 'user_confirmed', summary: proposalSummary(p, 'Accept') };
   }
@@ -276,8 +287,7 @@ async function previewHold(engine: BrainEngine, id: number, action: 'release' | 
 
 async function previewRevert(engine: BrainEngine, ref: TrustRef, input: OwnerActionInput): Promise<OwnerActionPreview> {
   if (ref.kind === 'proposal') {
-    const p = await getTrustProposal(engine, ref.id);
-    if (!p) throw notFound(trustProposalRef(ref.id), 'trust proposal');
+    const p = await pendingProposal(engine, ref.id);
     if (p.action !== 'lower_page') throw opError('invalid_params', `${trustProposalRef(p.id)} is a ${p.action} proposal; only agent-edit items (lower_page) revert.`, `Use gbrain trust confirm ${trustProposalRef(p.id)} or gbrain trust drop ${trustProposalRef(p.id)}.`);
     const s = lowerPageState(p);
     return { action: 'revert', ref: trustProposalRef(p.id), token: trustProposalRef(p.id), command: trustCommand('revert', trustProposalRef(p.id)),
@@ -315,8 +325,7 @@ export async function previewOwnerAction(engine: BrainEngine, input: OwnerAction
       const ref = requireRef(input);
       if (ref.kind === 'hold') return previewHold(engine, ref.id, 'drop');
       if (ref.kind !== 'proposal') throw unsupported('drop', ref);
-      const p = await getTrustProposal(engine, ref.id);
-      if (!p) throw notFound(trustProposalRef(ref.id), 'trust proposal');
+      const p = await pendingProposal(engine, ref.id);
       return { action: 'drop', ref: trustProposalRef(p.id), token: trustProposalRef(p.id), command: trustCommand('drop', trustProposalRef(p.id)),
         raises: false, binding: await proposalBinding(engine, p), summary: proposalSummary(p, 'Dismiss') };
     }

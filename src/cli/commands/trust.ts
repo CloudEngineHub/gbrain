@@ -1,17 +1,20 @@
 /**
  * `gbrain trust`: the memory-trust noun (#5575, DX-7). This module dispatches
- * `backfill` (A8, DX-5); the other subcommands (review, confirm, release,
- * drop, revert, explain, allow, disable) join the same record. The record is
- * startup: 'observational', so `backfill --dry-run` runs on a probe-only
- * engine with no migrations and no writes; applying completes startup first.
+ * `backfill` (A8, DX-5) and hands the owner subcommands (review, confirm,
+ * release, drop, revert, explain, allow, disable) to src/commands/trust.ts.
+ * The record is startup: 'observational', so `backfill --dry-run` runs on a
+ * probe-only engine with no migrations and no writes; every other subcommand
+ * completes startup first. While a resident serve holds a PGLite brain,
+ * src/cli.ts routes the owner subcommands to it before any engine opens.
  */
 import { jsonRequested, setCliExitVerdict, writeStdoutFinal } from '../../core/cli-force-exit.ts';
 import type { BrainEngine } from '../../core/engine.ts';
 import { TRUST_TIERS, trustLabel } from '../../core/trust/tier.ts';
 import { runTrustBackfill, type TrustBackfillReport } from '../../core/trust/backfill.ts';
 import type { CliDispatchContext } from '../command-table.ts';
+import { TRUST_OWNER_USAGE, isTrustOwnerSubcommand, localTrustBackend, runTrustOwnerCommand } from '../../commands/trust.ts';
 
-export const TRUST_USAGE = [
+export const TRUST_BACKFILL_USAGE = [
   'Usage: gbrain trust backfill [--dry-run] [--resume] [--batch-size N] [--json]',
   '  Classifies rows written before trust tiers (facts, takes, timeline entries, pages) from deterministic signals:',
   '  connector sources, page source_kind, transcript/extraction/dream provenance, facts and takes source tags, and',
@@ -19,6 +22,7 @@ export const TRUST_USAGE = [
   '  "confirmed by you". --dry-run is read-only (no migrations, no writes) and works before the trust migration;',
   '  it reports the projected count per table and tier. --resume continues an interrupted run.',
 ].join('\n');
+export const TRUST_USAGE = `${TRUST_OWNER_USAGE}\n\n${TRUST_BACKFILL_USAGE}`;
 
 function render(report: TrustBackfillReport): string {
   const lines = [`Trust backfill (${report.mode === 'dry_run' ? 'dry run, nothing written' : 'applied'}; schema: ${report.schema}):`];
@@ -33,9 +37,15 @@ function render(report: TrustBackfillReport): string {
 
 export async function run(engine: BrainEngine, args: string[], ctx: CliDispatchContext): Promise<void> {
   const [sub, ...rest] = args;
-  if (!sub || args.includes('--help') || args.includes('-h') || sub !== 'backfill') {
-    console.log(TRUST_USAGE);
-    if (sub && sub !== 'backfill' && !args.includes('--help') && !args.includes('-h')) setCliExitVerdict(2);
+  const known = sub === 'backfill' || isTrustOwnerSubcommand(sub);
+  if (!sub || args.includes('--help') || args.includes('-h') || !known) {
+    console.log(sub === 'backfill' ? TRUST_BACKFILL_USAGE : TRUST_USAGE);
+    if (sub && !known && !args.includes('--help') && !args.includes('-h')) setCliExitVerdict(2);
+    return;
+  }
+  if (sub !== 'backfill') {
+    await ctx.completeStartup?.(engine);
+    await runTrustOwnerCommand(localTrustBackend(engine, ctx.SELECTED_CONFIG_BY_ENGINE.get(engine)), sub, rest);
     return;
   }
   const dryRun = rest.includes('--dry-run');
