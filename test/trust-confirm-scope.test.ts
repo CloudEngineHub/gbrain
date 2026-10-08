@@ -25,6 +25,7 @@ import {
 } from '../src/core/scope.ts';
 import { GRANT_PROFILES, grantFromTokenRow } from '../src/core/grants/model.ts';
 import { resolveGrantProfile } from '../src/core/grants/profiles.ts';
+import { AGENT_WRITE_OPERATIONS } from '../src/core/trust/channel.ts';
 import { mintLegacyToken } from '../src/core/token-mint.ts';
 import { GBrainOAuthProvider } from '../src/core/oauth-provider.ts';
 import { sqlQueryForEngine } from '../src/core/sql-query.ts';
@@ -90,6 +91,18 @@ describe('memory_confirm scope (CEO-6)', () => {
   test('no grant profile carries it', () => {
     for (const profile of GRANT_PROFILES) {
       const patch = resolveGrantProfile({ profile, sourceId: 'default', boundTools: ['search'], boundSlugPrefixes: ['wiki/agents/'] });
+      expect({ profile, confirm: hasScope(patch.scopes ?? [], 'memory_confirm') }).toEqual({ profile, confirm: false });
+    }
+  });
+
+  test('bulk-write grants (full surface, put_pages) cannot confirm or raise a tier', () => {
+    const writer = resolveGrantProfile({ profile: 'memory-writer', sourceId: 'default' });
+    expect(writer.surface).toBe('full');
+    expect(writer.allowedOperations).toContain('put_pages');
+    // put_pages publishes at the agent channel tier; only memory_confirm (never implied) confirms.
+    expect(AGENT_WRITE_OPERATIONS).toContain('put_pages');
+    for (const profile of ['memory-writer', 'coding-agent'] as const) {
+      const patch = resolveGrantProfile({ profile, sourceId: 'default', boundSlugPrefixes: ['wiki/agents/'] });
       expect({ profile, confirm: hasScope(patch.scopes ?? [], 'memory_confirm') }).toEqual({ profile, confirm: false });
     }
   });
