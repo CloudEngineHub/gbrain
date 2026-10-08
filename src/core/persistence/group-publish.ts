@@ -39,7 +39,7 @@ import { principalKey, requestPrincipal, type FileRecoveryRecord, type WriteRequ
 import { CLAIM_LOST, DEFAULT_CLAIM_LEASE_TIMING, endLostLease, startClaimLease, type ClaimLeaseTiming } from './claim-lease.ts';
 import { claimPhaseStamp, enterClaimPhase, startClaimPhase } from './claim-phase.ts';
 import { setMemberAttribution, withCoordinatedWrite } from './context.ts';
-import { requestAttribution } from './attribution.ts';
+import { publicationAttribution, requestAttribution } from './attribution.ts';
 import { tryAcquirePublicationCapacity } from './pool-capacity.ts';
 import { queuePublicationEffects, queuesMentionLinks, reconcileFinishedBatch } from './effect-journal.ts';
 import { assertUnboundPublication, classifyUnboundPage } from './unbound-source.ts';
@@ -183,7 +183,7 @@ export async function publishGroup(engine: BrainEngine, rows: WriteRequest[], pr
             if (persistenceFileHash(file.record.path) !== file.record.beforeHash) throw new OperationError('unexpected_file_bytes', 'The canonical file changed during preparation.', 'The members publish one at a time.');
             await withFilesystemPublication([file.record.root], async () => publishPersistenceFile(member.file!, file.record.staging?.publication?.path));
           }
-          await setMemberAttribution(tx, requestAttribution(row));
+          await setMemberAttribution(tx, publicationAttribution(row, member.trust));
           member.postimage = undefined;
           const outcome = await member.apply(tx, snapshot);
           await classifyUnboundPage(tx, row);

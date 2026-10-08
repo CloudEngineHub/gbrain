@@ -61,6 +61,8 @@ export interface PurgePlan {
   requests: Awaited<ReturnType<typeof findRequestsCarrying>>;
   derived: Awaited<ReturnType<typeof derivedRowsFrom>>;
   reviewRows: number;
+  /** Per review table: rows naming the purged facts (all dropped by the purge). */
+  review: Record<'decide_review_queue' | 'decide_review_proposals' | 'decide_proposals', number>;
   /** A digest of the target set; a confirmation binds to it. */
   revision: string;
 }
@@ -109,15 +111,17 @@ export async function planFactPurge(engine: BrainEngine, target: PurgeTarget, al
   const requests = await findRequestsCarrying(engine, target.source_id, target.fact);
   const inputs: DerivationRef[] = [...factIds.map(id => ({ table: 'facts', id })), ...takes.map(t => ({ table: 'takes', id: t.id }))];
   const derived = await derivedRowsFrom(engine, inputs);
-  const [review] = await engine.executeRaw<{ n: number }>(`SELECT
-    (SELECT count(*) FROM decide_review_queue WHERE source_id=$1 AND (a_ref=ANY($2::text[]) OR b_ref=ANY($2::text[])))
-    + (SELECT count(*) FROM decide_review_proposals WHERE source_id=$1 AND (a_ref=ANY($2::text[]) OR b_ref=ANY($2::text[])))
-    + (SELECT count(*) FROM decide_proposals WHERE source_id=$1 AND (new_fact_id=ANY($3::bigint[]) OR old_fact_id=ANY($3::bigint[]))) AS n`,
+  const [counts] = await engine.executeRaw<{ q: number; rp: number; dp: number }>(`SELECT
+    (SELECT count(*)::int FROM decide_review_queue WHERE source_id=$1 AND (a_ref=ANY($2::text[]) OR b_ref=ANY($2::text[]))) AS q,
+    (SELECT count(*)::int FROM decide_review_proposals WHERE source_id=$1 AND (a_ref=ANY($2::text[]) OR b_ref=ANY($2::text[]))) AS rp,
+    (SELECT count(*)::int FROM decide_proposals WHERE source_id=$1 AND (new_fact_id=ANY($3::bigint[]) OR old_fact_id=ANY($3::bigint[]))) AS dp`,
   [target.source_id, factIds.map(String), factIds]);
+  const review = { decide_review_queue: Number(counts?.q ?? 0), decide_review_proposals: Number(counts?.rp ?? 0), decide_proposals: Number(counts?.dp ?? 0) };
   const { createHash } = await import('node:crypto');
   const revision = createHash('sha256').update(JSON.stringify({ subject, factIds, takes: takes.map(t => t.id),
     pages: pages.map(p => [p.page_id, p.revision]), requests: requests.map(r => r.id) })).digest('hex').slice(0, 16);
-  return { subject, factIds, takes, pages, versions: Number(versions?.n ?? 0), requests, derived, reviewRows: Number(review?.n ?? 0), revision };
+  return { subject, factIds, takes, pages, versions: Number(versions?.n ?? 0), requests, derived,
+    reviewRows: review.decide_review_queue + review.decide_review_proposals + review.decide_proposals, review, revision };
 }
 
 /** Pages with a pending recovery record or an unfinished mirror refuse a purge, as effects refuse other writes. */
@@ -282,7 +286,7 @@ export async function submitPurgeFactMutation(ctx: OperationContext, params: Rec
     return withCoordinatedWrite(tx, [p.sourceId], async () => {
       const plan = committedPlan;
       await assertNoPendingPublication(tx, p.sourceId, plan.pages, admitted.id);
-      const intents = await redactRequestIntents(tx, plan.requests, admitted.id);
+      const intents = await redactRequestIntents(tx, plan.requests, admitted.id, { needles: [current.fact] });
       await tx.lockPageKeys(plan.pages.map(page => ({ sourceId: p.sourceId, slug: page.slug })));
       // Derived rows are hidden while their evidence still exists.
       const derived = await hideDerivedRows(tx, plan.derived.rows, { sourceId: p.sourceId, requestId: admitted.id, reason: `purge:${token}` });
@@ -295,8 +299,16 @@ export async function submitPurgeFactMutation(ctx: OperationContext, params: Rec
       const ids = plan.factIds;
       const review = (await tx.executeRaw(`DELETE FROM decide_review_queue WHERE source_id=$1 AND (a_ref=ANY($2::text[]) OR b_ref=ANY($2::text[])) RETURNING 1`, [p.sourceId, ids.map(String)])).length
         + (await tx.executeRaw(`DELETE FROM decide_review_proposals WHERE source_id=$1 AND (a_ref=ANY($2::text[]) OR b_ref=ANY($2::text[])) RETURNING 1`, [p.sourceId, ids.map(String)])).length
-        + (await tx.executeRaw(`DELETE FROM decide_proposals WHERE source_id=$1 AND (new_fact_id=ANY($2::bigint[]) OR old_fact_id=ANY($2::bigint[])) RETURNING 1`, [p.sourceId, ids])).length;
+        + (await tx.executeRaw(`DELETE FROM decide_proposals WHERE source_id=$1 AND (new_fact_id=ANY($2::bigint[]) OR old_fact_id=ANY($2::bigint[])) RETURNING 1`, [p.sourceId, ids])).length
+        + (await tx.executeRaw(`DELETE FROM trust_proposals WHERE source_id=$1 AND ((target_table='facts' AND target_id=ANY($2::bigint[])) OR (related_table='facts' AND related_id=ANY($2::bigint[]))
+            OR (target_table='takes' AND target_id=ANY($3::bigint[])) OR (related_table='takes' AND related_id=ANY($3::bigint[]))) RETURNING 1`, [p.sourceId, ids, plan.takes.map(t => t.id)])).length;
       const loops = (await tx.executeRaw('DELETE FROM open_loops WHERE source_id=$1 AND fact_id=ANY($2::bigint[]) RETURNING 1', [p.sourceId, ids])).length;
+      // #5575: held writes carrying the claim (fact text or take claim) and the gate receipts naming purged rows or those holds.
+      const holdIds = (await tx.executeRaw<{ id: string }>(`DELETE FROM write_gate_holds WHERE source_id=$1
+          AND gbrain_fact_fingerprint(COALESCE(payload->>'fact', payload->>'claim', ''))=$2 RETURNING id::text AS id`, [p.sourceId, current.fact_hash])).map(r => r.id);
+      const gateReceipts = (await tx.executeRaw(`DELETE FROM write_gate_receipts WHERE (target_table='facts' AND target_id=ANY($1::text[]))
+          OR (target_table='takes' AND target_id=ANY($2::text[])) OR (target_table='write_gate_holds' AND target_id=ANY($3::text[])) RETURNING 1`,
+        [ids.map(String), plan.takes.map(t => String(t.id)), holdIds])).length;
       const proposals = (await tx.executeRaw('DELETE FROM take_proposals WHERE source_id=$1 AND gbrain_fact_fingerprint(claim_text)=$2 RETURNING 1', [p.sourceId, current.fact_hash])).length;
       const notices = (await tx.executeRaw(`UPDATE core_edit_notices SET base_text=NULL WHERE source_id=$1 AND strpos(lower(base_text),$2)>0 RETURNING 1`,
         [p.sourceId, current.fact.toLowerCase()])).length;
@@ -318,6 +330,7 @@ export async function submitPurgeFactMutation(ctx: OperationContext, params: Rec
         targets: pages.map(page => ({ slug: page.slug, page_id: Number(page.id), revision: page.knowledge_revision })) })]);
       counts = { facts, takes, chunks, page_versions: versions.redacted, pages: rewritten.length, persistence_requests: intents,
         query_cache: cache, decide_review: review, open_loops: loops, take_proposals: proposals, core_edit_notices: notices,
+        write_gate_holds: holdIds.length, write_gate_receipts: gateReceipts,
         derived_hidden: Object.values(derived.hidden).reduce((a, b) => a + b, 0) };
       return completeWrite(tx, admitted, 'committed', { purge: { fact_id: p.id, hash8: token, fact_hash: current.fact_hash, subject: plan.subject,
         visibility: current.visibility, removed: counts, derived: { ...derived, truncated: plan.derived.truncated }, pages: rewritten.length },

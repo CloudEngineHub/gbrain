@@ -10,6 +10,7 @@ import { journalLimitKey, oneYearCapacity, readJournalLimits, readReceiptRetenti
 import { retryWriteAdmission } from './admission-retry.ts';
 import { writeHealth, type WriteHealthFacts } from './health.ts';
 import { writerStamp } from './writer-versions.ts';
+import { intentCarriesPurgedContent } from './purged-intent.ts';
 import { publicFailureDetail } from './publication-failure.ts';
 import { catalogueError } from '../error-catalogue.ts';
 import { ACTIVE_REFRESH_STATES_SQL, refreshFenceClear } from './worktree-refresh-schema.ts';
@@ -593,9 +594,17 @@ export async function completeWrite(tx: SqlEngine, row: WriteRequest, state: 'co
     SELECT * FROM done`, [row.id, state, JSON.stringify(outcome), error?.code ?? null, error?.message ?? null, stamp.version, stamp.hostId,
       error?.detail ? JSON.stringify(error.detail) : null, resultBytes, ['brain', principalKey(requestPrincipal(row))], Number(current.intent_bytes)]);
   if (!done) throw capacityError('terminal result and effects exceed their reserved bounded encoding');
+  // #5575: a terminal write whose stored intent carries purged content (refused by the purge guards, refused for another
+  // reason first, or committed as a no-op after the overlay dropped the purged rows) keeps no copy of it; replay answers
+  // from the stored outcome, and the intent bytes were released above.
+  if (error && PURGED_REFUSAL.test(`${error.code}: ${error.message}`) || await intentCarriesPurgedContent(tx as BrainEngine, current)) {
+    const [redacted] = await tx.executeRaw<WriteRequest>('UPDATE persistence_requests SET intent=NULL,compacted=true WHERE id=$1::uuid RETURNING *', [row.id]);
+    return redacted ?? done;
+  }
   // Recovery bytes remain reserved until physical cleanup has been verified.
   return done;
 }
+const PURGED_REFUSAL = /^purged_content:|which the owner purged; it was not imported\.$/;
 
 /**
  * `known` is the row a publication just completed, passed while it still

@@ -1,9 +1,11 @@
 /**
  * `gbrain trust`: the memory-trust noun (#5575, DX-7). This module dispatches
- * `backfill` (A8, DX-5); the other subcommands (review, confirm, release,
- * drop, revert, explain, allow, disable) join the same record. The record is
- * startup: 'observational', so `backfill --dry-run` runs on a probe-only
- * engine with no migrations and no writes; applying completes startup first.
+ * `backfill` (A8, DX-5) and `scan` (DX-6), and hands the owner subcommands (review, confirm,
+ * release, drop, revert, explain, allow, disable) to src/commands/trust.ts.
+ * The record is startup: 'observational', so `backfill --dry-run` runs on a
+ * probe-only engine with no migrations and no writes; every other subcommand
+ * completes startup first. While a resident serve holds a PGLite brain,
+ * src/cli.ts routes the owner subcommands to it before any engine opens.
  */
 import { jsonRequested, setCliExitVerdict, writeStdoutFinal } from '../../core/cli-force-exit.ts';
 import type { BrainEngine } from '../../core/engine.ts';
@@ -12,8 +14,9 @@ import { runTrustBackfill, type TrustBackfillReport } from '../../core/trust/bac
 import { runTrustScan } from '../../core/eligibility/scan.ts';
 import { explainTrust } from '../../core/eligibility/explain.ts';
 import type { CliDispatchContext } from '../command-table.ts';
+import { TRUST_OWNER_USAGE, isTrustOwnerSubcommand, localTrustBackend, runTrustOwnerCommand } from '../../commands/trust.ts';
 
-export const TRUST_USAGE = [
+export const TRUST_BACKFILL_USAGE = [
   'Usage: gbrain trust backfill [--dry-run] [--resume] [--batch-size N] [--json]',
   '  Classifies rows written before trust tiers (facts, takes, timeline entries, pages) from deterministic signals:',
   '  connector sources, page source_kind, transcript/extraction/dream provenance, facts and takes source tags, and',
@@ -25,12 +28,8 @@ export const TRUST_USAGE = [
   '  Runs the write gate\'s deterministic detector over agent-written and lower rows written before the gate,',
   '  recording a receipt for each instruction-like row so proactive surfaces stop injecting it until you confirm',
   '  it (gbrain trust review). Changes no row; resumable (rerun to continue); a detector upgrade rescans.',
-  '',
-  'Usage: gbrain trust explain <ref> [--json]',
-  '  Why a memory is or is not used: its trust tier and origin, the write gate\'s verdict and receipts, and whether',
-  '  each proactive surface (hook, context engine, context pack, volunteer, reflex, core, hot memory) and explicit',
-  '  reads use it. Refs: f<id> fact, t<id> take, e<id> timeline entry, h<id> hold, p:<source>/<slug> page. Read-only.',
 ].join('\n');
+export const TRUST_USAGE = `${TRUST_OWNER_USAGE}\n\n${TRUST_BACKFILL_USAGE}`;
 
 function render(report: TrustBackfillReport): string {
   const lines = [`Trust backfill (${report.mode === 'dry_run' ? 'dry run, nothing written' : 'applied'}; schema: ${report.schema}):`];
@@ -45,10 +44,19 @@ function render(report: TrustBackfillReport): string {
 
 export async function run(engine: BrainEngine, args: string[], ctx: CliDispatchContext): Promise<void> {
   const [sub, ...rest] = args;
-  const known = sub === 'backfill' || sub === 'scan' || sub === 'explain';
+  const known = sub === 'backfill' || sub === 'scan' || isTrustOwnerSubcommand(sub);
   if (!sub || args.includes('--help') || args.includes('-h') || !known) {
-    console.log(TRUST_USAGE);
+    console.log(sub === 'backfill' || sub === 'scan' ? TRUST_BACKFILL_USAGE : TRUST_USAGE);
     if (sub && !known && !args.includes('--help') && !args.includes('-h')) setCliExitVerdict(2);
+    return;
+  }
+  if (sub !== 'backfill' && sub !== 'scan') {
+    await ctx.completeStartup?.(engine);
+    await runTrustOwnerCommand(localTrustBackend(engine, ctx.SELECTED_CONFIG_BY_ENGINE.get(engine)), sub, rest);
+    // `explain` also shows each proactive surface's decision for a typed ref (eligibility/explain.ts).
+    const ref = sub === 'explain' && !jsonRequested(args) ? rest.find(a => !a.startsWith('--')) : undefined;
+    const why = ref ? await explainTrust(engine, ref).catch(() => null) : null;
+    if (why?.found) console.log(['Per surface:', ...Object.entries(why.activation).map(([surface, decision]) => `  ${surface}: ${decision}`)].join('\n'));
     return;
   }
   const dryRun = rest.includes('--dry-run');
@@ -57,18 +65,6 @@ export async function run(engine: BrainEngine, args: string[], ctx: CliDispatchC
   if (batchSize !== undefined && (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 100_000)) {
     console.error('--batch-size must be an integer from 1 to 100000.');
     setCliExitVerdict(2);
-    return;
-  }
-  if (sub === 'explain') {
-    const ref = rest.find(a => !a.startsWith('--'));
-    if (!ref) { console.error('Usage: gbrain trust explain <ref> [--json]'); setCliExitVerdict(2); return; }
-    const why = await explainTrust(engine, ref);
-    if (!why.found) setCliExitVerdict(1);
-    if (jsonRequested(args)) { await writeStdoutFinal(`${JSON.stringify(why, null, 2)}\n`); return; }
-    if (!why.found) { console.log(`${ref}: no fact, take, timeline entry, hold or page has this ref.`); return; }
-    console.log([`${ref}: ${why.label} (${why.trust_tier}), origin ${why.origin}; gate verdict ${why.verdict}${why.unconfirmed ? ', unconfirmed' : ''}`,
-      ...Object.entries(why.activation).map(([surface, decision]) => `  ${surface}: ${decision}`),
-      ...(why.next ? [`  Review: ${why.next.join(' ')}`] : [])].join('\n'));
     return;
   }
   if (sub === 'scan') {

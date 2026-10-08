@@ -529,7 +529,7 @@ export function pageEvidenceText(page: { compiled_truth: string; timeline: strin
   const ownTruth = splitFenceOverlay(page.compiled_truth ?? '', page.fenceOverlay);
   const ownTimeline = splitFenceOverlay(page.timeline ?? '', page.fenceOverlay);
   const truth = [credentialSafeProjection(sanitizeRemoteBody(ownTruth.main)), ...[...ownTruth.lowTier, ...(includeTimeline ? ownTimeline.lowTier : [])]
-    .map(({ tier, body }) => markFenceChunk(tier, credentialSafeProjection(sanitizeRemoteBody(body))))].join('\n\n');
+    .map(({ tier, unconfirmed, body }) => markFenceChunk(tier, credentialSafeProjection(sanitizeRemoteBody(body)), unconfirmed))].join('\n\n');
   const timeline = includeTimeline ? credentialSafeProjection(sanitizeRemoteBody(ownTimeline.main)) : '';
   if (!timeline.trim()) return { text: truth, timelineAt: -1 };
   return { text: truth + TIMELINE_SEPARATOR + timeline, timelineAt: truth.length + TIMELINE_SEPARATOR.length };

@@ -25,16 +25,27 @@ import { isTerminal, principalKey, requestPrincipal, type WriteRequest } from '.
 
 export interface IntentRedactionTarget { id: string; principal_kind: string; principal_id: string }
 
-/** Requests in `sourceId` whose stored intent or error text carries `claim`, bounded. Owner-only; never returns the text. */
+/**
+ * Requests in `sourceId` whose stored intent, outcome or error text carries `claim`, bounded, compacted
+ * ones included (compaction keeps the outcome). Owner-only; never returns the text.
+ */
 export async function findRequestsCarrying(engine: BrainEngine, sourceId: string, claim: string, limit = 10_000): Promise<IntentRedactionTarget[]> {
   const needle = claim.toLowerCase();
   // The claim as it appears inside a JSON string (quotes and backslashes escaped), lowercased.
   const jsonNeedle = JSON.stringify(claim).slice(1, -1).toLowerCase();
+  const carries = (column: string) => `(${column} IS NOT NULL AND (strpos(lower(${column}::text),$2)>0 OR strpos(lower(${column}::text),$3)>0))`;
   return engine.executeRaw<IntentRedactionTarget>(`SELECT id::text AS id,principal_kind,principal_id FROM persistence_requests
-    WHERE source_id=$1 AND NOT compacted AND (
-      (intent IS NOT NULL AND (strpos(lower(intent::text),$2)>0 OR strpos(lower(intent::text),$3)>0))
-      OR (error_message IS NOT NULL AND strpos(lower(error_message),$2)>0))
+    WHERE source_id=$1 AND (${carries('intent')} OR ${carries('outcome')} OR ${carries('error_detail')} OR ${carries('error_message')})
     ORDER BY sequence LIMIT $4`, [sourceId, needle, jsonNeedle, limit]);
+}
+
+/** Replace every JSON string that carries one of `needles` (case-insensitive) with "[purged]"; structure and other values stay. */
+export function redactJson<T>(value: T, needles: readonly string[]): T {
+  const lowered = needles.map(n => n.toLowerCase()).filter(Boolean);
+  if (!lowered.length || value === null || value === undefined) return value;
+  const walk = (v: unknown): unknown => typeof v === 'string' ? (lowered.some(n => v.toLowerCase().includes(n)) ? '[purged]' : v)
+    : Array.isArray(v) ? v.map(walk) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)])) : v;
+  return walk(value) as T;
 }
 
 /** Requests in `sourceId` that target one of `slugs` and still hold an intent (page purge). */
@@ -54,7 +65,7 @@ export function redactionCounterKeys(targets: readonly IntentRedactionTarget[]):
  * `exclude` is the purge's own request id. Returns the number redacted.
  */
 export async function redactRequestIntents(tx: BrainEngine, targets: readonly IntentRedactionTarget[], exclude?: string,
-  opts: { skipPending?: boolean } = {}): Promise<number> {
+  opts: { skipPending?: boolean; needles?: readonly string[] } = {}): Promise<number> {
   const ids = targets.map(t => t.id).filter(id => id !== exclude);
   if (!ids.length) return 0;
   await lockCounters(tx, ['brain', ...redactionCounterKeys(targets)]);
@@ -70,12 +81,19 @@ export async function redactRequestIntents(tx: BrainEngine, targets: readonly In
   }
   let redacted = 0;
   for (const current of rows) {
-    if (current.compacted || !isTerminal(current) || current.recovery) continue;
+    if (!isTerminal(current) || current.recovery) continue;
+    // The stored outcome stays the replay answer, with every string carrying the claim replaced by "[purged]".
+    const outcome = redactJson(current.outcome, opts.needles ?? []);
+    const detail = redactJson(current.error_detail, opts.needles ?? []);
+    if (current.compacted && JSON.stringify(outcome) === JSON.stringify(current.outcome) && JSON.stringify(detail) === JSON.stringify(current.error_detail)
+      && current.error_message === null) continue;
     const [effects] = await tx.executeRaw<{ bytes: string }>(`SELECT COALESCE(SUM(octet_length(data::text)+octet_length(kind)+1024),0)::text AS bytes
       FROM persistence_effects WHERE request_id=$1::uuid`, [current.id]);
-    const retained = Math.min(Number(current.terminal_reservation), jsonBytes(current.authority) + jsonBytes(current.outcome ?? {})
-      + (current.error_detail ? jsonBytes(current.error_detail) : 0) + Number(effects.bytes) + 1024);
-    await tx.executeRaw('UPDATE persistence_requests SET intent=NULL,compacted=true,error_message=NULL,terminal_reservation=$2 WHERE id=$1::uuid', [current.id, retained]);
+    const retained = Math.min(Number(current.terminal_reservation), jsonBytes(current.authority) + jsonBytes(outcome ?? {})
+      + (detail ? jsonBytes(detail) : 0) + Number(effects.bytes) + 1024);
+    await tx.executeRaw(`UPDATE persistence_requests SET intent=NULL,compacted=true,error_message=NULL,terminal_reservation=$2,
+      outcome=$3::text::jsonb,error_detail=$4::text::jsonb WHERE id=$1::uuid`,
+    [current.id, retained, outcome == null ? null : JSON.stringify(outcome), detail == null ? null : JSON.stringify(detail)]);
     for (const key of ['brain', principalKey(requestPrincipal(current))]) {
       await tx.executeRaw('UPDATE persistence_counters SET terminal_bytes=terminal_bytes-$2 WHERE key=$1', [key, Number(current.terminal_reservation) - retained]);
     }

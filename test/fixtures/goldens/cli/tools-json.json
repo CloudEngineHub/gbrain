@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 219437,
-    "stdoutSha256": "d51f1094ade15139c8afd64979b53cbc2f9e410136aa62c9f073637c74db6c40",
+    "stdoutBytes": 221557,
+    "stdoutSha256": "686400d3c0696f086fb8e261a96d26641df1b0bead7b080cf510764a0f30f758",
     "toolNames": [
       "remember",
       "entity",
@@ -51,6 +51,7 @@
       "get_brain_identity",
       "quarantine_list",
       "get_write_attribution",
+      "confirm_memory",
       "list_skills",
       "get_skill",
       "list_brain_skillpack",
@@ -178,6 +179,7 @@
         "mutating": true,
         "name": "remember",
         "parameters": {
+          "content_origin": "string?",
           "entity": "string?",
           "expected_revision": "string?",
           "fact": "string?",
@@ -195,6 +197,15 @@
         "required_scopes": [],
         "schema": {
           "properties": {
+            "content_origin": {
+              "description": "Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
+              "enum": [
+                "user_said",
+                "tool_output",
+                "inferred"
+              ],
+              "type": "string"
+            },
             "entity": {
               "description": "Subject (name or slug).",
               "type": "string"
@@ -445,6 +456,7 @@
         "parameters": {
           "allow_empty": "boolean?",
           "content": "string",
+          "content_origin": "string?",
           "drop_timeline": "boolean?",
           "expected_revision": "string?",
           "force": "boolean?",
@@ -465,6 +477,15 @@
             },
             "content": {
               "description": "Complete markdown (get_page include_content:true).",
+              "type": "string"
+            },
+            "content_origin": {
+              "description": "Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
+              "enum": [
+                "user_said",
+                "tool_output",
+                "inferred"
+              ],
               "type": "string"
             },
             "drop_timeline": {
@@ -712,6 +733,7 @@
         "name": "capture",
         "parameters": {
           "content": "string",
+          "content_origin": "string?",
           "depth": "string?",
           "expected_revision": "string?",
           "force": "boolean?",
@@ -730,6 +752,15 @@
           "properties": {
             "content": {
               "description": "Markdown or text (not a file path).",
+              "type": "string"
+            },
+            "content_origin": {
+              "description": "Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
+              "enum": [
+                "user_said",
+                "tool_output",
+                "inferred"
+              ],
               "type": "string"
             },
             "depth": {
@@ -2383,6 +2414,30 @@
           "type": "object"
         },
         "scope": "admin"
+      },
+      {
+        "description": "Owner only: mark a fact, take or page as confirmed by the user (trust tier user_confirmed). Needs a connection the user granted memory_confirm on the brain host; agent connections are refused with a command for the user to run. Never call this on your own judgment: confirm only what the user explicitly confirmed.",
+        "idempotent": true,
+        "local_only": false,
+        "mutating": true,
+        "name": "confirm_memory",
+        "parameters": {
+          "ref": "string"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "ref": {
+              "description": "What to confirm: f<id> (fact), t<id> (take) or p:<source>/<slug> (page).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "ref"
+          ],
+          "type": "object"
+        },
+        "scope": "write"
       },
       {
         "description": "Skills: prose instruction sets (NOT executable code) for tasks with this server's tools, with triggers, usable_tools and unavailable_tools. Use one via get_skill.",
@@ -5700,6 +5755,7 @@
           "budget_tokens": "number?",
           "entities": "string?",
           "include_private": "boolean?",
+          "include_quarantined": "boolean?",
           "min_trust": "string?",
           "session_id": "string?",
           "since": "string?"
@@ -5717,6 +5773,10 @@
             },
             "include_private": {
               "description": "Local trusted callers only.",
+              "type": "boolean"
+            },
+            "include_quarantined": {
+              "description": "Admin or memory_confirm: quarantined cards.",
               "type": "boolean"
             },
             "min_trust": {

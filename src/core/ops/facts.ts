@@ -39,6 +39,9 @@ import { MEMORY_VERBS_VERSION } from '../verbs.ts';
 import type { SearchResult } from '../types.ts';
 import type { BrainEngine, FactRow } from '../engine.ts';
 import { MIN_TRUST_PARAM, resolveReadEligibility } from '../eligibility/policy.ts';
+import { hasScope } from '../scope.ts';
+import { renderTrustedText } from '../eligibility/labels.ts';
+import { MEMORY_CONFIRM_SCOPE } from '../trust/confirm.ts';
 import { proactiveEligibility } from '../eligibility/registry.ts';
 import { activationSuppressionNotice, suppressionSummary } from '../eligibility/activation.ts';
 import { stampPageTrust, stampRowTrust } from '../eligibility/stamp.ts';
@@ -646,6 +649,7 @@ const context_pack: Operation = {
     session_id: { type: 'string', description: 'Opaque session id.' },
     include_private: { type: 'boolean', description: 'Local trusted callers only.' },
     min_trust: MIN_TRUST_PARAM,
+    include_quarantined: { type: 'boolean', description: 'Admin or memory_confirm: quarantined cards.', fullSurfaceOnly: true },
   },
   scope: 'read',
   verb: true,
@@ -688,6 +692,8 @@ const context_pack: Operation = {
         includePrivate,
         maxEntities: PACK_DEFAULT_MAX_ENTITIES,
         eligibility,
+        // #5575 ENG-15: same rule as get_page: quarantined cards only on an authorized explicit ask.
+        includeQuarantined: p.include_quarantined === true && (ctx.remote === false || hasScope(ctx.auth?.scopes ?? [], 'admin') || hasScope(ctx.auth?.scopes ?? [], MEMORY_CONFIRM_SCOPE)),
       });
     // Always-loaded core tier (core-memory.ts): owner-designated pages of
     // `default` plus this source, inside the caller's grant; it packs first.
@@ -743,11 +749,13 @@ const context_pack: Operation = {
         slug: c.entity.slug,
         title: c.entity.title,
         type: c.entity.type,
-        summary: c.summary,
+        summary: c.quarantined && c.summary ? renderTrustedText(c.summary, { trust_tier: 'external_untrusted', origin: 'quarantined' }) : c.summary,
         open_threads: c.open_threads,
         edges: c.edges,
         backlink_count: c.backlink_count,
         ...(c.relationship_note ? { relationship_note: c.relationship_note } : {}),
+        ...(c.trust_tier ? { trust_tier: c.trust_tier, origin: c.origin } : {}),
+        ...(c.quarantined ? { quarantined: true } : {}),
       })),
       open_threads,
       facts: (ctx.remote === false ? rawFacts.slice(0, facts.length) : facts).map((f) => ({
