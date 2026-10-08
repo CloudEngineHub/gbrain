@@ -120,8 +120,7 @@ export async function getTimeline(exec: LegacyUnscopedRead, slug: string, opts?:
       SELECT te.* FROM ${pagesJoin}
       WHERE p.slug = ${slug} ${sourceCond} ${afterCond} ${beforeCond}
         ${opts?.excludePrivate ? trustedSql(`AND ${privatePagesFilterFragment('p')}
-          AND ${privateTimelineEventFilterFragment('te')}`) : sqlFragment``}
-        ${opts?.eligibility ? sqlFragment`AND ${trustedSql(projectionEligibleSql('timeline_entries', 'te', opts.eligibility))}` : sqlFragment``}
+          AND ${privateTimelineEventFilterFragment('te')}`) : sqlFragment``}${opts?.eligibility ? sqlFragment` AND ${trustedSql(projectionEligibleSql('timeline_entries', 'te', opts.eligibility))}` : sqlFragment``}
       ORDER BY te.date DESC, te.id DESC LIMIT ${limit}`)).rows;
     return rows as unknown as TimelineEntry[];
   }

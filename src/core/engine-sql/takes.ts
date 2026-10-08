@@ -283,7 +283,7 @@ export async function sweepContradictionCache(exec: SqlExecutor): Promise<number
 
 /** #5575: the read-eligibility predicate over the takes alias `t` when a read op passes a policy. */
 function takeEligibility(policy: ReadEligibility | undefined) {
-  return policy ? sqlFragment`AND ${trustedSql(projectionEligibleSql('takes', 't', policy))}` : sqlFragment``;
+  return policy ? sqlFragment` AND ${trustedSql(projectionEligibleSql('takes', 't', policy))}` : sqlFragment``;
 }
 
 export async function listTakes(exec: LegacyUnscopedRead, opts: TakesListOpts = {}): Promise<Take[]> {
@@ -318,8 +318,7 @@ export async function listTakes(exec: LegacyUnscopedRead, opts: TakesListOpts = 
           ${opts.takesHoldersAllowList ?? null}::text[] IS NULL
           OR t.holder = ANY(${opts.takesHoldersAllowList ?? null}::text[])
         )
-        ${sourceFilter}
-        ${takeEligibility(opts.eligibility)}
+        ${sourceFilter}${takeEligibility(opts.eligibility)}
       ORDER BY
         CASE WHEN ${opts.sortBy ?? 'created_at'} = 'weight'      THEN t.weight     END DESC NULLS LAST,
         CASE WHEN ${opts.sortBy ?? 'created_at'} = 'since_date'  THEN t.since_date END DESC NULLS LAST,
@@ -349,8 +348,7 @@ export async function searchTakes(exec: LegacyUnscopedRead, query: string, opts:
           ${opts.takesHoldersAllowList ?? null}::text[] IS NULL
           OR t.holder = ANY(${opts.takesHoldersAllowList ?? null}::text[])
         )
-        ${sourceFilter}
-        ${takeEligibility(opts.eligibility)}
+        ${sourceFilter}${takeEligibility(opts.eligibility)}
       ORDER BY score DESC, t.weight DESC
       LIMIT ${limit}
     `)).rows;
@@ -385,8 +383,7 @@ export async function searchTakesVector(
           ${opts.takesHoldersAllowList ?? null}::text[] IS NULL
           OR t.holder = ANY(${opts.takesHoldersAllowList ?? null}::text[])
         )
-        ${sourceFilter}
-        ${takeEligibility(opts.eligibility)}
+        ${sourceFilter}${takeEligibility(opts.eligibility)}
       ORDER BY t.embedding <=> ${vec}::vector
       LIMIT ${limit}
     `)).rows;
