@@ -17,6 +17,9 @@ import { appendContextNote, type InferredVia } from '../facts/subject-infer.ts';
 import { inferenceNote } from '../facts/subject-infer-write.ts';
 import { normalizeTargetFences } from '../fence-repair/import-step.ts';
 import { requestChannelTrust } from '../trust/channel.ts';
+import { gateField, gateInput, heldOutcome, loadWriteGateConfig } from '../trust/gate-outcomes.ts';
+import { decideFactWrite, recordFlaggedRow, recordWriteGateHold } from '../write-gate-store.ts';
+import { writeGateRejectedError } from '../write-gate.ts';
 import { recordContestedFact, supersessionGuarded } from '../trust/supersede-handlers.ts';
 import { storedTrustTier } from '../trust/tier.ts';
 import { pageFencesNormalized } from '../fence-repair/report.ts';
@@ -99,6 +102,13 @@ export async function prepareMemoryMutation(engine: BrainEngine, row: WriteReque
   const fact: NewFact = { ...input, source: String(p.provenance).trim(), valid_from: validFrom, valid_until: validUntil,
     confidence: 1, embedding, embedding_model, source_session: typeof p.session_id === 'string' ? p.session_id : null,
     ...(context ? { context } : {}) };
+  // #5575 B3: the row-level write gate at the request's declared tier (ENG-18); a held fact inserts nothing.
+  const gate = decideFactWrite({ fact: input.fact, context: context ?? null, source: fact.source }, { sourceId: row.source_id, slug: row.slug,
+    payload: { fact: input.fact, kind: input.kind, visibility: input.visibility, entity_slug: input.entity_slug, source: fact.source, context: context ?? null,
+      valid_from: validFrom.toISOString(), valid_until: validUntil?.toISOString() ?? null, source_session: fact.source_session },
+    input: gateInput(requestChannelTrust(row) ?? { tier: 'unknown', origin: null }, row.id), cfg: await loadWriteGateConfig(engine) });
+  if (gate.action === 'reject') throw writeGateRejectedError(gate.assessment);
+  if (gate.action === 'hold') return { observedRevision, validate, apply: async tx => heldOutcome(gate.assessment, (await recordWriteGateHold(tx, gate.hold!)).holdId) };
   let page: PreparedMutation | undefined;
   let rowNum: number | undefined;
   let fencesNormalized: Record<string, unknown> = {};
@@ -143,7 +153,8 @@ export async function prepareMemoryMutation(engine: BrainEngine, row: WriteReque
       WHERE id=$1 AND source_id=$2 AND expired_at IS NULL`, [decision.candidate!.id, row.source_id, id]);
     const contestedBy = contested ? await recordContestedFact(tx, { sourceId: row.source_id, oldId: decision.candidate!.id,
       oldTier: storedTrustTier(decision.candidate!.trust_tier), newId: id, newTier: writerTier, guard: replaces !== null ? 'remember.replaces' : 'conflict_slot' }) : null;
+    const flagged = gateField(gate.assessment, `f${id}`, await recordFlaggedRow(tx, gate, { table: 'facts', id, sourceId: row.source_id }));
     return { ...outcome(id, status, input.entity_slug, validUntil, degraded, p, status === 'superseded' ? decision.candidate!.id : undefined), ...fencesNormalized,
-      ...(contestedBy ? { contested: contestedBy } : {}) };
+      ...(contestedBy ? { contested: contestedBy } : {}), ...(flagged ? { gate: flagged } : {}) };
   } };
 }

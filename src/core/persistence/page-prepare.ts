@@ -54,8 +54,8 @@ import { parseFenceRepairReceipt } from '../fence-repair/receipt.ts';
 import { fenceRepairCommit } from './effect-model.ts';
 import { purgePageInTransaction } from './page-purge.ts';
 import { withTrustKeep } from './context.ts';
-import { isFenceEditWrite, pageWriteTrust, recordAgentPageLowering, stampPageTrustMarker, storedPageTier } from '../trust/page-write.ts';
-import type { WriteTrust } from '../trust/tier.ts';
+import { isFenceEditWrite, pageGateTrust, pageWriteTrust, recordAgentPageLowering, stampPageTrustMarker, storedPageTier } from '../trust/page-write.ts';
+import { gateField, gateInput } from '../trust/gate-outcomes.ts';
 
 
 const ownerStatusFix = (sourceId: string): Action => readFix(`Shows source ${sourceId}'s canonical owner with its pending, failed and recovering requests, read-only.`,
@@ -371,7 +371,9 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
   }
   let prepared: PreparedContentImport | undefined;
   let provenance: CanonicalProvenance | undefined;
-  let trust: WriteTrust | undefined;
+  // #5575: the page's tier, computed once before import so the write gate sees exactly it (ENG-18).
+  const trust = pageWriteTrust(row, typeof content === 'string' && !isFenceEditWrite(row) ? parseMarkdown(content, row.slug, { activePack }).frontmatter : null);
+  const gateTrust = pageGateTrust(row, trust, storedTier);
   const result = await importFromContent(engine, row.slug, content, {
     ...source, noEmbed: true, remote: row.authority.remote, activePack, fences: projected ? 'coordinated' : 'lenient',
     // #6259: only owner-tier intents keep gate-owned markers; an ordinary put_page, local or remote, has them stripped.
@@ -381,8 +383,8 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
     source_kind: typeof p.source_kind === 'string' ? p.source_kind : null,
     source_uri: typeof p.source_uri === 'string' ? p.source_uri : null,
     ingested_via: typeof p.ingested_via === 'string' ? p.ingested_via : null,
+    ...(gateTrust ? { writeGate: gateInput(gateTrust, row.id) } : {}),
     prepareFrontmatter: page => {
-      trust = pageWriteTrust(row, page.frontmatter);
       stampPageTrustMarker(row, page.frontmatter, trust, storedTier);
       provenance = putProvenance(row, snapshot, page);
     },
@@ -487,6 +489,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
       if (core) await core.record(tx, (await tx.readPageSnapshot(row.slug, source))?.revision ?? null);
     }
     const coreUsage = core?.usage();
+    const gate = noop ? undefined : gateField(ready.result.gate, `p:${row.source_id}/${row.slug}`, null);
     return { ...advisories, ...(autoLinks ? {auto_links:autoLinks} : {}), ...(coreUsage ? { core: coreUsage } : {}),
       ...(removedTimeline ? { timeline_rows_removed: timelineRowsRemovedAdvisory(row, removedTimeline) } : {}),
       status: noop ? 'skipped' : row.operation === 'restore_page' ? 'restored' : row.operation === 'revert_version' ? 'reverted' : 'created_or_updated',
@@ -497,7 +500,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
       ...(!noop && quarantineOutcome(ready.parsedPage.frontmatter) ? { quarantined: quarantineOutcome(ready.parsedPage.frontmatter) } : {}),
       ...(row.operation === 'capture' ? { channel: 'capture', content_hash: p.capture_hash } : {}),
       ...(edited ? editDiff(row.slug, edited.before, edited.after) : {}), ...fencesNormalized, ...fenceRepairOutcome,
-      ...(lowered ? { trust_lowered: lowered } : {}) };
+      ...(lowered ? { trust_lowered: lowered } : {}), ...(gate ? { gate } : {}) };
   } };
 }
 
