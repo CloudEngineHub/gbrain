@@ -224,7 +224,7 @@
               "number"
             ],
             "sql": "SELECT t.*, p.slug AS page_slug FROM takes t JOIN pages p ON p.id = t.page_id WHERE 1=1 AND ($1::int IS NULL OR t.page_id = $2::int) AND ($3::text IS NULL OR p.slug = $4::text) AND ($5::text IS NULL OR t.holder = $6::text) AND ($7::text IS NULL OR t.kind = $8::text) AND ($9::boolean IS NULL OR t.active = $10::boolean) AND ( $11::boolean IS NULL OR ($12::boolean = true AND t.resolved_at IS NOT NULL) OR ($13::boolean = false AND t.resolved_at IS NULL) ) AND ( $14::text[] IS NULL OR t.holder = ANY($15::text[]) ) ORDER BY CASE WHEN $16 = 'weight' THEN t.weight END DESC NULLS LAST, CASE WHEN $17 = 'since_date' THEN t.since_date END DESC NULLS LAST, CASE WHEN $18 = 'created_at' THEN t.created_at END DESC NULLS LAST LIMIT $19 OFFSET $20",
-            "textSha256": "94ba5b480a63e8948c598eeeef15dd6e3b52381f9438242f47f715ba58d3c93b"
+            "textSha256": "974ece0b8fa9166ba0b1462f293fc6e19c1952e1fccac100b957afd1d2ceccbb"
           }
         ],
         "sourceId": [
@@ -254,7 +254,7 @@
               "number"
             ],
             "sql": "SELECT t.*, p.slug AS page_slug FROM takes t JOIN pages p ON p.id = t.page_id WHERE 1=1 AND ($1::int IS NULL OR t.page_id = $2::int) AND ($3::text IS NULL OR p.slug = $4::text) AND ($5::text IS NULL OR t.holder = $6::text) AND ($7::text IS NULL OR t.kind = $8::text) AND ($9::boolean IS NULL OR t.active = $10::boolean) AND ( $11::boolean IS NULL OR ($12::boolean = true AND t.resolved_at IS NOT NULL) OR ($13::boolean = false AND t.resolved_at IS NULL) ) AND ( $14::text[] IS NULL OR t.holder = ANY($15::text[]) ) AND p.source_id = $16 ORDER BY CASE WHEN $17 = 'weight' THEN t.weight END DESC NULLS LAST, CASE WHEN $18 = 'since_date' THEN t.since_date END DESC NULLS LAST, CASE WHEN $19 = 'created_at' THEN t.created_at END DESC NULLS LAST LIMIT $20 OFFSET $21",
-            "textSha256": "8f77bbecf2e374e6d1f591a98e00dc760b5e75b61fc879a6ce7b5e5f03a04151"
+            "textSha256": "adad16434be36a3105641b3e645cc6cfb0cd0d90b1cb9b0dfc5eb861ac5ff0b1"
           }
         ],
         "sourceIds+excludePrivate": [
@@ -284,7 +284,7 @@
               "number"
             ],
             "sql": "SELECT t.*, p.slug AS page_slug FROM takes t JOIN pages p ON p.id = t.page_id WHERE 1=1 AND (COALESCE(p.frontmatter->>'visibility', CASE WHEN (p.type = 'atom' OR (p.type = 'concept' AND p.frontmatter->>'synthesized_by' IS NOT NULL)) THEN 'private' ELSE 'world' END) <> 'private' AND NOT (CASE WHEN p.type = 'atom' THEN EXISTS (SELECT 1 FROM pages derived_origin WHERE derived_origin.source_id = p.source_id AND derived_origin.slug = p.frontmatter->>'source_slug' AND derived_origin.frontmatter->>'visibility' = 'private') WHEN (p.type = 'atom' OR (p.type = 'concept' AND p.frontmatter->>'synthesized_by' IS NOT NULL)) THEN EXISTS (SELECT 1 FROM links derived_input_link JOIN pages derived_input ON derived_input.id = derived_input_link.to_page_id WHERE derived_input_link.from_page_id = p.id AND derived_input_link.link_source = 'concept-provenance' AND derived_input_link.link_type = 'synthesized_from' AND (COALESCE(derived_input.frontmatter->>'visibility', CASE WHEN derived_input.type = 'atom' THEN 'private' ELSE 'world' END) = 'private' OR EXISTS (SELECT 1 FROM pages derived_input_origin WHERE derived_input_origin.source_id = derived_input.source_id AND derived_input_origin.slug = derived_input.frontmatter->>'source_slug' AND derived_input_origin.frontmatter->>'visibility' = 'private'))) WHEN p.type = 'event' AND p.frontmatter->>'captured_via' LIKE 'life-chronicle:%' THEN NOT EXISTS (SELECT 1 FROM pages chronicle_origin WHERE chronicle_origin.source_id = p.source_id AND chronicle_origin.slug = p.frontmatter->'event'->>'depth' AND COALESCE(chronicle_origin.frontmatter->>'visibility', CASE WHEN (chronicle_origin.type = 'atom' OR (chronicle_origin.type = 'concept' AND chronicle_origin.frontmatter->>'synthesized_by' IS NOT NULL)) THEN 'private' ELSE 'world' END) <> 'private' AND NOT (CASE WHEN jsonb_typeof(chronicle_origin.frontmatter->'derived_from') IN ('array', 'string') THEN EXISTS ( SELECT 1 FROM pages declared_origin WHERE declared_origin.source_id = chronicle_origin.source_id AND declared_origin.frontmatter->>'visibility' = 'private' AND declared_origin.slug IN ( SELECT regexp_replace(declared.slug, '\\.md$', '') FROM jsonb_array_elements_text( CASE WHEN jsonb_typeof(chronicle_origin.frontmatter->'derived_from') = 'array' THEN chronicle_origin.frontmatter->'derived_from' ELSE jsonb_build_array(chronicle_origin.frontmatter->'derived_from') END) AS declared(slug))) ELSE false END)) ELSE false END) AND NOT (CASE WHEN jsonb_typeof(p.frontmatter->'derived_from') IN ('array', 'string') THEN EXISTS ( SELECT 1 FROM pages declared_origin WHERE declared_origin.source_id = p.source_id AND declared_origin.frontmatter->>'visibility' = 'private' AND declared_origin.slug IN ( SELECT regexp_replace(declared.slug, '\\.md$', '') FROM jsonb_array_elements_text( CASE WHEN jsonb_typeof(p.frontmatter->'derived_from') = 'array' THEN p.frontmatter->'derived_from' ELSE jsonb_build_array(p.frontmatter->'derived_from') END) AS declared(slug))) ELSE false END)) AND ($1::int IS NULL OR t.page_id = $2::int) AND ($3::text IS NULL OR p.slug = $4::text) AND ($5::text IS NULL OR t.holder = $6::text) AND ($7::text IS NULL OR t.kind = $8::text) AND ($9::boolean IS NULL OR t.active = $10::boolean) AND ( $11::boolean IS NULL OR ($12::boolean = true AND t.resolved_at IS NOT NULL) OR ($13::boolean = false AND t.resolved_at IS NULL) ) AND ( $14::text[] IS NULL OR t.holder = ANY($15::text[]) ) AND p.source_id = ANY($16::text[]) ORDER BY CASE WHEN $17 = 'weight' THEN t.weight END DESC NULLS LAST, CASE WHEN $18 = 'since_date' THEN t.since_date END DESC NULLS LAST, CASE WHEN $19 = 'created_at' THEN t.created_at END DESC NULLS LAST LIMIT $20 OFFSET $21",
-            "textSha256": "9b268ccbae5d5b51b8c8403ead68a6d7636516445e218297a1d857ca2faedd85"
+            "textSha256": "8f7fd0a88c768517a46c6179802a19e0f99b016284ff580503ae9f48f15bb7a6"
           }
         ]
       },
@@ -358,7 +358,7 @@
               "number"
             ],
             "sql": "SELECT t.id AS take_id, t.page_id, p.slug AS page_slug, t.row_num, t.claim, t.kind, t.holder, t.weight, word_similarity($1, t.claim)::real AS score FROM takes t JOIN pages p ON p.id = t.page_id WHERE t.active AND $2 <% t.claim AND ( $3::text[] IS NULL OR t.holder = ANY($4::text[]) ) ORDER BY score DESC, t.weight DESC LIMIT $5",
-            "textSha256": "2ec29ded123f4c0644aaa43f01de0b9177ad4ff08b78ef1731b281775f60b78d"
+            "textSha256": "34e67c5eb1d2c5f639547d25d2e1712cdc1b24d4f6d59629ca994375c2286648"
           }
         ],
         "sourceId": [
@@ -373,7 +373,7 @@
               "number"
             ],
             "sql": "SELECT t.id AS take_id, t.page_id, p.slug AS page_slug, t.row_num, t.claim, t.kind, t.holder, t.weight, word_similarity($1, t.claim)::real AS score FROM takes t JOIN pages p ON p.id = t.page_id WHERE t.active AND $2 <% t.claim AND ( $3::text[] IS NULL OR t.holder = ANY($4::text[]) ) AND p.source_id = $5 ORDER BY score DESC, t.weight DESC LIMIT $6",
-            "textSha256": "e55e410c13fae1926ee79c0183a301b15946d8c04646c9ad0752983f9d7b9872"
+            "textSha256": "d3cab7eb4b940a5fd1f1e04d8058b1a13d95083a9689df6a9b7e77ace4e50149"
           }
         ],
         "sourceIds+excludePrivate": [
@@ -388,7 +388,7 @@
               "number"
             ],
             "sql": "SELECT t.id AS take_id, t.page_id, p.slug AS page_slug, t.row_num, t.claim, t.kind, t.holder, t.weight, word_similarity($1, t.claim)::real AS score FROM takes t JOIN pages p ON p.id = t.page_id WHERE t.active AND $2 <% t.claim AND (COALESCE(p.frontmatter->>'visibility', CASE WHEN (p.type = 'atom' OR (p.type = 'concept' AND p.frontmatter->>'synthesized_by' IS NOT NULL)) THEN 'private' ELSE 'world' END) <> 'private' AND NOT (CASE WHEN p.type = 'atom' THEN EXISTS (SELECT 1 FROM pages derived_origin WHERE derived_origin.source_id = p.source_id AND derived_origin.slug = p.frontmatter->>'source_slug' AND derived_origin.frontmatter->>'visibility' = 'private') WHEN (p.type = 'atom' OR (p.type = 'concept' AND p.frontmatter->>'synthesized_by' IS NOT NULL)) THEN EXISTS (SELECT 1 FROM links derived_input_link JOIN pages derived_input ON derived_input.id = derived_input_link.to_page_id WHERE derived_input_link.from_page_id = p.id AND derived_input_link.link_source = 'concept-provenance' AND derived_input_link.link_type = 'synthesized_from' AND (COALESCE(derived_input.frontmatter->>'visibility', CASE WHEN derived_input.type = 'atom' THEN 'private' ELSE 'world' END) = 'private' OR EXISTS (SELECT 1 FROM pages derived_input_origin WHERE derived_input_origin.source_id = derived_input.source_id AND derived_input_origin.slug = derived_input.frontmatter->>'source_slug' AND derived_input_origin.frontmatter->>'visibility' = 'private'))) WHEN p.type = 'event' AND p.frontmatter->>'captured_via' LIKE 'life-chronicle:%' THEN NOT EXISTS (SELECT 1 FROM pages chronicle_origin WHERE chronicle_origin.source_id = p.source_id AND chronicle_origin.slug = p.frontmatter->'event'->>'depth' AND COALESCE(chronicle_origin.frontmatter->>'visibility', CASE WHEN (chronicle_origin.type = 'atom' OR (chronicle_origin.type = 'concept' AND chronicle_origin.frontmatter->>'synthesized_by' IS NOT NULL)) THEN 'private' ELSE 'world' END) <> 'private' AND NOT (CASE WHEN jsonb_typeof(chronicle_origin.frontmatter->'derived_from') IN ('array', 'string') THEN EXISTS ( SELECT 1 FROM pages declared_origin WHERE declared_origin.source_id = chronicle_origin.source_id AND declared_origin.frontmatter->>'visibility' = 'private' AND declared_origin.slug IN ( SELECT regexp_replace(declared.slug, '\\.md$', '') FROM jsonb_array_elements_text( CASE WHEN jsonb_typeof(chronicle_origin.frontmatter->'derived_from') = 'array' THEN chronicle_origin.frontmatter->'derived_from' ELSE jsonb_build_array(chronicle_origin.frontmatter->'derived_from') END) AS declared(slug))) ELSE false END)) ELSE false END) AND NOT (CASE WHEN jsonb_typeof(p.frontmatter->'derived_from') IN ('array', 'string') THEN EXISTS ( SELECT 1 FROM pages declared_origin WHERE declared_origin.source_id = p.source_id AND declared_origin.frontmatter->>'visibility' = 'private' AND declared_origin.slug IN ( SELECT regexp_replace(declared.slug, '\\.md$', '') FROM jsonb_array_elements_text( CASE WHEN jsonb_typeof(p.frontmatter->'derived_from') = 'array' THEN p.frontmatter->'derived_from' ELSE jsonb_build_array(p.frontmatter->'derived_from') END) AS declared(slug))) ELSE false END)) AND ( $3::text[] IS NULL OR t.holder = ANY($4::text[]) ) AND p.source_id = ANY($5::text[]) ORDER BY score DESC, t.weight DESC LIMIT $6",
-            "textSha256": "475873a0331cb561a20bb70ec538f2fc126e3db515657f12d58ff1611e97a028"
+            "textSha256": "9a4df8330d3b3ec0e9a9cbcbf73fe417dacc39db2ac10d378f7468e02b491068"
           }
         ]
       },
@@ -404,7 +404,7 @@
               "number"
             ],
             "sql": "SELECT t.id AS take_id, t.page_id, p.slug AS page_slug, t.row_num, t.claim, t.kind, t.holder, t.weight, (1 - (t.embedding <=> $1::vector))::real AS score FROM takes t JOIN pages p ON p.id = t.page_id WHERE t.active AND t.embedding IS NOT NULL AND ( $2::text[] IS NULL OR t.holder = ANY($3::text[]) ) ORDER BY t.embedding <=> $4::vector LIMIT $5",
-            "textSha256": "4d82b910a352aa07599dbf8eb4ec2939a89d008e0fac7db0c70eac15ff9347c0"
+            "textSha256": "28e886336542c1f9f448881d77ef271ea62d0ce5b4418da97faf94119e6d4c20"
           }
         ],
         "sourceId": [
@@ -419,7 +419,7 @@
               "number"
             ],
             "sql": "SELECT t.id AS take_id, t.page_id, p.slug AS page_slug, t.row_num, t.claim, t.kind, t.holder, t.weight, (1 - (t.embedding <=> $1::vector))::real AS score FROM takes t JOIN pages p ON p.id = t.page_id WHERE t.active AND t.embedding IS NOT NULL AND ( $2::text[] IS NULL OR t.holder = ANY($3::text[]) ) AND p.source_id = $4 ORDER BY t.embedding <=> $5::vector LIMIT $6",
-            "textSha256": "a9758d2943a82b8c95a801ee9c1417a7217a5cf866b312dbc5b876567ca25dec"
+            "textSha256": "cc06c98b52d8b78658b74fe07eb33390c82722dca85a92b2b879e537ad06b7da"
           }
         ],
         "sourceIds+excludePrivate": [
@@ -434,7 +434,7 @@
               "number"
             ],
             "sql": "SELECT t.id AS take_id, t.page_id, p.slug AS page_slug, t.row_num, t.claim, t.kind, t.holder, t.weight, (1 - (t.embedding <=> $1::vector))::real AS score FROM takes t JOIN pages p ON p.id = t.page_id WHERE t.active AND t.embedding IS NOT NULL AND (COALESCE(p.frontmatter->>'visibility', CASE WHEN (p.type = 'atom' OR (p.type = 'concept' AND p.frontmatter->>'synthesized_by' IS NOT NULL)) THEN 'private' ELSE 'world' END) <> 'private' AND NOT (CASE WHEN p.type = 'atom' THEN EXISTS (SELECT 1 FROM pages derived_origin WHERE derived_origin.source_id = p.source_id AND derived_origin.slug = p.frontmatter->>'source_slug' AND derived_origin.frontmatter->>'visibility' = 'private') WHEN (p.type = 'atom' OR (p.type = 'concept' AND p.frontmatter->>'synthesized_by' IS NOT NULL)) THEN EXISTS (SELECT 1 FROM links derived_input_link JOIN pages derived_input ON derived_input.id = derived_input_link.to_page_id WHERE derived_input_link.from_page_id = p.id AND derived_input_link.link_source = 'concept-provenance' AND derived_input_link.link_type = 'synthesized_from' AND (COALESCE(derived_input.frontmatter->>'visibility', CASE WHEN derived_input.type = 'atom' THEN 'private' ELSE 'world' END) = 'private' OR EXISTS (SELECT 1 FROM pages derived_input_origin WHERE derived_input_origin.source_id = derived_input.source_id AND derived_input_origin.slug = derived_input.frontmatter->>'source_slug' AND derived_input_origin.frontmatter->>'visibility' = 'private'))) WHEN p.type = 'event' AND p.frontmatter->>'captured_via' LIKE 'life-chronicle:%' THEN NOT EXISTS (SELECT 1 FROM pages chronicle_origin WHERE chronicle_origin.source_id = p.source_id AND chronicle_origin.slug = p.frontmatter->'event'->>'depth' AND COALESCE(chronicle_origin.frontmatter->>'visibility', CASE WHEN (chronicle_origin.type = 'atom' OR (chronicle_origin.type = 'concept' AND chronicle_origin.frontmatter->>'synthesized_by' IS NOT NULL)) THEN 'private' ELSE 'world' END) <> 'private' AND NOT (CASE WHEN jsonb_typeof(chronicle_origin.frontmatter->'derived_from') IN ('array', 'string') THEN EXISTS ( SELECT 1 FROM pages declared_origin WHERE declared_origin.source_id = chronicle_origin.source_id AND declared_origin.frontmatter->>'visibility' = 'private' AND declared_origin.slug IN ( SELECT regexp_replace(declared.slug, '\\.md$', '') FROM jsonb_array_elements_text( CASE WHEN jsonb_typeof(chronicle_origin.frontmatter->'derived_from') = 'array' THEN chronicle_origin.frontmatter->'derived_from' ELSE jsonb_build_array(chronicle_origin.frontmatter->'derived_from') END) AS declared(slug))) ELSE false END)) ELSE false END) AND NOT (CASE WHEN jsonb_typeof(p.frontmatter->'derived_from') IN ('array', 'string') THEN EXISTS ( SELECT 1 FROM pages declared_origin WHERE declared_origin.source_id = p.source_id AND declared_origin.frontmatter->>'visibility' = 'private' AND declared_origin.slug IN ( SELECT regexp_replace(declared.slug, '\\.md$', '') FROM jsonb_array_elements_text( CASE WHEN jsonb_typeof(p.frontmatter->'derived_from') = 'array' THEN p.frontmatter->'derived_from' ELSE jsonb_build_array(p.frontmatter->'derived_from') END) AS declared(slug))) ELSE false END)) AND ( $2::text[] IS NULL OR t.holder = ANY($3::text[]) ) AND p.source_id = ANY($4::text[]) ORDER BY t.embedding <=> $5::vector LIMIT $6",
-            "textSha256": "d1584159bba86c3f6bd9bf09ad7b57b988f25edf932cc7bd67f583e3b1a48e00"
+            "textSha256": "0aa6701896aa6c022fb3f8353f4e9f4859b47acd3d3a526d34d6abaadbcecbda"
           }
         ]
       },

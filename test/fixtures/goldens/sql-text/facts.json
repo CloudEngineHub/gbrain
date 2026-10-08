@@ -574,7 +574,7 @@
               "number"
             ],
             "sql": "SELECT * FROM facts WHERE source_id = $1 AND entity_slug = $2 AND consolidated_at IS NULL AND kind = ANY($3::text[]) AND visibility = ANY($4::text[]) AND source != ALL($5::text[]) AND fact ILIKE $6 ESCAPE '\\' ORDER BY valid_from DESC, id DESC LIMIT $7 OFFSET $8",
-            "textSha256": "c5f3f63210603247370f2801d42d47410b2051d13ff8e1b4aef4e6eaea721e60"
+            "textSha256": "be494a6935e25722d68ceaee7a2d67aa12a45b886a5154165e73c8be1f06e461"
           }
         ],
         "default": [
@@ -587,7 +587,7 @@
               "number"
             ],
             "sql": "SELECT * FROM facts WHERE source_id = $1 AND entity_slug = $2 AND expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) ORDER BY valid_from DESC, id DESC LIMIT $3 OFFSET $4",
-            "textSha256": "6ec4921a6e59a0e9e87892e6ccdf71fd754a7d9f090ff984612965f03d358720"
+            "textSha256": "f480c85f5b2b56d825347ae4812946eb71fcb8730bb4eb23655c538dab8e0b2e"
           }
         ]
       },
@@ -606,7 +606,7 @@
               "number"
             ],
             "sql": "SELECT * FROM facts WHERE source_id = $1 AND source_session = $2 AND consolidated_at IS NULL AND kind = ANY($3::text[]) AND visibility = ANY($4::text[]) AND source != ALL($5::text[]) AND fact ILIKE $6 ESCAPE '\\' ORDER BY created_at DESC, id DESC LIMIT $7 OFFSET $8",
-            "textSha256": "3e20f1408963e21b6163f69a3968546ecfe320c3ccf93051a70355b5502738b6"
+            "textSha256": "869e7e5ad9aeab19b81e704f439f4043c269defe2fbcb30e57b23c37cea8fded"
           }
         ],
         "default": [
@@ -619,7 +619,7 @@
               "number"
             ],
             "sql": "SELECT * FROM facts WHERE source_id = $1 AND source_session = $2 AND expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) ORDER BY created_at DESC, id DESC LIMIT $3 OFFSET $4",
-            "textSha256": "3bb863323c2a88b50ce1b737f2da391a18cca8742c6049efe96a209bb66fcbec"
+            "textSha256": "16af231e53b7564dc3e84fe282ab684b8aa5ab3135ac6b602943d26f00fd96ba"
           }
         ]
       },
@@ -632,7 +632,7 @@
               "number"
             ],
             "sql": "SELECT *, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at_iso FROM facts WHERE source_id = $1 AND expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) ORDER BY created_at ASC, id ASC LIMIT $2",
-            "textSha256": "cbf74977e9bd8227e796439b8c2c1b3be749383469c75a77112b6dbc92fcbff8"
+            "textSha256": "0a40122b0f45781fe163473acc69c889aeb6c63e2fd366f2f15731229025b466"
           }
         ],
         "keyset": [
@@ -646,7 +646,7 @@
               "number"
             ],
             "sql": "SELECT *, gbrain_fact_fingerprint(fact) AS fact_fingerprint, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at_iso FROM facts WHERE source_id = $1 AND (created_at > $2::text::timestamptz OR (created_at = $3::text::timestamptz AND id > $4)) ORDER BY created_at ASC, id ASC LIMIT $5",
-            "textSha256": "71abbadee1ad18cb7b39dace5104e59b7d6235122355a699d7322d0dd22e2eb5"
+            "textSha256": "48e52d1c6898cb66b520371fe6e65624ccfca9643f2e6e4dcf8f30186bbbdd0f"
           }
         ],
         "strictTime": [
@@ -659,7 +659,7 @@
               "number"
             ],
             "sql": "SELECT *, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at_iso FROM facts WHERE source_id = $1 AND created_at > $2::text::timestamptz AND expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) AND visibility = ANY($3::text[]) ORDER BY created_at ASC, id ASC LIMIT $4",
-            "textSha256": "b433fc98e8fd4702a594ff9efd187c89390875187059f5ee9b695b467f45c233"
+            "textSha256": "8918057b510da33d9b032fdefda14dfd7c9f5e67dd28b763ee8823cfa87b42f5"
           }
         ]
       },
@@ -680,7 +680,7 @@
               "number"
             ],
             "sql": "SELECT * FROM facts WHERE source_id = $1 AND COALESCE(valid_from, created_at) >= $2 AND entity_slug = $3 AND source_session = $4 AND consolidated_at IS NULL AND kind = ANY($5::text[]) AND visibility = ANY($6::text[]) AND source != ALL($7::text[]) AND fact ILIKE $8 ESCAPE '\\' ORDER BY COALESCE(valid_from, created_at) DESC, id DESC LIMIT $9 OFFSET $10",
-            "textSha256": "8ef6416fe6a75cd5a9e639c5e891a2325eaa046459911480ffe0b9fbd10c79c9"
+            "textSha256": "a635199e1e8bc1742eaa0209a8bc5b296098640ab38aa287635fe9195fa696ae"
           }
         ],
         "default": [
@@ -693,7 +693,7 @@
               "number"
             ],
             "sql": "SELECT * FROM facts WHERE source_id = $1 AND created_at >= $2 AND expired_at IS NULL AND (valid_until IS NULL OR valid_until > now()) ORDER BY created_at DESC, id DESC LIMIT $3 OFFSET $4",
-            "textSha256": "aa5b526eb12e737df05d6ec0b7d7a34837fa3540430220ae18c8b283f73ffc2f"
+            "textSha256": "3f0a5fa0e5e1a4338c4d9a10f70015aef0d1d34504c0161ce43eae3a104f6beb"
           }
         ]
       },
@@ -706,7 +706,7 @@
               "number"
             ],
             "sql": "SELECT * FROM facts WHERE source_id = $1 AND superseded_by IS NOT NULL ORDER BY COALESCE(expired_at, valid_until) DESC, id DESC LIMIT $2",
-            "textSha256": "586a64d75b93c904191897f8356290c4f3992c340d05b01e1ea364199f40fdbd"
+            "textSha256": "c9884eab330821c3b6b9a84fd1ae17e215ce8911ba3945e954b6918172b22d9c"
           }
         ],
         "since+visibility": [
@@ -719,7 +719,7 @@
               "number"
             ],
             "sql": "SELECT * FROM facts WHERE source_id = $1 AND superseded_by IS NOT NULL AND COALESCE(expired_at, valid_until) >= $2 AND visibility = ANY($3::text[]) ORDER BY COALESCE(expired_at, valid_until) DESC, id DESC LIMIT $4",
-            "textSha256": "528d9a6d4e088e9aaee9f9bd39bb1ca10cd6ebf3b566c33966867d5ac249401d"
+            "textSha256": "5df970c375dc85b29e4d5fca79616dc18bbd6090717d96be62472c7fa38177ed"
           }
         ]
       },
