@@ -1,15 +1,18 @@
 /**
  * Stamps `trust_tier` + `origin` (eligibility/labels.ts) onto page-derived
  * read rows (search/query hits, evidence, fetch results) after ranking, so
- * label mode never changes ordering (A7). A chunk's tier is its page's tier.
+ * label mode never changes ordering (A7). A chunk's tier is its page's tier,
+ * lowered to the row tier when its text carries a facts-fence trust marker
+ * (fence-overlay.ts, ENG-1); a marker can only lower.
  * One batched lookup per call; a failed lookup labels the rows `unknown` /
  * `unrecorded` rather than dropping them or leaving them unlabeled.
  */
 import type { BrainEngine } from '../engine.ts';
-import { admitsTrust, type TrustTier } from '../trust/tier.ts';
+import { admitsTrust, compareTrust, type TrustTier } from '../trust/tier.ts';
+import { FENCE_TRUST_ORIGIN, lowestFenceTrustMarker } from './fence-overlay.ts';
 import { trustFields, type TrustFields } from './labels.ts';
 
-interface PageRef { page_id?: number | null; source_id?: string | null; slug: string; trust_tier?: string; origin?: string }
+interface PageRef { page_id?: number | null; source_id?: string | null; slug: string; chunk_text?: string | null; trust_tier?: string; origin?: string }
 
 type Exec = Pick<BrainEngine, 'executeRaw'>;
 
@@ -42,7 +45,9 @@ export async function loadPageTrust(engine: Exec, refs: readonly PageRef[]): Pro
 
 /**
  * Sets `trust_tier` and `origin` on each row in place and returns the rows a
- * floor admits. The floor is already applied inside every arm's SQL; this is
+ * floor admits. A row whose text carries a fence trust marker below its
+ * page's tier is labeled with the marker tier (origin `facts-fence`) and is
+ * held to the floor at that tier. The floor is already applied inside every arm's SQL; this is
  * the backstop for rows a stage adds by slug (exact lookup, alias hop, graph
  * walk), so no row below the floor leaves the operation.
  */
@@ -54,8 +59,10 @@ export async function stampPageTrust<T extends PageRef>(engine: Exec, rows: T[],
     const fields = (typeof row.page_id === 'number' ? found?.byId.get(row.page_id) : undefined)
       ?? found?.byKey.get(key(row.source_id, row.slug))
       ?? { trust_tier: 'unknown' as const, origin: 'unrecorded' };
-    row.trust_tier = fields.trust_tier;
-    row.origin = fields.origin;
+    const marked = lowestFenceTrustMarker(row.chunk_text);
+    const lowered = marked !== null && compareTrust(marked, fields.trust_tier) < 0;
+    row.trust_tier = lowered ? marked : fields.trust_tier;
+    row.origin = lowered ? FENCE_TRUST_ORIGIN : fields.origin;
   }
   return floor ? rows.filter(row => admitsTrust(row.trust_tier as TrustTier, floor)) : rows;
 }
