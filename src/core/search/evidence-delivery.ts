@@ -1050,7 +1050,7 @@ export interface AssembleEvidenceInput {
   return_window?: number;
   budget_tokens?: number;
   detail?: 'low' | 'medium' | 'high';
-  caller?: { remote?: boolean; sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean };
+  caller?: { remote?: boolean; sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean; minTrust?: import('../trust/tier.ts').TrustTier };
 }
 
 export interface AssembleEvidenceOutput {
@@ -1133,6 +1133,7 @@ export async function assembleEvidenceForHits(engine: BrainEngine, input: Assemb
     ...(input.caller?.sourceIds && input.caller.sourceIds.length > 0 ? { sourceIds: input.caller.sourceIds } : input.caller?.sourceId ? { sourceId: input.caller.sourceId } : {}),
     excludePrivate,
     requireSafeChunks: remote,
+    ...(input.caller?.minTrust ? { minTrust: input.caller.minTrust } : {}),
     ...(input.detail ? { detail: input.detail } : {}),
   };
   const plan = await resolveEvidencePlan(engine, {
