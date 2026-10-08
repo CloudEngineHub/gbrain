@@ -25,6 +25,7 @@ import {
   type WriteGateAssessment, type WriteGateConfig,
 } from '../write-gate.ts';
 import { recordWriteGateReceipt } from '../write-gate-store.ts';
+import { WRITE_GATE_SCAN_BASELINE_KEY } from '../write-gate-schema.ts';
 import { storedTrustTier, TRUST_TIER_RANK, TRUST_TIERS, type TrustTier } from '../trust/tier.ts';
 import { ACTIVATION_TIER_CEILING } from './sql.ts';
 
@@ -69,7 +70,7 @@ async function saveCursor(engine: Pick<BrainEngine, 'executeRaw'>, cursor: Curso
  * under the current detector bounds the scan; a detector bump rescans all.
  */
 async function readBaseline(engine: Pick<BrainEngine, 'executeRaw'>): Promise<Cursor['until'] | null> {
-  const [row] = await engine.executeRaw<{ value: string }>(`SELECT value FROM config WHERE key = 'write_gate.scan_baseline'`);
+  const [row] = await engine.executeRaw<{ value: string }>('SELECT value FROM config WHERE key = $1', [WRITE_GATE_SCAN_BASELINE_KEY]);
   const parsed = row ? JSON.parse(row.value) as { detector_version?: unknown; until?: unknown } : null;
   return parsed?.detector_version === WRITE_GATE_DETECTOR_VERSION && parsed.until && typeof parsed.until === 'object'
     ? parsed.until as Cursor['until'] : null;

@@ -24,6 +24,9 @@
  */
 export const WRITE_GATE_DETECTOR_VERSION = 2;
 
+/** Config key v221 seeds: the detector version and per-table max ids when the gate went live (eligibility/scan.ts). */
+export const WRITE_GATE_SCAN_BASELINE_KEY = 'write_gate.scan_baseline';
+
 export const WRITE_GATE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS write_gate_receipts (
   id               BIGSERIAL PRIMARY KEY,
