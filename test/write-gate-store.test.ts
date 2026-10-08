@@ -17,7 +17,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import type { BrainEngine } from '../src/core/engine.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
-import { assessFactForGate, assessPageForGate, DEFAULT_WRITE_GATE_CONFIG } from '../src/core/write-gate.ts';
+import { assessFactForGate, assessPageForGate, DEFAULT_WRITE_GATE_CONFIG, WRITE_GATE_DETECTOR_VERSION } from '../src/core/write-gate.ts';
 import {
   decideFactWrite, decideTakeWrite, dropWriteGateHold, getWriteGateHold, holdFingerprint, listWriteGateHolds, parseHoldRef,
   pruneWriteGateReceipts, recordFlaggedRow, recordPageGateReceipt, recordWriteGateHold, recordWriteGateReceipt, releaseWriteGateHold,
@@ -59,7 +59,7 @@ for (const kind of testBackends()) {
       expect(other).not.toBe(first);
       const rows = await engine.executeRaw<Record<string, unknown>>(
         "SELECT target_table, target_id, verdict, tier, detector_version, reason_families, reasons, request_id FROM write_gate_receipts WHERE target_id = '1'");
-      expect(rows).toEqual([{ target_table: 'facts', target_id: '1', verdict: 'quarantine', tier: 'external_untrusted', detector_version: 1,
+      expect(rows).toEqual([{ target_table: 'facts', target_id: '1', verdict: 'quarantine', tier: 'external_untrusted', detector_version: WRITE_GATE_DETECTOR_VERSION,
         reason_families: ['exfiltration'], reasons: ['fact:exfil-standing-lead'], request_id: 'req-1' }]);
     });
 
