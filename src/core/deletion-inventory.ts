@@ -156,9 +156,10 @@ const ROWS: readonly Row[] = [
   ['takes', 'swept', 'take', 'claim kind holder since_date until_date source resolved_unit resolved_source resolved_by embedding resolved_quality embedding_model embedded_text_hash write_principal_kind write_principal_id last_write_principal_kind last_write_principal_id trust_tier write_origin'],
   ['think_ab_results', 'out_of_scope', 'probed_reported', 'source_id wave_version question baseline_answer with_calibration_answer preferred model_id notes', 'question baseline_answer with_calibration_answer'],
   ['timeline_entries', 'out_of_scope', 'probed_reported', 'source summary detail write_principal_kind write_principal_id last_write_principal_kind last_write_principal_id trust_tier write_origin', 'summary detail'],
-  ['trust_proposals', 'out_of_scope', 'probed_reported', 'action source_id target_table related_table before_state after_state proposer proposer_principal_kind proposer_principal_id status decided_principal_kind decided_principal_id', 'before_state after_state'],
+  ['trust_allow_rules', 'out_of_scope', 'no_memory_text', 'source_id uri_prefix reason_family created_by removed_by reason'],
+  ['trust_proposals', 'swept', 'review_rows', 'action source_id target_table related_table before_state after_state proposer proposer_principal_kind proposer_principal_id status decided_principal_kind decided_principal_id'],
   ['wanted_links', 'out_of_scope', 'probed_reported', 'source_id producer ref_kind target_source_id target_ref link_type context', 'context'],
-  ['write_gate_holds', 'out_of_scope', 'probed_reported', 'kind source_id slug fingerprint payload write_origin tier reason_families reasons request_id status decided_by', 'payload'],
+  ['write_gate_holds', 'swept', 'review_rows', 'kind source_id slug fingerprint payload write_origin tier reason_families reasons request_id status decided_by'],
   ['write_gate_receipts', 'out_of_scope', 'text_free_ledger', 'target_table target_id source_id content_hash tier verdict reason_families reasons request_id'],
 ];
 

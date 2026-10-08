@@ -16,11 +16,12 @@ import { logContentSanityAssessment } from './audit/content-sanity-audit.ts';
 import { buildEmbedSkipMarker, EMBED_SKIP_KEY } from './embed-skip.ts';
 import { buildContentFlagMarker, buildQuarantineMarker, CONTENT_FLAG_KEY, QUARANTINE_KEY } from './quarantine.ts';
 import { ATOMS_SCAN_HASH_KEY } from './utils.ts';
+import { applyTrustAllowRules } from './trust/allow-rules.ts';
 import {
   assessPageForGate, DEFAULT_WRITE_GATE_CONFIG, parseWriteGateConfig, writeGateDetail, writeGateRejectedError,
   type WriteGateAssessment, type WriteGateConfig, type WriteGateInput,
 } from './write-gate.ts';
-import { recordPageGateReceipt } from './write-gate-store.ts';
+import { clearStalePageGateReceipts, recordPageGateReceipt } from './write-gate-store.ts';
 import { loadOperatorLiterals } from './content-sanity-literals.ts';
 import { classifyImportHold, contentSizeHold, parseMarkdown, type ContentHold, type ParseOpts, type ParsedMarkdown } from './markdown.ts';
 import { isCodeFilePath } from './sync.ts';
@@ -227,7 +228,8 @@ export async function settleContentDisposition(engine: BrainEngine, parsed: Pars
       `[gbrain] content-sanity warn: ${slug} (${sanityResult.bytes} bytes) — exceeds warn threshold, consider splitting\n`,
     );
   }
-  const gate = ctx.writeGate ? assessPageForGate(parsed, ctx.writeGate, sanityCfg.writeGate ?? DEFAULT_WRITE_GATE_CONFIG) : null;
+  const gate = ctx.writeGate ? await applyTrustAllowRules(engine, assessPageForGate(parsed, ctx.writeGate, sanityCfg.writeGate ?? DEFAULT_WRITE_GATE_CONFIG),
+    { sourceId: sourceId ?? 'default', sourceUri: ctx.writeGate.origin?.source_uri ?? null }) : null;
   if (gate) {
     if (gate.verdict === 'reject') throw writeGateRejectedError(gate);
     const detail = writeGateDetail(gate);
@@ -247,6 +249,7 @@ export async function settleContentDisposition(engine: BrainEngine, parsed: Pars
   return {
     quarantined: pageQuarantined, flagged: pageFlagged, ...(pageFlagReason ? { flagReason: pageFlagReason } : {}), gate,
     persistReceipt: async tx => {
+      if (gate?.ran) await clearStalePageGateReceipts(tx, { slug, sourceId: sourceId ?? 'default', contentHash: gate.contentHash });
       if (gate) await recordPageGateReceipt(tx, { slug, sourceId: sourceId ?? 'default', assessment: gate, requestId: ctx.writeGate?.requestId ?? null });
     },
   };

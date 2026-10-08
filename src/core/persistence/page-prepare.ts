@@ -53,6 +53,9 @@ import { pageFencesNormalized } from '../fence-repair/report.ts';
 import { parseFenceRepairReceipt } from '../fence-repair/receipt.ts';
 import { fenceRepairCommit } from './effect-model.ts';
 import { purgePageInTransaction } from './page-purge.ts';
+import { withTrustKeep } from './context.ts';
+import { isFenceEditWrite, pageGateTrust, pageWriteTrust, recordAgentPageLowering, stampPageTrustMarker, storedPageTier } from '../trust/page-write.ts';
+import { gateField, gateInput } from '../trust/gate-outcomes.ts';
 
 
 const ownerStatusFix = (sourceId: string): Action => readFix(`Shows source ${sourceId}'s canonical owner with its pending, failed and recovering requests, read-only.`,
@@ -352,6 +355,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
     const { timeline, materialized } = await materializeTimeline(engine,parsed,row.slug,snapshot,writer,timelinePolicy);
     if (materialized) content = serializePageToMarkdown({...snapshot.page,...parsed,timeline,type:parsed.typeExplicit ? parsed.type : snapshot.page.type},parsed.tags);
   }
+  const storedTier = snapshot ? await storedPageTier(engine, row.source_id, row.slug) : null;
   // Detect an exact canonical no-op before ingestion can invoke any provider.
   // Revision/identity checks above still apply to stale identical replacements.
   if (snapshot && (snapshot.page.deleted_at != null) === targetDeleted && typeof content === 'string') {
@@ -367,6 +371,9 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
   }
   let prepared: PreparedContentImport | undefined;
   let provenance: CanonicalProvenance | undefined;
+  // #5575: the page's tier, computed once before import so the write gate sees exactly it (ENG-18).
+  const trust = pageWriteTrust(row, typeof content === 'string' && !isFenceEditWrite(row) ? parseMarkdown(content, row.slug, { activePack }).frontmatter : null);
+  const gateTrust = pageGateTrust(row, trust, storedTier);
   const result = await importFromContent(engine, row.slug, content, {
     ...source, noEmbed: true, remote: row.authority.remote, activePack, fences: projected ? 'coordinated' : 'lenient',
     // #6259: only owner-tier intents keep gate-owned markers; an ordinary put_page, local or remote, has them stripped.
@@ -376,7 +383,11 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
     source_kind: typeof p.source_kind === 'string' ? p.source_kind : null,
     source_uri: typeof p.source_uri === 'string' ? p.source_uri : null,
     ingested_via: typeof p.ingested_via === 'string' ? p.ingested_via : null,
-    prepareFrontmatter: page => { provenance = putProvenance(row, snapshot, page); },
+    ...(gateTrust ? { writeGate: gateInput(gateTrust, row.id) } : {}),
+    prepareFrontmatter: page => {
+      stampPageTrustMarker(row, page.frontmatter, trust, storedTier);
+      provenance = putProvenance(row, snapshot, page);
+    },
     prepare: async value => { prepared = value; return value.result; },
   }).catch(error => {
     if (!(error instanceof ContentSanityBlockError)) throw error;
@@ -441,12 +452,17 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
   // Always-loaded core tier: owner-only marking, brain-wide budget, remote-edit policy (core-guard.ts).
   const core = noop ? null : await prepareCoreGuard(engine, { row, snapshot, incoming: targetDeleted ? null : ready.parsedPage });
   return { observedRevision, noop, additionalPageKeys:links?.pageKeys, file, ...await pageDatabaseOnlyPublication(engine, row, file),
-    ...(core ? { exclusiveSources: core.exclusiveSources } : {}),
+    ...(core ? { exclusiveSources: core.exclusiveSources } : {}), ...(trust ? { trust } : {}),
     validate: async tx => { await ready.validate(tx); await core?.validate(tx); }, apply: async tx => {
     let autoLinks: Awaited<ReturnType<NonNullable<typeof links>['apply']>> | undefined;
     let removedTimeline: TimelineRowsRemoved | null = null;
+    let lowered: { proposal_ref: string } | null = null;
+    let contested: string[] = [];
     if (!noop) {
-      const applied = await ready.apply(tx);
+      const prior = snapshot ? await storedPageTier(tx, row.source_id, row.slug) : null;
+      // ENG-1: a managed fence edit keeps the page's tier; CEO-12: an agent rewrite that lowers a page files a queue item.
+      const applied = isFenceEditWrite(row) ? await withTrustKeep(tx, ['pages'], () => ready.apply(tx)) : await ready.apply(tx);
+      lowered = prior ? await recordAgentPageLowering(tx, row, { tier: prior, revision: snapshot!.revision }) : null;
       // Mandatory metadata shares publication rollback; exact no-ops never heal it.
       if (sourcePath && !snapshot?.page.source_path) await tx.executeRaw(`UPDATE pages SET source_path = $1
         WHERE source_id=$2 AND slug=$3 AND source_path IS NULL`, [sourcePath, row.source_id, row.slug]);
@@ -465,7 +481,9 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
         for (const tag of versionTags) await tx.addTag(row.slug, tag, source);
       }
       // #6007: the page the import just wrote live is the page the projections describe; no re-read.
-      removedTimeline = (await project?.(tx, row.operation === 'restore_page' ? undefined : applied?.pageId))?.timelineRowsRemoved ?? null;
+      const projected = await project?.(tx, row.operation === 'restore_page' ? undefined : applied?.pageId);
+      removedTimeline = projected?.timelineRowsRemoved ?? null;
+      contested = projected?.contested ?? [];
       autoLinks = await links?.apply(tx);
       if (targetDeleted) await tx.softDeletePage(row.slug, source);
       // Index installation and terminal receipt share this transaction. The import sealed the projection
@@ -474,6 +492,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
       if (core) await core.record(tx, (await tx.readPageSnapshot(row.slug, source))?.revision ?? null);
     }
     const coreUsage = core?.usage();
+    const gate = noop ? undefined : gateField(ready.result.gate, `p:${row.source_id}/${row.slug}`, null);
     return { ...advisories, ...(autoLinks ? {auto_links:autoLinks} : {}), ...(coreUsage ? { core: coreUsage } : {}),
       ...(removedTimeline ? { timeline_rows_removed: timelineRowsRemovedAdvisory(row, removedTimeline) } : {}),
       status: noop ? 'skipped' : row.operation === 'restore_page' ? 'restored' : row.operation === 'revert_version' ? 'reverted' : 'created_or_updated',
@@ -483,7 +502,10 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
       // #6259: say the gate hid the page, not only why it has no chunks.
       ...(!noop && quarantineOutcome(ready.parsedPage.frontmatter) ? { quarantined: quarantineOutcome(ready.parsedPage.frontmatter) } : {}),
       ...(row.operation === 'capture' ? { channel: 'capture', content_hash: p.capture_hash } : {}),
-      ...(edited ? editDiff(row.slug, edited.before, edited.after) : {}), ...fencesNormalized, ...fenceRepairOutcome };
+      ...(edited ? editDiff(row.slug, edited.before, edited.after) : {}), ...fencesNormalized, ...fenceRepairOutcome,
+      ...(lowered ? { trust_lowered: lowered } : {}), ...(gate ? { gate } : {}),
+      // DX-1: a guarded supersession reports contested (the first proposal; every one when the write contested several rows).
+      ...(contested.length ? { contested: { proposal_ref: contested[0], ...(contested.length > 1 ? { proposal_refs: contested } : {}) } } : {}) };
   } };
 }
 

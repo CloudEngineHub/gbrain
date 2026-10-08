@@ -3,6 +3,8 @@ import type { Principal, SqlEngine, WriteRequest } from './model.ts';
 import type { BrainEngine } from '../engine.ts';
 import { withWriteAttribution } from './context.ts';
 import type { WriteTrust } from '../trust/tier.ts';
+import { requestChannelTrust } from '../trust/channel.ts';
+export { ownerSourceGateInput, trustMarkerChanged, writeTrustOfGate } from '../trust/channel.ts';
 
 /**
  * The actor the database stamps on rows written inside withCoordinatedWrite
@@ -21,6 +23,12 @@ export { withWriteAttribution };
 /** A journaled request publishes as itself. */
 export function requestAttribution(row: Pick<WriteRequest, 'id' | 'principal_kind' | 'principal_id'>): WriteAttribution {
   return { requestId: row.id, principal: { kind: row.principal_kind, id: row.principal_id } };
+}
+
+/** A journaled publication: the request's actor, and the tier its preparer declared or its channel earns (#5575 A3). */
+export function publicationAttribution(row: Pick<WriteRequest, 'id' | 'principal_kind' | 'principal_id' | 'operation' | 'authority' | 'intent'>, trust?: WriteTrust): WriteAttribution {
+  const declared = trust ?? requestChannelTrust(row);
+  return { ...requestAttribution(row), ...(declared ? { trust: declared } : {}) };
 }
 
 /** A write by a known principal that has no journal request (manual links, source lifecycle). */

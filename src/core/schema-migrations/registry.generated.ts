@@ -223,6 +223,7 @@ import { v219 } from './v219-pages-reconcile-name-indexes.ts';
 import { v230 } from './v230-trust-tiers.ts';
 import { v231 } from './v231-write-gate.ts';
 import { v232 } from './v232-memory-purge.ts';
+import { v233 } from './v233-trust-allow-rules.ts';
 import { v234 } from './v234-trust-generation.ts';
 
 // Array order is historical (see HISTORICAL_ARRAY_ORDER in the generator); the
@@ -445,5 +446,6 @@ export const MIGRATIONS: Migration[] = [
   v230,
   v231,
   v232,
+  v233,
   v234,
 ];

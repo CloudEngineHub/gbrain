@@ -502,7 +502,7 @@
         },
         {
           "category": "ops",
-          "message": "RLS enabled on 121/121 public tables",
+          "message": "RLS enabled on 130/130 public tables",
           "name": "rls",
           "status": "ok"
         },
@@ -514,7 +514,7 @@
         },
         {
           "category": "meta",
-          "message": "992 column(s) verified against live schema",
+          "message": "1055 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
@@ -1767,6 +1767,11 @@
               "unknown": 0,
               "user_confirmed": 0
             },
+            "derived": {
+              "external_pct": 0,
+              "external_untrusted": 0,
+              "rows": 0
+            },
             "rows": 0,
             "tables": [
               {
@@ -1822,6 +1827,23 @@
           },
           "message": "No facts, takes, timeline entries or pages yet.",
           "name": "trust_tiers",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "completed_at": null,
+            "detector_version": 1,
+            "total_unscanned": 0,
+            "unscanned": {
+              "facts": 0,
+              "pages": 0,
+              "takes": 0,
+              "timeline_entries": 0
+            }
+          },
+          "message": "Every agent-written or lower row has been scanned by the current write-gate detector; proactive suppression covers them.",
+          "name": "trust_scan",
           "status": "ok"
         },
         {

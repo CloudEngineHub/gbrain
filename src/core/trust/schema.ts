@@ -12,6 +12,10 @@
  *   gbrain.write_origin           its origin record, JSON text
  *   gbrain.write_trust_promotion  a tier ceiling for an explicit raise (owner confirmation, CEO-9)
  *   gbrain.write_trust_backfill   'on' for the deterministic backfill (CEO-10)
+ *   gbrain.write_trust_keep       comma list of tables whose content rewrites in this scope keep the
+ *                                 stored tier: a gbrain-managed fence edit (remember/takes fence append,
+ *                                 forget or accept strike) rewrites the page body without authoring it,
+ *                                 and the fence row carries its own tier (ENG-1)
  *
  * Trigger semantics (CEO-12, CEO-16, CEO-10, ENG-13):
  * - INSERT: the row gets the writer's tier, or `unknown` without one; a
@@ -20,7 +24,9 @@
  * - UPDATE that changes a TRUST_CONTENT_COLUMNS column: an owner-tier writer
  *   (operator_curated or higher) restamps the row to its tier; any lower
  *   writer (or none, read as `unknown`) sets min(prior tier, writer tier).
- * - UPDATE that changes no content column keeps the stored tier.
+ * - UPDATE that changes no content column keeps the stored tier, and so does
+ *   a content change on a table named by gbrain.write_trust_keep (a fence
+ *   edit; it can still lower, never raise).
  * - An UPDATE that sets a higher tier is honored under a covering promotion
  *   ceiling, or under the backfill setting from `unknown` to anything below
  *   user_confirmed. Inside a writer scope it is otherwise clamped back; with
@@ -43,7 +49,7 @@ export const TRUST_TABLES: readonly TrustTable[] = ['facts', 'takes', 'timeline_
  * `trust_tier` marker is content on purpose: deleting it by hand is the
  * owner act that lets the next owner sync restamp the page (CEO-21).
  */
-export const TRUST_EPHEMERAL_FRONTMATTER_KEYS: readonly string[] = [...HASH_EPHEMERAL_FRONTMATTER_KEYS, 'quarantine_override'];
+export const TRUST_EPHEMERAL_FRONTMATTER_KEYS: readonly string[] = [...HASH_EPHEMERAL_FRONTMATTER_KEYS.filter(key => key !== 'trust_tier'), 'quarantine_override'];
 
 /**
  * ENG-2: the columns whose change is a content rewrite. Lifecycle and
@@ -89,12 +95,13 @@ const SETTINGS = `
   origin_text := NULLIF(current_setting('gbrain.write_origin', true), '');
   promo := NULLIF(current_setting('gbrain.write_trust_promotion', true), '');
   backfill := COALESCE(current_setting('gbrain.write_trust_backfill', true), '') = 'on';
+  keep := TG_TABLE_NAME = ANY(string_to_array(COALESCE(current_setting('gbrain.write_trust_keep', true), ''), ','));
   IF ${rank('writer')} = 0 AND writer IS NOT NULL OR ${rank('promo')} = 0 AND promo IS NOT NULL THEN
     RAISE EXCEPTION USING ERRCODE='22023', MESSAGE='gbrain trust setting names no tier', CONSTRAINT='trust_tier_guard';
   END IF;`;
 
 const STAMP_TIER_FUNCTION = `CREATE OR REPLACE FUNCTION gbrain_stamp_trust_tier() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public AS $fn$
-DECLARE writer text; origin_text text; promo text; backfill boolean; changed boolean; effective text;
+DECLARE writer text; origin_text text; promo text; backfill boolean; keep boolean; changed boolean; effective text;
 BEGIN${SETTINGS}
   IF ${rank('writer')} > ${rank(`'${OWNER_TIER_FLOOR}'`)} AND (promo IS NULL OR ${rank('writer')} > ${rank('promo')}) THEN
     ${refuse('a write declared a tier above operator_curated without owner confirmation', `jsonb_build_object('op',TG_OP,'writer',writer)::text`)};
@@ -125,7 +132,7 @@ BEGIN${SETTINGS}
   ELSE
     RAISE EXCEPTION 'gbrain_stamp_trust_tier is not classified for table %', TG_TABLE_NAME;
   END IF;
-  IF changed THEN
+  IF changed AND NOT keep THEN
     effective := COALESCE(writer, 'unknown');
     IF ${rank('effective')} < ${rank(`'${OWNER_TIER_FLOOR}'`)} THEN effective := ${lowerOf('OLD.trust_tier', 'effective')}; END IF;
     IF ${rank('NEW.trust_tier')} < ${rank('OLD.trust_tier')} THEN effective := ${lowerOf('NEW.trust_tier', 'effective')}; END IF;
