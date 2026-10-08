@@ -222,7 +222,8 @@ or a physical projection that leaves attribution untouched):
 - `src/core/calibration/undo-wave.ts` (1): the calibration wave undo of take resolutions runs in `maintenanceTransaction`.
 - `src/core/chronicle/publish.ts` (3): Life Chronicle event generations: maintenance requests on managed brains; the unmanaged event write, retirement soft delete and retired stamp run in `maintenanceTransaction`.
 - `src/core/company-brain/profile.ts` (1): legacy sync soft deletes (`softDeleteSyncPages`) run in `maintenanceTransaction`, inside the company-brain source check when one is active.
-- `src/core/cycle/dream-provenance.ts` (1): the dream provenance frontmatter stamp runs per page in `maintenanceTransaction` (unmanaged brains only; managed synthesis publishes through maintenance requests).
+- `src/core/cycle/dream-provenance.ts` (1): the dream provenance frontmatter stamp runs per page in `maintenanceTransaction`, or `derivedMaintenanceTransaction` at the child's derived tier when the ref carries its taint (unmanaged brains only; managed synthesis publishes through maintenance requests).
+- `src/core/cycle/dream-taint.ts` (1): the unmanaged dream summary page runs in `derivedMaintenanceTransaction` at the tier of the pages it indexes; managed brains publish it through a maintenance request.
 - `src/core/cycle/drift.ts` (1): the unmanaged drift report page runs in `maintenanceTransaction`; managed brains publish it through a maintenance request.
 - `src/core/cycle/extract-atoms-page-state.ts` (1): the atom completion stamp runs in `maintenanceTransaction`.
 - `src/core/cycle/extract-atoms.ts` (1): stale atom retirement soft-deletes in 500-page `maintenanceTransaction` chunks.
@@ -230,8 +231,7 @@ or a physical projection that leaves attribution untouched):
 - `src/core/cycle/extract-takes.ts` (2): coordinated per page on managed brains; the unmanaged batch upsert runs in `maintenanceTransaction`.
 - `src/core/cycle/grade-takes.ts` (1): unmanaged take auto-resolution runs in `maintenanceTransaction`; managed brains publish a `takes_resolve` request.
 - `src/core/cycle/phantom-redirect.ts` (3): the unmanaged phantom fact move, canonical body refresh and phantom soft delete run in `maintenanceTransaction`; the managed redirect moves facts inside its coordinated write.
-- `src/core/cycle/phases/consolidate.ts` (4): unmanaged consolidation takes and fact updates run in `maintenanceTransaction` per cluster step; managed brains submit a maintenance consolidation request.
-- `src/core/cycle/synthesize.ts` (1): the unmanaged dream summary page runs in `maintenanceTransaction`; managed brains publish it through a maintenance request.
+- `src/core/cycle/phases/consolidate.ts` (4): unmanaged consolidation's take insert or re-promotion, consolidation marks and valid_until writeback run in one `derivedMaintenanceTransaction` per cluster at the cluster's derived tier; managed brains submit a maintenance consolidation request.
 - `src/core/embed-facts.ts` (1): embedding columns only (physical projection).
 - `src/core/embedding-dim-check.ts` (1): embedding columns only (physical projection).
 - `src/core/extract/receipt-writer.ts` (1): the extraction receipt page runs in `maintenanceTransaction`.

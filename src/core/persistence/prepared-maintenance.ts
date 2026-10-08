@@ -167,8 +167,9 @@ export async function submitDatabaseMaintenanceIntent(engine: BrainEngine, autho
   return submitMaintenance(engine, authority, slug, intent, requestId, false);
 }
 
+/** `derivation` (#5575 I2): the deriver's taint declaration, stamped onto the output page. */
 export async function stampMaintenancePage(engine: BrainEngine, authority: MaintenanceAuthority, slug: string,
-  cycleDate: string, rawSource?: string, rawTraceExemptReason?: string, seat?: string | null): Promise<void> {
+  cycleDate: string, rawSource?: string, rawTraceExemptReason?: string, seat?: string | null, derivation?: DerivationDeclaration): Promise<void> {
   const snapshot = await engine.readPageSnapshot(slug, { sourceId: authority.writer.sourceId });
   if (!snapshot) throw opError('page_not_found', 'A maintenance output page disappeared.',
     `Output page ${slug} in '${authority.writer.sourceId}' no longer exists, so it was not stamped. Confirm with the command in fix, then run maintenance again to regenerate it if it is still wanted.`,
@@ -179,7 +180,8 @@ export async function stampMaintenancePage(engine: BrainEngine, authority: Maint
     dream_cycle_date: firstDate, dream_created_cycle_date: firstDate, ...(rawSource ? { raw_source: rawSource } : {}),
     ...(rawTraceExemptReason ? { raw_trace_exempt: true, raw_trace_exempt_reason: rawTraceExemptReason } : {}),
     ...(seat ? { seat } : {}) } };
-  await publishMaintenancePage(engine, authority, slug, serializePageToMarkdown(page, snapshot.tags), { expectedRevision: snapshot.revision });
+  await publishMaintenancePage(engine, authority, slug, serializePageToMarkdown(page, snapshot.tags), { expectedRevision: snapshot.revision,
+    ...(derivation ? { derivation } : {}) });
 }
 
 export async function verifyMaintenanceOutputs(engine: BrainEngine, authority: MaintenanceAuthority,
