@@ -18,7 +18,7 @@ import type { Principal } from '../persistence/model.ts';
 import { opError } from '../ops/contract.ts';
 import { isValidSourceId } from '../source-id.ts';
 
-// TODO(L2a-merge): unify with write-gate.ts WriteGateReasonFamily (same four families).
+/** The write gate's reason families (write-gate-patterns.ts); pinned equal by test/trust-channel-writes.test.ts. */
 export const TRUST_ALLOW_REASON_FAMILIES = ['override', 'standing_instruction', 'exfiltration', 'credential'] as const;
 export type TrustAllowReasonFamily = typeof TRUST_ALLOW_REASON_FAMILIES[number];
 
@@ -163,4 +163,20 @@ export function matchTrustAllowRule(rules: readonly Pick<TrustAllowRule, 'id' | 
     used.add(cover.id);
   }
   return [...used].sort((a, b) => a - b);
+}
+
+/**
+ * DX-14: a gate verdict on content an owner allow rule covers (same source,
+ * server-stamped URI prefix, every flagged reason family) becomes `allow`, so
+ * recurring benign external content stops re-quarantining. Detector errors are
+ * never allowed (fail-closed stays fail-closed). Rules are read once per write.
+ */
+export async function applyTrustAllowRules<T extends { verdict: string; families: readonly string[]; detectorError: boolean }>(
+  engine: Pick<BrainEngine, 'executeRaw'>, assessment: T, write: { sourceId: string; sourceUri: string | null }): Promise<T> {
+  if (assessment.verdict === 'allow' || assessment.detectorError || assessment.families.length === 0) return assessment;
+  let rules: TrustAllowRule[];
+  try { rules = await listTrustAllowRules(engine, { sourceIds: [write.sourceId] }); }
+  catch { return assessment; }
+  return matchTrustAllowRule(rules, { sourceId: write.sourceId, sourceUri: write.sourceUri, families: [...assessment.families] as never })
+    ? { ...assessment, verdict: 'allow' } : assessment;
 }

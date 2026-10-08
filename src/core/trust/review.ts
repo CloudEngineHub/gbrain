@@ -133,7 +133,7 @@ function proposalItem(p: TrustProposalRow, page: string | null): TrustReviewItem
   };
 }
 
-// TODO(L2a-merge): the standing-preference flag lives in write_gate_receipts (L2a); this query reads it when the table exists.
+// The standing-preference flag lives in write_gate_receipts (the write gate); read when the table exists.
 async function standingPreferences(engine: BrainEngine, filter: TrustReviewFilter): Promise<TrustReviewItem[]> {
   const [table] = await engine.executeRaw<{ t: string | null }>(`SELECT to_regclass('write_gate_receipts')::text AS t`);
   if (!table?.t) return [];
@@ -241,7 +241,7 @@ export interface TrustExplanation {
   tier: TrustTier;
   label: string;
   write_origin: Record<string, unknown> | null;
-  /** TODO(L2a-merge): receipts come from write_gate_receipts when the table exists. */
+  /** Receipts from write_gate_receipts (the write gate), when the table exists. */
   gate: { verdict: 'flag' | 'quarantine' | 'none' | 'unavailable'; receipts: Array<{ id: number; verdict: string; reason_families: string[]; detector_version: number; last_seen_at: string }> };
   quarantined?: boolean;
   pending_proposals: Array<{ ref: string; action: string; commands: string[][] }>;
@@ -249,7 +249,7 @@ export interface TrustExplanation {
   text?: string;
 }
 
-// TODO(L2a-merge): replace with the gate store's receipt reader (write-gate-store.ts).
+// The write gate receipts for one row (write_gate_receipts), newest first.
 async function gateReceipts(engine: BrainEngine, table: string, id: number): Promise<TrustExplanation['gate']> {
   const [exists] = await engine.executeRaw<{ t: string | null }>(`SELECT to_regclass('write_gate_receipts')::text AS t`);
   if (!exists?.t) return { verdict: 'unavailable', receipts: [] };

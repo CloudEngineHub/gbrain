@@ -34,6 +34,10 @@ import {
 import { formatTrustRef, pageRef, parseTrustRef, resolvePageRef, type TrustRef } from './refs.ts';
 import { storedTrustTier, trustLabel, type TrustTier } from './tier.ts';
 import { isQuarantined } from '../quarantine.ts';
+import { getWriteGateHold, releaseWriteGateHold, type WriteGateHold } from '../write-gate-store.ts';
+import { withCoordinatedWrite, withTrustPromotion, withWriteAttribution, withWriteTrust } from '../persistence/context.ts';
+import { maintenanceAttribution } from '../persistence/attribution.ts';
+import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 import {
   addTrustAllowRule, getTrustAllowRule, normalizeTrustAllowRule, parseAllowRuleRef, principalLabel, removeTrustAllowRule, type TrustAllowRule,
 } from './allow-rules.ts';
@@ -130,8 +134,7 @@ async function readTakeTarget(engine: BrainEngine, id: number): Promise<RowTarge
     binding: bindingOf(row), live: row.active !== false };
 }
 
-// TODO(L2a-merge): replace this adapter with write-gate-store.ts (getWriteGateHold, releaseWriteGateHold,
-// dropWriteGateHold) and the gate's publish-at-user_confirmed path. It reads the same write_gate_holds table.
+// Held writes (write-gate-store.ts). Release publishes the held row at user_confirmed in the same transaction (CEO-9).
 export interface HoldRow { id: number; kind: 'fact' | 'take'; source_id: string; slug: string; status: string; tier: TrustTier; reason_families: string[]; payload: Record<string, unknown>; last_seen_at: string }
 export interface HoldStoreAdapter {
   get(engine: BrainEngine, id: number): Promise<HoldRow | null>;
@@ -165,12 +168,36 @@ const defaultHoldStore: HoldStoreAdapter = {
          AND ($2::timestamptz IS NULL OR last_seen_at >= $2) ORDER BY id LIMIT 1000`, [opts.sourceId ?? null, opts.since?.toISOString() ?? null]);
     return rows.map(holdRow);
   },
-  async release() {
-    throw opError('unavailable', 'Releasing a held write needs the write gate\'s publish path, which this build does not include; nothing was changed.',
-      'Upgrade gbrain on the brain host, then run gbrain trust release again.');
+  async release(tx, id, by) {
+    const held = await getWriteGateHold(tx, id);
+    if (held?.kind === 'take') {
+      throw opError('unavailable', `h${id} is a held take; releasing takes is not supported yet, so nothing was changed.`,
+        `Drop it with gbrain trust drop h${id}, or add the take yourself with gbrain takes add.`);
+    }
+    const hold = await releaseWriteGateHold(tx, id, by);
+    if (!hold) return false;
+    await publishReleasedFact(tx, hold);
+    return true;
   },
   async drop(tx, id, by) { return (await tx.executeRaw(decideHoldSql('dropped'), [id, by])).length === 1; },
 };
+/**
+ * The released fact enters memory as the owner's confirmed row: database-only (the hold kept no fence
+ * position; its embedding is filled by the usual backfill), stamped user_confirmed under the promotion capability.
+ */
+async function publishReleasedFact(tx: BrainEngine, hold: WriteGateHold): Promise<void> {
+  const p = hold.payload;
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+  const trust = { tier: 'user_confirmed' as const, origin: { channel: 'trust_release', request_id: hold.request_id ?? undefined } };
+  const write = () => withTrustPromotion(tx, 'user_confirmed', () => withWriteTrust(tx, trust, () => tx.insertFact({ // gbrain-allow-direct-insert: owner release of a held fact (CEO-9), inside the owner's coordinated transaction
+    fact: String(p.fact ?? ''), kind: (str(p.kind) ?? 'fact') as never, entity_slug: str(p.entity_slug), visibility: (p.visibility === 'world' ? 'world' : 'private'),
+    source: str(p.source) ?? `trust release h${hold.id}`, context: str(p.context), source_session: str(p.source_session), confidence: 1,
+    valid_from: str(p.valid_from) ? new Date(String(p.valid_from)) : new Date(), valid_until: str(p.valid_until) ? new Date(String(p.valid_until)) : null,
+    embedding: null, embedding_model: null,
+  }, { source_id: hold.source_id })));
+  if (await managedPersistenceEnabled(tx)) await withCoordinatedWrite(tx, [hold.source_id], write, await maintenanceAttribution(tx));
+  else await withWriteAttribution(tx, await maintenanceAttribution(tx), write);
+}
 let holdStore: HoldStoreAdapter = defaultHoldStore;
 /** Test seam (and the L2a merge point): the hold store the owner actions use. */
 export function __setHoldStoreForTests(store: HoldStoreAdapter | null): void { holdStore = store ?? defaultHoldStore; }
