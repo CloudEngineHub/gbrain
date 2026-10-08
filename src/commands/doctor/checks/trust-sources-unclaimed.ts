@@ -2,8 +2,8 @@
  * trust_sources_unclaimed (#5575, legacy content): warns while live,
  * non-connector sources the owner has not claimed hold rows still at
  * `unknown` (written before trust tiers, so they have no provenance), and
- * while a claim's lift has not finished. The fix is `fix.next: ask_user`:
- * relay what claiming means; only the owner can claim, at a terminal
+ * while a claim's lift has not finished. The fix is `fix.next:
+ * tell_user_to_run`: relay what claiming means; only the owner can claim, at a terminal
  * (`gbrain trust claim-sources`, trust/claim.ts). A fresh or empty brain, or a
  * brain before the trust migration, is ok. Read-only.
  */
@@ -33,7 +33,7 @@ async function runTrustSourcesUnclaimed(ctx: DoctorContext): Promise<Check[]> {
     } else {
       checks.push({ name: 'trust_sources_unclaimed', status: 'warn', details,
         message: `${rows} row(s) from before trust tiers in ${unclaimed.length} unclaimed source(s) (${unclaimed.map(s => s.id).join(', ')}) read as "unverified origin". `
-          + 'Ask the user whether these are their own notes; if so they run gbrain trust claim-sources in a terminal on the brain host (gbrain trust claim-sources --dry-run --json previews it).',
+          + 'Tell the user: if these are their own notes, they run gbrain trust claim-sources in a terminal on the brain host (gbrain trust claim-sources --dry-run --json previews it).',
         fix: claimSourcesFix('trust_sources_unclaimed') });
     }
   } catch (err) {

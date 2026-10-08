@@ -37,8 +37,8 @@ recall and `get_page`. Proactive surfaces (hook context, the context engine,
 sources and agree to the scan.** Older rows have no provenance, so they read
 as "unverified origin". On a long-lived brain that is most rows, including
 your own notes and synced code repositories. gbrain never scans them on its
-own. Doctor, `gbrain post-upgrade` and the behavior-change notice ask you
-first.
+own. Doctor, `gbrain post-upgrade` and the behavior-change notice tell you
+the commands to run.
 
 ## Claim your sources (once, after upgrading)
 
@@ -65,8 +65,8 @@ Typing a source's id claims it as your own notes:
   comes from other people.
 
 Claiming needs you at a terminal on the brain host. Without one (an agent,
-piped input) the command changes nothing. It exits 3 with an `ask_user` fix,
-whose `user_message` explains claiming.
+piped input) the command changes nothing. It exits 3 with a fix whose
+`next` is `tell_user_to_run`; its `user_message` explains claiming.
 
 The lift runs in bounded batches. If it is interrupted,
 `gbrain trust claim-sources --resume` finishes it without asking again. Until
@@ -89,16 +89,17 @@ The scan runs the write gate's deterministic detector over older rows at
 "written by an agent" or below. It records a receipt for each instruction-like
 row. It never deletes, moves or rewrites anything, but flagged rows stop
 reaching proactive context until you confirm them. Doctor's `trust_scan`
-check therefore asks you before an agent runs it (`fix.next: ask_user`).
+check therefore leaves it to you (`fix.next: tell_user_to_run`): no agent
+starts it.
 Claim your own sources first, so your notes are not treated as unverified.
 
 ## Doctor checks
 
 - `trust_sources_unclaimed` warns while unclaimed, non-connector sources hold
-  rows from before trust tiers, with `fix.next: ask_user` naming
+  rows from before trust tiers, with `fix.next: tell_user_to_run` naming
   `gbrain trust claim-sources`. It also warns, with the resume command, while
   a claim's lift has not finished. A fresh or empty brain is ok.
 - `trust_scan` warns while older rows at "written by an agent" or below have
-  not been scanned. Its fix asks you first.
+  not been scanned. Its fix is yours to run (`tell_user_to_run`).
 - `trust_tiers` reports the tier mix and recommends `gbrain trust backfill`.
   The backfill classifies older rows from deterministic signals only.

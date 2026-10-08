@@ -16,7 +16,7 @@
  * Connector sources (google, github) cannot be claimed: their text is third
  * party. Claiming needs the owner at a terminal typing each source id
  * (trust/confirm.ts; `--yes` never counts); without one the command refuses
- * with an ask_user fix. The lift is bounded (keyset batches), resumable
+ * with a tell_user_to_run fix. The lift is bounded (keyset batches), resumable
  * (`--resume`, its own cursor) and receipted (each lifted row's
  * `write_origin.channel` is `trust_claim`; the source records when it was
  * claimed and when its lift finished). `--dry-run` is read-only.
@@ -212,12 +212,14 @@ export const CLAIM_USER_MESSAGE = 'Your older notes were saved before gbrain tra
   + 'To claim, run `gbrain trust claim-sources` in a terminal on the brain host; it shows each source and asks you to type its id.';
 
 /**
- * The ask for an unclaimed brain: relay `user_message`; only the user can
- * claim (the command needs them at a terminal typing each source id).
+ * The fix for an unclaimed brain: `actor: 'user'`, so `fix.next` is
+ * tell_user_to_run (DX-3: every tier-raising fix is the user's to run, and the
+ * command needs them at a terminal typing each source id). The agent relays
+ * `user_message`, which explains the decision.
  */
 export function claimSourcesFix(verifyCheck = 'trust_sources_unclaimed'): Action {
   return {
-    argv: [...TRUST_CLAIM_COMMAND], consent: ['destructive'], actor: 'agent', requires_exclusive: false,
+    argv: [...TRUST_CLAIM_COMMAND], consent: [], actor: 'user', requires_exclusive: false,
     why: 'Claiming raises legacy rows of the sources the owner confirms from "unverified origin" to "your notes" (never to "confirmed by you"); it is the owner\'s decision and needs them at a terminal.',
     user_message: CLAIM_USER_MESSAGE,
     preview_argv: [...TRUST_CLAIM_COMMAND, '--dry-run', '--json'],

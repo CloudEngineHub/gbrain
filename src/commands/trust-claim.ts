@@ -106,7 +106,7 @@ export async function runTrustClaimSources(engine: BrainEngine, args: string[], 
       });
       if (answer === 'non_interactive') {
         throw opError('confirmation_required', 'Claiming sources needs the owner at a terminal; nothing was changed.',
-          'Relay user_message to the user and stop. Only they can claim, by running the command in a terminal on the brain host.',
+          'Relay user_message to the user and stop. Only they can claim, by running the command in fix in a terminal on the brain host.',
           { why: 'Claiming raises legacy rows to "your notes"; that is the owner\'s decision, so it needs a person typing each source id. Piped input, agents and --yes cannot claim.', fix: claimSourcesFix() });
       }
       if (answer === 'confirmed') claimed.push(s.id);

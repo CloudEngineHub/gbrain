@@ -1,7 +1,7 @@
 /**
  * `gbrain post-upgrade` (#5575, legacy content): while unclaimed sources hold
- * rows from before trust tiers, an [AGENT] ask_user block asks the agent to
- * relay what claiming means; only the owner claims, at a terminal
+ * rows from before trust tiers, an [AGENT] tell_user_to_run block asks the agent
+ * to relay what claiming means; only the owner claims, at a terminal
  * (`gbrain trust claim-sources`, trust/claim.ts). It repeats on every
  * post-upgrade until nothing is left to claim. A claim whose lift did not
  * finish gets the resume command instead. Never runs the claim or the scan.
@@ -24,12 +24,11 @@ export async function trustClaimUpgradeNotice(engine: Pick<BrainEngine, 'execute
   if (!unclaimed.length) return null;
   const rows = unclaimed.reduce((n, s) => n + s.legacy_unknown, 0);
   return ['', ...agentBlock({
-    ask: `Are ${unclaimed.map(s => s.id).join(', ')} the user's own notes? If so, the user claims them in a terminal.`,
     why: `${rows} row(s) written before trust tiers in ${unclaimed.length} unclaimed source(s) read as "unverified origin". New agent-written content is already held back `
-      + 'when it reads as instructions; older content is covered only after the user claims their sources and agrees to gbrain trust scan, which nothing runs on its own.',
-    actor: 'user', next: `ask_user: ${TRUST_CLAIM_COMMAND.join(' ')}`,
-    if_yes: `Tell the user to run ${TRUST_CLAIM_COMMAND.join(' ')} in a terminal on the brain host; it asks them to type each source id (--yes never claims). Preview: gbrain trust claim-sources --dry-run --json.`,
-    if_no: 'Run nothing; those rows stay "unverified origin" and nothing is withheld unless the user later agrees to gbrain trust scan.',
+      + 'when it reads as instructions; older content is covered only after the user claims their sources and runs gbrain trust scan, which no agent starts.',
+    actor: 'user', next: `tell_user_to_run: ${TRUST_CLAIM_COMMAND.join(' ')}`,
+    if_yes: `The user runs ${TRUST_CLAIM_COMMAND.join(' ')} in a terminal on the brain host; it asks them to type each source id (--yes never claims). Preview: gbrain trust claim-sources --dry-run --json.`,
+    if_no: 'Run nothing; those rows stay "unverified origin" and nothing is withheld unless the user later runs gbrain trust scan.',
     verify,
   }, { showUser: CLAIM_USER_MESSAGE }).trimEnd().split('\n'), ''];
 }

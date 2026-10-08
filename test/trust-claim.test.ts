@@ -3,7 +3,7 @@
  *
  * Protects: the owner claims a source only by typing its id on a terminal
  * (--yes never counts; without a terminal the command refuses with an
- * ask_user fix and changes nothing); a claim sets the per-source default
+ * tell_user_to_run fix and changes nothing); a claim sets the per-source default
  * operator_curated and lifts the source's legacy unknown rows through the
  * backfill, never above operator_curated, while rows with a lowering signal
  * (mcp:* and capture stamps, transcript imports, clipped pages, connector
@@ -11,9 +11,10 @@
  * tier; connector sources cannot be claimed; an interrupted lift resumes, and
  * until it does the scan refuses and explain shows the rows as owner tier;
  * `--dry-run` writes nothing; `sources set-trust` to a lower tier ends a
- * claim. Doctor `trust_sources_unclaimed` warns with ask_user while unclaimed
- * legacy rows exist and never on a fresh brain; doctor `trust_scan` asks
- * before scanning; post-upgrade and the behavior-change notice carry the ask.
+ * claim. Doctor `trust_sources_unclaimed` warns with tell_user_to_run while unclaimed
+ * legacy rows exist and never on a fresh brain; doctor `trust_scan` leaves the
+ * scan to the user; post-upgrade and the behavior-change notice name the claim.
+ * None of these fixes carries consent effects (nothing is destructive).
  * Also pins the SQL frontmatter caps to `frontmatterTrustCaps`.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
@@ -163,7 +164,7 @@ describe('trust claim-sources', () => {
     expect(out).toContain('github connector: cannot be claimed');
   });
 
-  test('without a terminal it refuses with an ask_user fix and changes nothing', async () => {
+  test('without a terminal it refuses with a tell_user_to_run fix and changes nothing', async () => {
     const s = await seed();
     const before = await snapshot(s.src);
     nonTty();
@@ -171,7 +172,8 @@ describe('trust claim-sources', () => {
     expect(err).toContain('confirmation_required');
     expect(await snapshot(s.src)).toBe(before);
     const fix = render(claimSourcesFix());
-    expect(fix.next).toBe('ask_user');
+    expect(fix.next).toBe('tell_user_to_run');
+    expect(fix.consent).toEqual([]);
     expect(fix.argv).toEqual(['gbrain', 'trust', 'claim-sources']);
     expect(fix.user_message).toContain('gbrain trust claim-sources');
     expect(fix.user_message).toContain('your notes');
@@ -260,7 +262,7 @@ describe('trust claim-sources', () => {
 });
 
 describe('the asks around claiming', () => {
-  test('doctor trust_sources_unclaimed: ok on a fresh brain, ask_user while unclaimed legacy rows exist', async () => {
+  test('doctor trust_sources_unclaimed: ok on a fresh brain, tell_user_to_run while unclaimed legacy rows exist', async () => {
     expect((await doctor(trustSourcesUnclaimedEntry, fresh)).status).toBe('ok');
     expect(await trustClaimUpgradeNotice(fresh)).toBeNull();
     expect(await withTrustClaimAsk(fresh, { code: 'behavior_changes', kind: 'safety', why: 'w', fix: { argv: ['gbrain', 'doctor', '--only', 'behavior_changes', '--json'], consent: [], actor: 'agent', requires_exclusive: false, why: 'x' } }))
@@ -271,7 +273,8 @@ describe('the asks around claiming', () => {
     expect(check.message).toContain(s.src);
     expect(check.message).not.toContain(s.gh);
     const fix = render(check.fix);
-    expect(fix.next).toBe('ask_user');
+    expect(fix.next).toBe('tell_user_to_run');
+    expect(fix.consent).toEqual([]);
     expect(fix.argv).toEqual(['gbrain', 'trust', 'claim-sources']);
   });
 
@@ -284,27 +287,28 @@ describe('the asks around claiming', () => {
     expect((await fresh.executeRaw<{ t: string }>('SELECT trust_tier AS t FROM pages WHERE id=$1', [page!.id]))[0]!.t).toBe('unknown');
   });
 
-  test('doctor trust_scan asks before scanning legacy content', async () => {
+  test('doctor trust_scan leaves the legacy scan to the user', async () => {
     await seed();
     // These rows stand in for content from before the write gate: no scan baseline bounds them.
     await engine.executeRaw('DELETE FROM config WHERE key = $1', [WRITE_GATE_SCAN_BASELINE_KEY]);
     const check = await doctor(trustScanEntry);
     expect(check.status).toBe('warn');
     const fix = render(check.fix);
-    expect(fix.next).toBe('ask_user');
+    expect(fix.next).toBe('tell_user_to_run');
+    expect(fix.consent).toEqual([]);
     expect(fix.argv).toEqual(['gbrain', 'trust', 'scan']);
     expect(fix.user_message).toContain('claim');
   });
 
-  test('post-upgrade and the behavior-change notice carry the ask_user block', async () => {
+  test('post-upgrade and the behavior-change notice carry the tell_user_to_run block', async () => {
     await seed();
     const lines = (await trustClaimUpgradeNotice(engine))!.join('\n');
     expect(lines).toContain('[AGENT]');
-    expect(lines).toContain('next: ask_user: gbrain trust claim-sources');
+    expect(lines).toContain('next: tell_user_to_run: gbrain trust claim-sources');
     expect(lines).toContain('[SHOW USER]');
     expect(lines).not.toContain('gbrain trust scan --');
     const notice = await withTrustClaimAsk(engine, { code: 'behavior_changes', kind: 'safety', why: 'w', fix: { argv: ['gbrain', 'doctor', '--only', 'behavior_changes', '--json'], consent: [], actor: 'agent', requires_exclusive: false, why: 'x' } });
-    expect(render(notice!.fix).next).toBe('ask_user');
+    expect(render(notice!.fix)).toMatchObject({ next: 'tell_user_to_run', consent: [] });
     expect(notice!.user_message).toContain('gbrain trust claim-sources');
   });
 });

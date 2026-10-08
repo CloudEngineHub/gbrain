@@ -313,7 +313,7 @@ export const BEHAVIOR_CHANGES: ReadonlyArray<{ since: string; text: ChangeText }
   { since: '0.60.108.0', text: 'A job error during worker shutdown now records `worker_shutdown: <handler error>` instead of bare `worker_shutdown`, and an `UnrecoverableError` thrown then dead-letters at once instead of running again.' },
   { since: '0.60.108.0', text: '`gbrain jobs supervisor stop` can now report `unverified` (exit 1) and `stale_pid_file` (exit 0, nothing signaled), and on Linux the supervisor PID file has a second line with the process start time; read only its first line.' },
   { since: '0.60.108.0', text: '`thinking: off` calls on native Google and OpenAI routes (eval judges, the synthesize triage judge, fence repair\'s model tier) now send the model\'s thinking switch (`thinkingBudget: 0`, `reasoningEffort: none`) and, where reasoning cannot be turned off (Gemini 2.5 Pro and 3.x, gpt-5/-mini/-nano, o-series), a 32,000-token reply cap; `eval takes-quality --budget-usd` and `eval cross-modal --max-usd` price that cap, so a budget that passed before can refuse earlier.' },
-  { since: '0.60.110.0', text: 'Memory trust: new agent-written content that reads as instructions to an agent is held back from proactive context until you confirm it (`gbrain trust review`). Content written before this release is held back only after you claim your own sources (`gbrain trust claim-sources`, in a terminal) and agree to `gbrain trust scan`; neither runs on its own.' },
+  { since: '0.60.110.0', text: 'Memory trust: new agent-written content that reads as instructions to an agent is held back from proactive context until you confirm it (`gbrain trust review`). Content written before this release is held back only after you claim your own sources (`gbrain trust claim-sources`, in a terminal) and run `gbrain trust scan` yourself; no agent starts either.' },
 ];
 
 /** The newest disclosed change's release: the notice id moves only when a release adds rows. */
@@ -351,7 +351,7 @@ export function behaviorChangesNotice(chain: ChainDisclosure | null, opts: { rem
 
 /**
  * #5575 legacy content: while unclaimed sources hold rows from before trust
- * tiers, the notice's fix becomes the claim ask (`fix.next: ask_user`, the
+ * tiers, the notice's fix becomes the claim (`fix.next: tell_user_to_run`, the
  * user_message explains claiming), unless it already carries the chat
  * fallback removal. Best-effort: any fault keeps the notice as built.
  */

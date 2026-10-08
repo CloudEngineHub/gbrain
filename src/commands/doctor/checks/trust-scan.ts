@@ -2,11 +2,12 @@
  * trust_scan (#5575, DX-6 / ENG-8): rows at `agent_written` or lower that
  * the write gate's current detector has not scanned. Activation control
  * (CEO-20) only covers scanned rows, so unscanned legacy rows can still be
- * injected by proactive surfaces. The fix is `fix.next: ask_user`: `gbrain
- * trust scan` records flag receipts in bounded, resumable batches and changes
- * no row, but a flagged row stops reaching proactive context, so the scan of
- * legacy content runs only after the user agrees (and ideally after they
- * claimed their own sources: trust_sources_unclaimed).
+ * injected by proactive surfaces. The fix is `actor: 'user'` (`fix.next:
+ * tell_user_to_run`): `gbrain trust scan` records flag receipts in bounded,
+ * resumable batches and changes no row, but a flagged row stops reaching
+ * proactive context, so no agent starts the legacy scan; the user runs it
+ * after reading user_message (ideally after claiming their own sources:
+ * trust_sources_unclaimed).
  * A brain before the trust or write-gate migrations is ok. Read-only.
  */
 import type { Check } from '../../doctor.ts';
@@ -18,7 +19,7 @@ import { isUndefinedColumnError, isUndefinedTableError } from '../../../core/uti
 const SCAN_USER_MESSAGE = 'gbrain can check your memory written before its write gate for text that reads like instructions to an AI '
   + '(for example "from now on always say..."). Anything it flags stays in your brain and in search, but agents stop getting it automatically '
   + 'until you confirm it in gbrain trust review. If some sources are your own notes, claim them first (gbrain trust claim-sources) so the check '
-  + 'treats them as yours. Run the check now?';
+  + 'treats them as yours. To run the check, run gbrain trust scan on the brain host.';
 
 async function runTrustScan(ctx: DoctorContext): Promise<Check[]> {
   const engine = connectedEngine(ctx);
@@ -33,10 +34,10 @@ async function runTrustScan(ctx: DoctorContext): Promise<Check[]> {
     }
     checks.push({ name: 'trust_scan', status: 'warn', details,
       message: `${state.total_unscanned} agent-written or lower row(s) have not been scanned by the write-gate detector (v${state.detector_version}), `
-        + 'so proactive surfaces do not withhold instruction-like ones yet. Ask the user before running gbrain trust scan: it records receipts in resumable batches and changes no row, '
+        + 'so proactive surfaces do not withhold instruction-like ones yet. Tell the user about gbrain trust scan; they run it if they want it: it records receipts in resumable batches and changes no row, '
         + 'but flagged rows (their own older notes included, unless they claimed those sources first with gbrain trust claim-sources) stop reaching proactive context until confirmed.',
-      fix: { argv: ['gbrain', 'trust', 'scan'], consent: ['destructive'], actor: 'agent', requires_exclusive: false, verify: doctorVerify('trust_scan'),
-        why: 'Scans legacy agent-written and unverified rows with the deterministic detector and records flag receipts; it moves, deletes or rewrites nothing, but flagged rows stop reaching proactive context until the owner confirms them, so it runs only after the user agrees.',
+      fix: { argv: ['gbrain', 'trust', 'scan'], consent: [], actor: 'user', requires_exclusive: false, verify: doctorVerify('trust_scan'),
+        why: 'Scans legacy agent-written and unverified rows with the deterministic detector and records flag receipts; it moves, deletes or rewrites nothing, but flagged rows stop reaching proactive context until the owner confirms them, so the user runs it after reading user_message; no agent starts it.',
         user_message: SCAN_USER_MESSAGE } });
   } catch (err) {
     if (isUndefinedColumnError(err, 'trust_tier') || isUndefinedTableError(err)) {
