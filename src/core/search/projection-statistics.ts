@@ -1,5 +1,5 @@
 import type { BrainEngine } from '../engine.ts';
-import { beginFullAnalyze, plannerAutoAnalyzeEnabled } from '../planner-stats.ts';
+import { beginFullAnalyze, maybeRefreshPlannerStats, plannerAutoAnalyzeEnabled, plannerStatsThreshold } from '../planner-stats.ts';
 
 export const PROJECTION_STATISTICS_NAME = 'pages_text_projection_current_stats';
 
@@ -39,8 +39,22 @@ export async function verifyProjectionStatistics(engine: Pick<BrainEngine, 'exec
   }
 }
 
-export async function refreshProjectionStatistics(engine: BrainEngine): Promise<boolean> {
+/**
+ * Refreshes the projection statistics after a write pass that changed `changedPages` pages (omitted: always).
+ * A pass that changed fewer pages than the planner-statistics threshold (max(500, 10% of pages), autovacuum's
+ * scale) leaves collected statistics alone: the current-page fraction barely moves, and the narrow ANALYZE cost
+ * 170 ms per one-page sync at 50k pages on Postgres and a full ANALYZE of every table on PGLite. PGLite still
+ * analyzes any hot table its row deltas mark stale.
+ */
+export async function refreshProjectionStatistics(engine: BrainEngine, changedPages = Infinity): Promise<boolean> {
   try {
+    if (Number.isFinite(changedPages)) {
+      const [pages] = await engine.executeRaw<{ reltuples: number }>("SELECT reltuples::float8 AS reltuples FROM pg_class WHERE oid = 'pages'::regclass");
+      if (changedPages < plannerStatsThreshold(Number(pages?.reltuples ?? -1)) && await verifyProjectionStatistics(engine).then(() => true, () => false)) {
+        await maybeRefreshPlannerStats(engine, 'import', { throttle: false });
+        return true;
+      }
+    }
     const [role] = await engine.executeRaw<{ can_analyze: boolean }>(
       `SELECT pg_has_role(current_user, p.relowner, 'USAGE') OR r.rolsuper AS can_analyze
        FROM pg_class p CROSS JOIN pg_roles r
