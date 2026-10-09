@@ -138,7 +138,7 @@ describe('every PR1 reason routes to the fence repair, never to frontmatter repa
         meta: { reason, recovery_version: RECOVERY_VERSION, fence: location } });
       const steps = holdRepairSteps('default', { fences: 1, others: 0 });
       expect(fix.argv).toEqual(['gbrain', 'repair', 'fences', '--source', 'default', '--only', 'notes/example.md']);
-      expect(steps.argv).toEqual(['gbrain', 'repair', 'fences', '--source', 'default']);
+      expect(steps.argv).toEqual(['gbrain', 'repair', 'content', '--source', 'default']); // #6377: the source-level step is the content lane
       const texts = [error.message, error.suggestion, JSON.stringify(error.fix), receipt?.suggestion, hold.message, JSON.stringify(fix),
         writeFailureDiagnostic('invalid_params', error.message).suggestion, steps.text];
       for (const text of texts) expect(text ?? '').not.toContain('repair frontmatter');

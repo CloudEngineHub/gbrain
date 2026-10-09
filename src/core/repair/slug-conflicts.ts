@@ -317,6 +317,13 @@ async function candidatePaths(engine: BrainEngine, src: FenceSource, selection: 
   return { paths: [...paths].sort(), unknown };
 }
 
+
+/** The hash a preview of this selection prints when it finds nothing to repair. */
+async function emptyPlanHash(engine: BrainEngine, scope: RepairScope, selection: Selection): Promise<string> {
+  const sourcesRows = await engine.executeRaw<{ id: string; incarnation: string }>('SELECT id, incarnation::text AS incarnation FROM sources WHERE id=ANY($1::text[]) ORDER BY id', [scope.source_ids]);
+  return previewHash({ kind: 'slug-conflicts-v1', brain_id: scope.brain_id, sources: sourcesRows, selection, items: [] });
+}
+
 export const slugConflictsRepair: RepairHandler = {
   kind: 'slug-conflicts',
   outcomeItemsLimit: 1000,
@@ -324,6 +331,8 @@ export const slugConflictsRepair: RepairHandler = {
     const selection: Selection = { source_ids: scope.source_ids, only: [...(opts?.only ?? [])].sort(), skip: [...(opts?.skip ?? [])].sort(), no_llm: opts?.noLlm === true };
     const preview = previewArgv(scope, selection);
     if (opts?.apply && opts.expect) {
+      // #6377: a preview that found nothing saved no set; its hash still binds "nothing to apply" (the content lane passes one hash per kind).
+      if (opts.expect === await emptyPlanHash(engine, scope, selection)) return { items: [], preview_hash: opts.expect, residuals: {}, llm: { usd: 0, cap_remaining_usd: null } };
       const approved = await loadApprovedSet<ApprovedSetItem>(engine, { command: 'slug-conflicts', hash: opts.expect, previewCommand: shellQuote(preview) });
       if (approved.items.some(entry => digestOf(entry.selection) !== digestOf(selection))) throw previewChangedError(opts.expect, shellQuote(preview));
       const items = approved.items.map(({ selection: _chosen, ...entry }, index) => item(entry, index, opts.expect!, index === approved.items.length - 1));

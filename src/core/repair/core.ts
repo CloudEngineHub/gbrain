@@ -144,9 +144,11 @@ export interface RepairResult {
   scan?: { fresh_at: string | null; partial: boolean };
   /** Preview-bound kinds' dry run: every item the preview hash covers. */
   listing?: RepairListing[];
+  /** Preview-bound kinds' dry run: the hash `--apply --expect` binds to (the one `apply_command` carries). */
+  preview_hash?: string;
   /** Per-outcome counts and the first items, for kinds that name outcomes. */
   outcomes?: Record<string, number>;
-  outcome_items?: Array<{ item: string; outcome: string; reason?: string; detail?: Record<string, unknown> }>;
+  outcome_items?: Array<{ item: string; outcome: string; reason?: string; detail?: Record<string, unknown>; llm_usd?: number }>;
   /** Kind-specific preview detail (see RepairPlan.details). */
   details?: Record<string, unknown>;
 }
@@ -286,6 +288,7 @@ export async function runRepair(ctx: OperationContext, handler: RepairHandler, s
   };
   if (!opts.apply) {
     if (plan.listing) result.listing = plan.listing;
+    if (plan.preview_hash) result.preview_hash = plan.preview_hash;
     if (plan.details) result.details = plan.details;
     result.complete = pending.length === plan.items.length;
     return finish();
@@ -328,7 +331,7 @@ export async function runRepair(ctx: OperationContext, handler: RepairHandler, s
         result.outcomes = { ...result.outcomes, [applied.outcome]: (result.outcomes?.[applied.outcome] ?? 0) + 1 };
         if ((result.outcome_items ??= []).length < (handler.outcomeItemsLimit ?? SAMPLE * 2)) {
           result.outcome_items.push({ item: `${item.source_id}:${item.slug}`, outcome: applied.outcome, ...(applied.reason ? { reason: applied.reason } : {}),
-            ...(applied.detail ? { detail: applied.detail } : {}) });
+            ...(applied.detail ? { detail: applied.detail } : {}), ...(applied.llm_usd ? { llm_usd: applied.llm_usd } : {}) });
         }
       }
       if (typeof applied === 'object' ? applied.applied : applied) result.applied++;

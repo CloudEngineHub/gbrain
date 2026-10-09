@@ -145,6 +145,15 @@ const MATRIX: Record<CyclePhase, Entry> = {
       expect(result.details).toMatchObject({ mode: 'apply', repaired: 0, stopped_reason: null, llm_usd: 0 });
     },
   },
+  content_repair: {
+    // #6377: the lane minus `fences`; with no other content-repair kind registered in this release the phase runs nothing
+    // and says so, so it must finish skipped with `no_kinds` and never refuse or stop.
+    seed: async ({ engine, sourceId }) => put(engine, sourceId, 'people/alice-example', page('person', 'Alice', 'A person with no holds.')),
+    assert: async ({ result }) => {
+      expect(result.status).toBe('skipped');
+      expect(result.details).toMatchObject({ reason: 'no_kinds', kinds: [] });
+    },
+  },
   synthesize: {
     seed: async ({ engine, sourceId, root }) => {
       await put(engine, sourceId, 'people/example', page('note', 'Example', 'Example evidence.'));
