@@ -12,28 +12,18 @@ identifiers and attribution are available in the pre-removal Git revision
 
 ## [0.60.136.0] - 2026-10-09
 
-**A query that quotes a passage verbatim now returns a clean read. Pasted text with a long dash rule no longer breaks keyword search, an inferred image query on a text-only brain keeps its keyword arm and expansion, and the query confidence block always reports the reranker score.**
+**CI headroom: the PostgreSQL unit arms run as three balanced shards, the graduation custody suites run 30–42% faster, and the Tier 2 agent-journey file is split so no serial file sits near its 300-second cap.**
 
-An eval readiness probe quotes the first 300 characters of a stored conversation turn and expects that conversation back. It counted 89 of 500 LongMemEval-S haystacks as misses. Rebuilt the same way, gbrain returned the target at rank 1 in all 89, but each read looked degraded to the probe for one of three reasons:
-- A verbatim quote embeds almost identically to its chunk, so the confidence grade was `high_vector_match`. That grade returned before the reranker score was attached, so `retrieval.crag.top_rerank_score` was missing even though the reranker ran (84 of 89).
-- A turn holding a markdown rule of 32 or more dashes overflowed `websearch_to_tsquery`'s operator stack (`tsquery stack too small`), failing the keyword and title arms (1 of 89).
-- Text such as "a photo of Half Dome" was routed to image search on a text-only install. That skipped the keyword arm and expansion, then the multimodal embed failed and reported `vector_arm_failed` (4 of 89).
-
-### What you'd see
-
-The same 89 missed haystacks plus 20 controls, rebuilt with the eval shim's page format through `put_page` on PGLite with shipped defaults (voyage-4, rerank-2.5, expansion on). This build reads 109 of 109 clean, with the target at rank 1. 0.60.106.0 read 36 of 108 clean.
-
-### What to watch for
-
-- `retrieval.crag.top_rerank_score` is now present whenever the reranker ran, whatever the grade's reason.
-- A query whose wording suggests images ("show me photos of ...") routes to the image arm only when `embedding_multimodal_model` (or `embedding_model`) can embed images. Otherwise it runs as a text query. An explicit `cross_modal: image` still routes as asked.
-- A run of 32 or more dash negations in a keyword query collapses to its parity, which is the query a deeper parser stack would build. Every query that parsed before is unchanged.
+Nothing changes for users. This release keeps the CI gate from failing on slow runners. The PostgreSQL unit-arm shard 2 overran its 20-minute step twice in one day, and the Tier 2 journey file took up to 235 of its 300 seconds.
 
 ### Itemized changes
 
-- **Rerank score on every grade (`src/core/search/crag.ts`).** `gradeRetrievalConfidence` attaches the rank-1 cross-encoder score to identity-tier grades too (`exact_lookup`, `alias_hit`, `exact_title_match`, `high_vector_match`, `decide_evidence`).
-- **Dash runs (`src/core/search/sql-ranking.ts`).** `collapseWebsearchDashRuns` runs before both engines' keyword statements and inside `boundWebsearchQuery`, which covers the title arm.
-- **Image routing (`src/core/ai/gateway.ts`, `src/core/search/hybrid/request.ts`).** `multimodalEmbeddingModel()` returns the model `embedMultimodal` would use when it can embed images. An inferred image intent and the LLM modality tie-break need it.
+### For contributors
+
+- **Faster graduation custody tests.** Every `test/graduation-rollback.test.ts` and `test/graduation-state.test.ts` case built its source brain from scratch: a PGLite initdb plus the full schema replay, about 2 s per harness and dozens of harnesses per file. `test/helpers/graduation-harness.ts` now builds one seeded source datastore per test process and copies it for each harness. It opens the copy once at its own path, so the owner sidecars are written there, and draws the per-brain identity values (brain id, shared-skill secret) fresh. Same machine, Postgres arm included, N=3 medians: rollback 141 s → 98 s, state 227 s → 131 s. No assertion changed.
+- **Three PostgreSQL arm shards.** `unit-postgres-arms` runs three shards instead of two, balanced on weights re-mined from 76 recent job logs. Before, 35 of the 106 listed files had no weight. Replayed over 36 historical CI runs, each shard's p95 test time is at most 10.0 minutes, inside the 20-minute step even on a runner twice as slow.
+- **Planner-stats E2E flake.** `test/e2e/planner-stats-postgres.test.ts` waited for `n_mod_since_analyze` to reach 2,000 after a 2,000-row insert. An autoanalyze landing first reset the counter to 0, and the test then timed out. The test now holds autovacuum off `facts` while it runs and resets it afterwards. Forced probe with aggressive autovacuum (1 s naptime): 5 failures in 56 runs before, 0 in 40 after.
+- **Tier 2 split.** The read-op `--json` sweep (row 1) moved to `test/agent-journey-tier2-json.serial.test.ts`. Its shared fixtures now live in `test/helpers/agent-journey-tier2.ts`. Locally the original file took 77 s; the two files now take 43 s and 34 s.
 
 ## [0.60.135.0] - 2026-10-09
 
