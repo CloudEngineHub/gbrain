@@ -38,7 +38,7 @@ import { realpathOrResolve } from '../core/path-confine.ts';
 import { slog } from '../core/console-prefix.ts';
 import { refreshProjectionStatistics } from '../core/search/projection-statistics.ts';
 import { importAnalyzeEveryPages, maybeRefreshPlannerStats, PLANNER_STATS_REPAIR_COMMAND } from '../core/planner-stats.ts';
-import { importManagedFile } from '../core/persistence/import-mutations.ts';
+import { importManagedFile, importManagedFiles, nextImportBatch } from '../core/persistence/import-mutations.ts';
 import { acceptedPendingReceipt } from '../core/persistence/accepted-pending.ts';
 import { estimateCostFromChars, lookupEmbeddingPrice } from '../core/embedding-pricing.ts';
 import { getEmbeddingModel } from '../core/ai/gateway.ts';
@@ -701,8 +701,8 @@ export async function runImport(
   // never plans against the empty tables it started with (O-CEO-17).
   const analyzeEvery = await importAnalyzeEveryPages(engine);
 
-  async function processFile(eng: BrainEngine, filePath: string) {
-    if (signal?.aborted) return;
+  async function processFile(eng: BrainEngine, filePath: string, settled?: PromiseSettledResult<ImportResult>) {
+    if (!settled && signal?.aborted) return;
     const relativePath = singleFile ? basename(filePath) : relative(dir, filePath);
     // #753/#774: slug + source_path base. When performFullSync syncs a
     // monorepo subdir, slugRoot is the git root so slugs stay git-root-
@@ -719,7 +719,8 @@ export async function runImport(
       // multimodal is enabled. The walker (collectMarkdownFiles) only picks
       // up images when GBRAIN_EMBEDDING_MULTIMODAL=true so this branch is
       // unreachable when the gate is off; defense-in-depth check anyway.
-      const result = company ? await importCompanyBrainFile(eng, filePath, sourceId!) : managedImport
+      if (settled?.status === 'rejected') throw settled.reason;
+      const result = settled ? settled.value : company ? await importCompanyBrainFile(eng, filePath, sourceId!) : managedImport
         ? await importManagedFile(eng, filePath, importRelPath, { noEmbed, sourceId, activePack: importActivePack, signal, slugRoot: opts.slugRoot })
         : isImageFilePath(relativePath) && process.env.GBRAIN_EMBEDDING_MULTIMODAL === 'true'
         ? await importImageFile(eng, filePath, importRelPath, { noEmbed, sourceId })
@@ -728,7 +729,7 @@ export async function runImport(
       // Account for it before stopping, so resume never loses a successful path.
       noteTypeWarning((result as { type_warning?: Parameters<typeof noteTypeWarning>[0] }).type_warning); fenceTally.note(importRelPath, result);
       const _fileMs = Date.now() - _fileT0;
-      if (_fileMs > 5000) {
+      if (!settled && _fileMs > 5000) {
         console.error(`[gbrain phase] import.process_file slow ${_fileMs}ms ${relativePath}`);
       }
       if (await opts.onFileResult?.(importRelPath, filePath, result) === 'held') {
@@ -830,6 +831,22 @@ export async function runImport(
     }
   }
 
+  // A managed import admits and publishes its files in batches (import-mutations.ts importManagedFiles);
+  // each file is still accounted, in order, exactly as processFile accounts one file.
+  const batched = managedImport && !company;
+  const take = (start: number) => batched ? nextImportBatch(files, start) : [files[start]!];
+  async function processBatch(eng: BrainEngine, batch: string[]) {
+    if (batch.length === 1) return processFile(eng, batch[0]!);
+    if (signal?.aborted) return;
+    const open = batch.filter(file => !opts.heldPaths?.has(opts.slugRoot ? relative(opts.slugRoot, file) : relative(importRoot, file)));
+    const t0 = Date.now();
+    const settled: PromiseSettledResult<ImportResult>[] = !open.length ? [] : await importManagedFiles(eng, open.map(filePath => ({
+      filePath, sourcePath: opts.slugRoot ? relative(opts.slugRoot, filePath) : relative(importRoot, filePath) })),
+    { noEmbed, sourceId, activePack: importActivePack, signal, slugRoot: opts.slugRoot }).catch(reason => open.map(() => ({ status: 'rejected' as const, reason })));
+    if (Date.now() - t0 > 5000 * open.length) console.error(`[gbrain phase] import.process_batch slow ${Date.now() - t0}ms files=${open.length} first=${relative(dir, open[0]!)}`);
+    for (const file of batch) await processFile(eng, file, settled[open.indexOf(file)]);
+  }
+
   let workerError: unknown;
   let workerFailed = false;
   try {
@@ -839,10 +856,7 @@ export async function runImport(
       // checks belt-and-suspenders so we never crash on a null assertion.
       const config = loadConfig();
       if (engine.kind === 'pglite' || !config?.database_url) {
-        for (const file of files) {
-          if (signal?.aborted) break;
-          await processFile(engine, file);
-        }
+        for (let i = 0, batch: string[]; i < files.length && !signal?.aborted; i += batch.length) await processBatch(engine, batch = take(i));
       } else {
         const { PostgresEngine } = await import('../core/postgres-engine.ts');
         const { connectWithRetry, resolvePoolSize } = await import('../core/db.ts');
@@ -872,9 +886,10 @@ export async function runImport(
           const outcomes = await Promise.allSettled(workerEngines.map(async (eng) => {
             try {
               while (!stopWorkers && !signal?.aborted) {
-                const idx = queueIndex++;
-                if (idx >= files.length) break;
-                await processFile(eng, files[idx]);
+                if (queueIndex >= files.length) break;
+                const batch = take(queueIndex);
+                queueIndex += batch.length;
+                await processBatch(eng, batch);
               }
             } catch (error) {
               stopWorkers = true;
@@ -900,10 +915,7 @@ export async function runImport(
       } // end else (postgres parallel)
     } else {
       // Sequential: use the provided engine
-      for (const filePath of files) {
-        if (signal?.aborted) break;
-        await processFile(engine, filePath);
-      }
+      for (let i = 0, batch: string[]; i < files.length && !signal?.aborted; i += batch.length) await processBatch(engine, batch = take(i));
     }
   } catch (error) {
     workerFailed = true;
