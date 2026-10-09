@@ -10,6 +10,39 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.125.0] - 2026-10-09
+
+**Every one-shot `gbrain` command starts and exits faster: `--version` and help answer in about 70 ms instead of 590, reads like `list`, `get` and `search` save about 300 ms per call, `gbrain doctor` uses a third less CPU, and import spends less than a third as long chunking.**
+
+An agent that shells out to `gbrain` pays process start-up and exit on every call. Each call paid two avoidable costs. It waited a fixed 250 ms before exiting whenever stdout was a pipe, and it loaded every operation and command module (about 1,200 modules) before reading argv, `--version` included. The same profiling found three CPU hot spots on large brains: the code stripper behind link and citation extraction copied text one character at a time, the chunker ran a full tiktoken encode for every chunk, and `doctor` re-listed the same git checkout several times per run.
+
+| Cold CLI call, stdout piped (5,003-page Postgres brain, 4 vCPU, N=25) | before p50 / p95 | after p50 / p95 |
+|---|---|---|
+| `gbrain --version` | 591 / 628 ms | 73 / 77 ms |
+| `gbrain --help` | 585 / 632 ms | 73 / 84 ms |
+| `gbrain list --limit 5` | 684 / 730 ms | 381 / 431 ms |
+| `gbrain get <slug>` | 729 / 766 ms | 417 / 439 ms |
+| `gbrain search <q>` | 869 / 974 ms | 580 / 651 ms |
+| `gbrain doctor --json` | 5,975 / 6,519 ms | 4,223 / 4,623 ms |
+
+### Itemized changes
+
+- **No fixed exit delay.** A one-shot command now exits as soon as its piped output is delivered. It still waits for a slow reader: stdout goes through the delivery-exact write chain, and a backlog on stderr holds the exit until Bun reports the pipe drained. The 250 ms grace (`GBRAIN_FLUSH_GRACE_MS`) is now only an upper bound for that wait.
+- **Lazy start-up.** `gbrain --version`, bare `gbrain` and `gbrain --help` answer without loading the dispatcher. Real commands skip the schema-migration modules unless the brain is behind, skip the version-upgrade registry, and load the MCP HTTP client only for thin-client calls. Output, exit codes, the CLI surface and the MCP tool list are unchanged.
+- **Faster code stripping.** Link extraction, citation parsing and the doctor checks that read page bodies strip code 23-33x faster, with byte-identical output.
+- **Faster chunk token counts.** Import counts are still exact cl100k counts, memoized per pre-token, so chunk boundaries are identical. The chunk pass is about 3.5x faster, and `extract all` uses about 2.5x less CPU.
+- **Cheaper `gbrain doctor`.** One `git ls-files` per checkout per run (34 git spawns instead of 50), no citation parsing on pages without `[Source:`, and one `.git` lookup per source instead of one per page. Output and exit codes are unchanged. At 50,030 pages `doctor --json` takes 15.8 s instead of 19.4 s (p50).
+
+### To take advantage of v0.60.125.0
+
+`gbrain upgrade`. Nothing to configure. If you raised `GBRAIN_FLUSH_GRACE_MS` for a slow consumer, it still caps how long the exit waits for a pipe to drain.
+
+### For contributors
+
+- The dispatcher moved from `src/cli.ts` to `src/cli/main.ts`. `src/cli.ts` is now the light entry point, and tests import the dispatcher's helpers from `src/cli/main.ts`. The top-level help text lives in `src/cli/top-help.ts`.
+- `bun run build:schema-migrations` also writes `src/core/schema-migrations/latest.generated.ts`, which the connect-time pending check reads.
+- New equivalence pins: `test/cli-exit-drain.test.ts` (real pipes), `test/cli-fast-path.test.ts` (fast path and import-graph bounds), `test/markdown-code-equivalence.test.ts` and `test/chunkers/token-estimate-pieces.test.ts` (fuzzed against the previous implementations), and `test/doctor-content-golden.test.ts` (doctor output on a brain with content, captured on the previous release).
+
 ## [0.60.124.0] - 2026-10-09
 
 **When you give `query`, `search`, `recall` or `assemble_evidence` a token budget for whole-conversation evidence, gbrain now stays inside it. Calls without a budget return exactly what they did before.**
