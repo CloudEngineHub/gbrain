@@ -12,47 +12,39 @@ identifiers and attribution are available in the pre-removal Git revision
 
 ## [0.60.123.0] - 2026-10-09
 
-**When you give `query`, `search`, `recall` or `assemble_evidence` a token budget for whole-conversation evidence, gbrain now stays inside it. Calls without a budget return exactly what they did before.**
+**A write whose database session drops during admission no longer hands the caller a false refusal: the admission is re-run against the retained request id, and a session that keeps dropping returns the typed `write_outcome_unknown`. Two reconnect defects in the vendored Postgres driver that the same fault reached are fixed with it.**
 
-Ask gbrain for "the evidence, within 8,000 tokens" and the default `auto` delivery used to treat that number as a target, not a limit: it reserved a matching snippet for every hit, grew conversations in rank order, and appended every conversation that no longer fit as extra chunks outside the budget. On the LongMemEval-S development slice, a 6,200-token budget over 25 hits came back at about 10,500 tokens on every question, mostly cut conversations and spilled chunks. A budget you pass is a cost promise, so it is now a hard cap: titles, evidence and every marker fit inside it, the best hit always comes first, and anything that does not fit is counted instead of appended. Evidence handed over for a frozen list of hits also keeps each page's date now, the same date a live `query` returns.
+The crash robot (`pooler_disconnect`, seed 5105, master run 37872222822) caught an `edit_page` caller receiving the raw `write CONNECTION_CLOSED` from a dropped session while its admitted request went on to commit: the receipt the caller held said refused, the page held the write (`untrue_receipt`, `lost_write`). `retryWriteAdmission` was right not to retry an admission on a lost socket, since a second INSERT could double-apply, but the safe step was missing: every admission attempt begins by reading the retained `request_id` and replays an admitted row, so re-running the attempt is a read, never a second admission. Pre-existing (the same shape replays on the commit before #6347); found by the robot's seed, fixed here.
 
 ### How to use it
 
+Nothing to configure. A single drop resolves by itself (re-runs after 100, 300 and 900 ms). When the session keeps dropping the caller sees:
+
 ```bash
-gbrain query "when did the acme-example renewal move?" --return-unit auto --token-budget 8000   # capped at 8,000
-gbrain config set search.auto_packing breadth_capped     # how conversations share the budget (default cap_only)
-gbrain config set search.auto_packing off                # the old uncapped behavior, even with a budget
+gbrain errors write_outcome_unknown      # the new code, offline
+gbrain write-request -- <request_id>     # the fix it names: a committed or pending row means accepted (replay the same id); no row means not (submit again with the same id)
 ```
 
-**Say to your agent:** *"What did we decide about the widget-co launch? Keep the evidence under 8,000 tokens."*
+### What you see
 
-### What you'd see
-
-| Call | Before | Now |
-|---|---|---|
-| `query`, `return_unit: "auto"`, `token_budget: 6200`, 25 hits on chat sessions | about 10,500 tokens delivered; conversations that did not fit appended as chunks | at most 6,200 tokens; conversations that do not fit listed in `dropped_reasons` |
-| Same call, no `token_budget` | 24,000-token default, uncapped spill | byte-identical to before |
-| `query` with a bare `token_budget` and no `return_unit` | legacy chunk budgeting | unchanged (legacy chunk budgeting) |
-| `token_budget: 10` with `return_unit: "auto"` | accepted, over budget | `invalid_params`: the minimum is 32 tokens |
-| `assemble_evidence` on a frozen hit list | no `effective_date` | each row's `effective_date` and `effective_date_source`, as live `query` returns them |
+| Where | What changed |
+|---|---|
+| A write whose session drops under admission | Re-run after 100, 300 and 900 ms; the re-run replays the admitted row when the lost acknowledgment had committed, admits when it had not. |
+| A session that keeps dropping | `write_outcome_unknown` (`reason: connection_lost`, `detail` the socket error without URLs, `fix` the read of the request by id, `write_error` on the receipt) instead of the raw `CONNECTION_CLOSED` / `57P01`. |
+| A write admitted on this process's warm lane (the consumer's reserved backend) whose session dropped | The re-run takes a transaction from the engine's pool instead of the dead reservation, and the consumer gives the lane up at once (retaken after a minute) whatever the admission makes of the loss. Before, every re-run and the next write hit "Connection is no longer owned" on the same reservation. |
+| A backend terminated while the driver is still starting its connection (during the driver's own array-types fetch) | The fresh connection serves the caller's first statement. Before, the driver reconnected but kept the dead startup's internal query and its FATAL `57P01`: the caller's first statement on the live connection failed with that stale `57P01` (the robot's `put_page refused/57P01`), and the orphaned internal query rejected with nobody awaiting it, which Bun treats as fatal (the robot worker's exit 1). |
+| A connection closed while a statement's bytes still wait for its write immediate | The next connection on that pool slot starts normally. Before, the cleared immediate left its handle and bytes behind, the reconnect's StartupMessage was appended and never scheduled, and the slot sat open until `CONNECT_TIMEOUT` (10 s) on every statement bound to it, for as long as it kept being chosen (the robot's effects worker, for minutes, leaving a running effect unreclaimed). |
+| A managed sync's stall line in the unit lane (`test/sync-drain-claims.test.ts`) | Attributed to the head read that produced it instead of counted by position, so a read in flight across a park no longer reads as the park's first line (the master flake on #6271). |
+| Confirmed aborts (`40001`, `40P01`, `55P03`, `57014`) | Unchanged. |
 
 ### Itemized changes
 
-- **The cap** (`src/core/search/evidence-delivery.ts`). An explicit budget under `auto` (on `query`, `search`, `recall`'s results arm and `assemble_evidence`; `think` passes none) is a hard cap on the recount of every result's title plus `chunk_text`. Rank one, note or conversation, is reserved first and cut at a piece boundary with the marker `\n\n[…]` if it alone exceeds the budget; the other non-conversation chunks keep the rank-order prefix that fits (the rest are `budget_note`); a conversation that does not fit is dropped (`budget_floor`), never spilled. Redaction and an explicit `snippet_chars` run before the final recount, a snippet's recovery marker is paid from the row's own allocation (`snippet_marker_omitted` when it cannot fit), and `budget_used` is that recount (`budget_recount` drops anything still over). `delivery.auto_packing` names the packing when the cap ran.
-- **Three packings** (`search.auto_packing`, registered and validated at `config set`): `cap_only` (default: every matching span first, then growth in rank order), `breadth_capped` (the longest rank-order prefix of conversations whose title, matching span and `return_window` target window fit; the rest `breadth_cap`), `depth_first` (each conversation whole if it fits, else as much around its match as fits, else skipped). `off` keeps the uncapped behavior. `assembleEvidenceForHits` takes a library-only `auto_packing` that wins over config per call, for evaluations on one frozen hit list.
-- **The minimum.** An explicit `auto` budget below 32 tokens fails with `invalid_params` naming the minimum and the parameter (`token_budget`, or `budget_tokens` on `recall`), and so does a zero, negative or non-finite one passed with `return_unit: "auto"`; with the unit omitted such a budget still means no budget. Above it, a non-empty readable hit list always returns non-empty evidence.
-- **No budget, no change.** The evidence plan now records whether the caller passed the budget (`budgetExplicit`) and the resolved packing; without an explicit budget the allocator runs the previous code. A structural property test over random corpora pins every packing to the previous bytes, and the off-path golden is unchanged.
-- **Frozen-hit dates.** `resolveFrozenHits` projects `effective_date` and `effective_date_source` through the same normalizer live search rows use (`applyEffectiveDate` in `src/core/utils.ts`), so frozen and live delivery hand a reader the same dates.
-- Docs: `docs/evidence-delivery.md` ("Explicit budgets (the cap)", drop and fallback codes, errors, the frozen-candidate interface); KEY_FILES entries for `evidence-delivery.ts` and the new `src/core/search/evidence-packing.ts`.
-- Tests: explicit-budget twins of the auto property and spill tests (the originals keep pinning the no-budget path), fixed cases for mixed notes and chats, notes only, tiny budgets, rank one over budget, the `breadth_capped` prefix, the `depth_first` order and skip rule, a source-swamp fixture, redaction growth, the snippet marker, CJK spans, fetch failure and cached hits; op-level checks through all four operations; live-against-frozen parity on every consumed field including dates; and the leak suite and engine parity under every packing on PGLite and Postgres.
+- `src/core/retry-matcher.ts`: `isConnectionLoss` (connection-class SQLSTATEs, postgres.js connection codes, `57P01`/`57P02`/`57P03`, socket errnos; not auth or timeouts). `src/core/persistence/admission-retry.ts`: `CONNECTION_LOSS_RETRY_MS`, `writeOutcomeUnknown`, the re-run branch. `types.ts`: `write_outcome_unknown` in `WRITE_ERROR_CODES`. Registry, `write-refusals.md`, `error-codes.md`, KEY_FILES, one `BEHAVIOR_CHANGES` row.
+- `vendor/postgres` (`src`, `cjs/src`, `cf/src` `connection.js`; `patches/postgres@3.4.9.patch` regenerated, `bash vendor/update-postgres.sh --check` clean): `closed()` settles a startup's internal query and clears its saved error before reconnecting for `initial`, clears the pending write buffer and its immediate handle, and drops the errored `query`; `fetchArrayTypes` swallows its own failure (`errored()` has already told the caller's query; `connected()` re-arms the fetch). `scripts/persistence/ops.ts`: the harness read retry also covers `CONNECTION_DESTROYED` and `CONNECT_TIMEOUT` (a backend killed mid-handshake surfaces as a connect timeout), still only after a drop the robot injected.
+- `src/core/persistence/journal.ts` `admitWrite`: after a connection loss the re-run runs on `engine.transaction` (the pool), never again on a lent transaction, once `engine.reconnect` rebuilt the pool. `src/core/persistence/consumer.ts` `onLane`: a lent transaction that reports a connection loss (`isConnectionLoss`) releases the lane and sets the one-minute retake delay in `finally`, independent of how `run` ends.
+- Tests: `test/persistence-admission-connection-loss.test.ts` (classifier; re-run / typed outcome / budget / other errors untouched; forced probes: `admitWrite` with a lost COMMIT acknowledgment returns the admitted row and exactly one request exists, and a dead lent transaction is used once with the pool finishing the write; on the previous code the raw `write CONNECTION_CLOSED` escapes). `test/persistence-consumer-lane-loss.test.ts` (forced probe: the lane is given up after a lost lent transaction whether the run ends typed or succeeds; kept on success; fails on the previous `onLane`). `test/sync-drain-claims.test.ts`: stall lines are attributed to their head read's start (`parkedStallLines`), with a forced probe replaying the by-position misattribution. `test/postgres-driver-startup-death.test.ts` (scripted wire-protocol server, no database: a connection killed with FATAL 57P01 at its first statement, and a close delivered while a statement's bytes wait for the write immediate; both fail on the previous driver with 57P01 / CONNECT_TIMEOUT). The seed-5105 crash-robot manifest replays clean (20 of 20 sequential after the driver fixes; before them 1 run in about 7 wedged or crashed).
 
-## To take advantage of v0.60.123.0
-
-Nothing to migrate. Callers that pass no budget see no change. A caller that passes `token_budget` under `auto` now gets at most that many tokens; to keep the old behavior for a while, run `gbrain config set search.auto_packing off`, and check a call with:
-
-```bash
-gbrain query "renewal terms" --return-unit auto --token-budget 4000 --json   # delivery.budget_used <= 4000, delivery.auto_packing
-```
+Fixes #6355. Follows #6347.
 
 ## [0.60.122.0] - 2026-10-09
 
