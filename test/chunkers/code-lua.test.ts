@@ -51,8 +51,10 @@ const SHORT_TIMEOUT = { GBRAIN_CHUNKER_TIMEOUT_MS: '1500' };
 
 describe('Lua grammar: sound across parses, no spin on mislabelled shell fences', () => {
   test('the vendored grammar is the ABI-14 release and has no unresolved normal-path libc imports', async () => {
+    // test-reads-source-ok[structural]: the vendored grammar binary's imports and ABI are the shipped artifact under test, not source text.
     const runtime = await WebAssembly.compile(readFileSync(join(assets, 'tree-sitter.wasm')));
     const exports = new Set(WebAssembly.Module.exports(runtime).map(e => e.name));
+    // test-reads-source-ok[structural]: same artifact check for the Lua grammar binary.
     const grammar = await WebAssembly.compile(readFileSync(join(assets, 'grammars/tree-sitter-lua.wasm')));
     const missing = WebAssembly.Module.imports(grammar).filter(i => i.module === 'env' && i.kind === 'function' && !exports.has(i.name) && !exports.has('_' + i.name));
     expect(missing.map(i => i.name)).toEqual([]);
