@@ -59,6 +59,7 @@
     "build:flag-registry": "bun run scripts/generate-flag-registry.ts",
     "weights:mine": "bun run scripts/mine-shard-weights.ts",
     "build:pglite-snapshot": "bun run scripts/build-pglite-snapshot.ts",
+    "bench:efficiency": "bash scripts/bench/efficiency/run-all.sh",
     "test": "bash scripts/run-unit-parallel.sh",
     "test:admin": "playwright test --config admin/playwright.config.ts",
     "eval:autocut": "bun test test/search/autocut-eval.test.ts",
