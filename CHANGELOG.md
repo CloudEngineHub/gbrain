@@ -12,36 +12,47 @@ identifiers and attribution are available in the pre-removal Git revision
 
 ## [0.60.124.0] - 2026-10-09
 
-**Every one-shot `gbrain` command starts and exits faster: `--version` and help answer in about 70 ms instead of 590, reads like `list`, `get` and `search` save about 300 ms per call, `gbrain doctor` uses a third less CPU, and import spends less than a third as long chunking.**
+**When you give `query`, `search`, `recall` or `assemble_evidence` a token budget for whole-conversation evidence, gbrain now stays inside it. Calls without a budget return exactly what they did before.**
 
-An agent that shells out to `gbrain` pays process start-up and exit on every call. Each call paid two avoidable costs. It waited a fixed 250 ms before exiting whenever stdout was a pipe, and it loaded every operation and command module (about 1,200 modules) before reading argv, `--version` included. The same profiling found three CPU hot spots on large brains: the code stripper behind link and citation extraction copied text one character at a time, the chunker ran a full tiktoken encode for every chunk, and `doctor` re-listed the same git checkout several times per run.
+Ask gbrain for "the evidence, within 8,000 tokens" and the default `auto` delivery used to treat that number as a target, not a limit: it reserved a matching snippet for every hit, grew conversations in rank order, and appended every conversation that no longer fit as extra chunks outside the budget. On the LongMemEval-S development slice, a 6,200-token budget over 25 hits came back at about 10,500 tokens on every question, mostly cut conversations and spilled chunks. A budget you pass is a cost promise, so it is now a hard cap: titles, evidence and every marker fit inside it, the best hit always comes first, and anything that does not fit is counted instead of appended. Evidence handed over for a frozen list of hits also keeps each page's date now, the same date a live `query` returns.
 
-| Cold CLI call, stdout piped (5,003-page Postgres brain, 4 vCPU, N=25) | before p50 / p95 | after p50 / p95 |
+### How to use it
+
+```bash
+gbrain query "when did the acme-example renewal move?" --return-unit auto --token-budget 8000   # capped at 8,000
+gbrain config set search.auto_packing breadth_capped     # how conversations share the budget (default cap_only)
+gbrain config set search.auto_packing off                # the old uncapped behavior, even with a budget
+```
+
+**Say to your agent:** *"What did we decide about the widget-co launch? Keep the evidence under 8,000 tokens."*
+
+### What you'd see
+
+| Call | Before | Now |
 |---|---|---|
-| `gbrain --version` | 591 / 628 ms | 73 / 77 ms |
-| `gbrain --help` | 585 / 632 ms | 73 / 84 ms |
-| `gbrain list --limit 5` | 684 / 730 ms | 381 / 431 ms |
-| `gbrain get <slug>` | 729 / 766 ms | 417 / 439 ms |
-| `gbrain search <q>` | 869 / 974 ms | 580 / 651 ms |
-| `gbrain doctor --json` | 5,975 / 6,519 ms | 4,223 / 4,623 ms |
+| `query`, `return_unit: "auto"`, `token_budget: 6200`, 25 hits on chat sessions | about 10,500 tokens delivered; conversations that did not fit appended as chunks | at most 6,200 tokens; conversations that do not fit listed in `dropped_reasons` |
+| Same call, no `token_budget` | 24,000-token default, uncapped spill | byte-identical to before |
+| `query` with a bare `token_budget` and no `return_unit` | legacy chunk budgeting | unchanged (legacy chunk budgeting) |
+| `token_budget: 10` with `return_unit: "auto"` | accepted, over budget | `invalid_params`: the minimum is 32 tokens |
+| `assemble_evidence` on a frozen hit list | no `effective_date` | each row's `effective_date` and `effective_date_source`, as live `query` returns them |
 
 ### Itemized changes
 
-- **No fixed exit delay.** A one-shot command now exits as soon as its piped output is delivered. It still waits for a slow reader: stdout goes through the delivery-exact write chain, and a backlog on stderr holds the exit until Bun reports the pipe drained. The 250 ms grace (`GBRAIN_FLUSH_GRACE_MS`) is now only an upper bound for that wait.
-- **Lazy start-up.** `gbrain --version`, bare `gbrain` and `gbrain --help` answer without loading the dispatcher. Real commands skip the schema-migration modules unless the brain is behind, skip the version-upgrade registry, and load the MCP HTTP client only for thin-client calls. Output, exit codes, the CLI surface and the MCP tool list are unchanged.
-- **Faster code stripping.** Link extraction, citation parsing and the doctor checks that read page bodies strip code 23-33x faster, with byte-identical output.
-- **Faster chunk token counts.** Import counts are still exact cl100k counts, memoized per pre-token, so chunk boundaries are identical. The chunk pass is about 3.5x faster, and `extract all` uses about 2.5x less CPU.
-- **Cheaper `gbrain doctor`.** One `git ls-files` per checkout per run (34 git spawns instead of 50), no citation parsing on pages without `[Source:`, and one `.git` lookup per source instead of one per page. Output and exit codes are unchanged. At 50,030 pages `doctor --json` takes 15.8 s instead of 19.4 s (p50).
+- **The cap** (`src/core/search/evidence-delivery.ts`). An explicit budget under `auto` (on `query`, `search`, `recall`'s results arm and `assemble_evidence`; `think` passes none) is a hard cap on the recount of every result's title plus `chunk_text`. Rank one, note or conversation, is reserved first and cut at a piece boundary with the marker `\n\n[…]` if it alone exceeds the budget; the other non-conversation chunks keep the rank-order prefix that fits (the rest are `budget_note`); a conversation that does not fit is dropped (`budget_floor`), never spilled. Redaction and an explicit `snippet_chars` run before the final recount, a snippet's recovery marker is paid from the row's own allocation (`snippet_marker_omitted` when it cannot fit), and `budget_used` is that recount (`budget_recount` drops anything still over). `delivery.auto_packing` names the packing when the cap ran.
+- **Three packings** (`search.auto_packing`, registered and validated at `config set`): `cap_only` (default: every matching span first, then growth in rank order), `breadth_capped` (the longest rank-order prefix of conversations whose title, matching span and `return_window` target window fit; the rest `breadth_cap`), `depth_first` (each conversation whole if it fits, else as much around its match as fits, else skipped). `off` keeps the uncapped behavior. `assembleEvidenceForHits` takes a library-only `auto_packing` that wins over config per call, for evaluations on one frozen hit list.
+- **The minimum.** An explicit `auto` budget below 32 tokens fails with `invalid_params` naming the minimum and the parameter (`token_budget`, or `budget_tokens` on `recall`), and so does a zero, negative or non-finite one passed with `return_unit: "auto"`; with the unit omitted such a budget still means no budget. Above it, a non-empty readable hit list always returns non-empty evidence.
+- **No budget, no change.** The evidence plan now records whether the caller passed the budget (`budgetExplicit`) and the resolved packing; without an explicit budget the allocator runs the previous code. A structural property test over random corpora pins every packing to the previous bytes, and the off-path golden is unchanged.
+- **Frozen-hit dates.** `resolveFrozenHits` projects `effective_date` and `effective_date_source` through the same normalizer live search rows use (`applyEffectiveDate` in `src/core/utils.ts`), so frozen and live delivery hand a reader the same dates.
+- Docs: `docs/evidence-delivery.md` ("Explicit budgets (the cap)", drop and fallback codes, errors, the frozen-candidate interface); KEY_FILES entries for `evidence-delivery.ts` and the new `src/core/search/evidence-packing.ts`.
+- Tests: explicit-budget twins of the auto property and spill tests (the originals keep pinning the no-budget path), fixed cases for mixed notes and chats, notes only, tiny budgets, rank one over budget, the `breadth_capped` prefix, the `depth_first` order and skip rule, a source-swamp fixture, redaction growth, the snippet marker, CJK spans, fetch failure and cached hits; op-level checks through all four operations; live-against-frozen parity on every consumed field including dates; and the leak suite and engine parity under every packing on PGLite and Postgres.
 
-### To take advantage of v0.60.124.0
+## To take advantage of v0.60.124.0
 
-`gbrain upgrade`. Nothing to configure. If you raised `GBRAIN_FLUSH_GRACE_MS` for a slow consumer, it still caps how long the exit waits for a pipe to drain.
+Nothing to migrate. Callers that pass no budget see no change. A caller that passes `token_budget` under `auto` now gets at most that many tokens; to keep the old behavior for a while, run `gbrain config set search.auto_packing off`, and check a call with:
 
-### For contributors
-
-- The dispatcher moved from `src/cli.ts` to `src/cli/main.ts`. `src/cli.ts` is now the light entry point, and tests import the dispatcher's helpers from `src/cli/main.ts`. The top-level help text lives in `src/cli/top-help.ts`.
-- `bun run build:schema-migrations` also writes `src/core/schema-migrations/latest.generated.ts`, which the connect-time pending check reads.
-- New equivalence pins: `test/cli-exit-drain.test.ts` (real pipes), `test/cli-fast-path.test.ts` (fast path and import-graph bounds), `test/markdown-code-equivalence.test.ts` and `test/chunkers/token-estimate-pieces.test.ts` (fuzzed against the previous implementations), and `test/doctor-content-golden.test.ts` (doctor output on a brain with content, captured on the previous release).
+```bash
+gbrain query "renewal terms" --return-unit auto --token-budget 4000 --json   # delivery.budget_used <= 4000, delivery.auto_packing
+```
 
 ## [0.60.123.0] - 2026-10-09
 
