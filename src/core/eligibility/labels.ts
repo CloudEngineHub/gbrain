@@ -109,11 +109,12 @@ export function needsDataEnvelope(tier: TrustTier): boolean {
 }
 
 const ENVELOPE_TAG = 'external-data';
+const ENVELOPE_TAG_RE = /<(\/?external-data)/gi;
 
 /** One item of text context: a compact label line, or for external content a data envelope. */
 export function renderTrustedText(text: string, fields: TrustFields, opts: LabelOpts = {}): string {
   if (!needsDataEnvelope(fields.trust_tier)) return `${compactTrustLabel(fields, opts)} ${text}`;
-  const body = text.replace(new RegExp(`</?${ENVELOPE_TAG}`, 'gi'), m => m.replace('<', '&lt;'));
+  const body = text.replace(ENVELOPE_TAG_RE, '&lt;$1');
   return `<${ENVELOPE_TAG} trust="${fields.trust_tier}" origin="${fields.origin}">\n${body}\n</${ENVELOPE_TAG}>`;
 }
 
@@ -134,6 +135,6 @@ export function withTrustLabel<T extends object>(row: T): T & TrustFields {
 /** One-line variant for list items (pointers, volunteered pages, fact lines): label, or an inline data envelope below `unknown`. */
 export function renderTrustedInline(text: string, fields: TrustFields, opts: LabelOpts = {}): string {
   if (!needsDataEnvelope(fields.trust_tier)) return text ? `${compactTrustLabel(fields, opts)} ${text}` : compactTrustLabel(fields, opts);
-  const body = text.replace(new RegExp(`</?${ENVELOPE_TAG}`, 'gi'), m => m.replace('<', '&lt;'));
+  const body = text.replace(ENVELOPE_TAG_RE, '&lt;$1');
   return `<${ENVELOPE_TAG} trust="${fields.trust_tier}" origin="${fields.origin}">${body}</${ENVELOPE_TAG}>`;
 }

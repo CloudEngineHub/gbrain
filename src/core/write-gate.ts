@@ -194,6 +194,7 @@ export const WRITE_GATE_WINDOW_CHARS = 4096;
 
 const NEGATED_BEFORE_RE = /\b(?:never|not|n't|no)\s{1,4}$/i;
 /** Global clones, for searching from an offset and walking every match (the table's own regexes stay stateless). */
+// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- global copies of WRITE_GATE_PATTERNS, vetted by scripts/check-write-gate-regex.ts
 const ITERATORS: ReadonlyMap<string, RegExp> = new Map(WRITE_GATE_PATTERNS.map(p => [p.name, new RegExp(p.rx.source, `${p.rx.flags}g`)]));
 
 /**

@@ -72,6 +72,7 @@ const DETECTION_FAMILY: Readonly<Record<string, 'override' | 'exfiltration'>> = 
 };
 export const INJECTION_DETECTION_PATTERNS: ReadonlyArray<{ name: string; family: 'override' | 'exfiltration'; rx: RegExp }> = INJECTION_PATTERNS
   .filter(p => DETECTION_FAMILY[p.name])
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- non-global copies of this module's own literal INJECTION_PATTERNS
   .map(p => ({ name: p.name, family: DETECTION_FAMILY[p.name], rx: new RegExp(p.rx.source, p.rx.flags.replace('g', '')) }));
 
 /**

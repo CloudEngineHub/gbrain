@@ -47,6 +47,7 @@ export function checkWriteGatePatterns(patterns: readonly WriteGatePattern[] = W
 
 function fixturePatterns(root: string): WriteGatePattern[] {
   const rows = JSON.parse(readFileSync(join(root, 'patterns.json'), 'utf8')) as Array<{ name: string; source: string; flags?: string; anchors: string[]; preceded?: string }>;
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- self-test fixture patterns this guard exists to vet; never runs on user text
   return rows.map(r => ({ name: r.name, family: 'override', rx: new RegExp(r.source, r.flags ?? 'i'), anchors: r.anchors, ...(r.preceded ? { preceded: new RegExp(r.preceded, 'i') } : {}) }));
 }
 

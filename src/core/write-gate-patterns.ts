@@ -147,6 +147,7 @@ export function spaced(source: string): string {
 function own(name: string, family: WriteGateReasonFamily, source: string, anchors: readonly string[],
   extra: Pick<WriteGatePattern, 'requires' | 'negatable'> & { preceded?: string } = {}): WriteGatePattern {
   const { preceded, ...rest } = extra;
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- sources are this module's literal table, vetted by scripts/check-write-gate-regex.ts (bounded, no nesting, no backrefs)
   return { name, family, rx: new RegExp(spaced(source), 'i'), anchors, ...rest, ...(preceded ? { preceded: new RegExp(`${spaced(preceded)}$`, 'i') } : {}) };
 }
 
@@ -228,10 +229,12 @@ const OWN_PATTERNS: readonly WriteGatePattern[] = [
 /** The full detector table: bounded clones first, then the detector's own patterns. */
 export const WRITE_GATE_PATTERNS: readonly WriteGatePattern[] = [
   ...INJECTION_DETECTION_PATTERNS.map(p => ({
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- bounded clone of a literal pattern, vetted by scripts/check-write-gate-regex.ts
     name: p.name, family: p.family, rx: new RegExp(boundQuantifiers(p.rx.source), p.rx.flags), anchors: CLONE_ANCHORS[p.name] ?? [],
     ...(CLONE_REQUIRES[p.name] ? { requires: CLONE_REQUIRES[p.name] } : {}),
   })),
   ...IMPERATIVE_RES.map((rx, i) => ({
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- bounded clone of a literal pattern, vetted by scripts/check-write-gate-regex.ts
     name: IMPERATIVE_META[i]!.name, family: 'override' as const, rx: new RegExp(boundQuantifiers(rx.source), rx.flags.replace('g', '')), anchors: IMPERATIVE_META[i]!.anchors,
     ...(IMPERATIVE_META[i]!.requires ? { requires: IMPERATIVE_META[i]!.requires } : {}),
   })),
