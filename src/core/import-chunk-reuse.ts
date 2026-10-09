@@ -4,20 +4,22 @@
  * publish (inside its publication transaction, under the page guard).
  */
 import type { BrainEngine } from './engine.ts';
-import type { Chunk, ChunkInput } from './types.ts';
 import { embeddingWriteTarget, embeddingInputContext } from './page-state/projections.ts';
 import { canReuseMarkdownVector, planEmbeddingReuse } from './embed-reuse.ts';
+import { modeRequiresSynopsis } from './embedding-context.ts';
+import type { Chunk, ChunkInput, CRMode } from './types.ts';
 
 /**
  * A13 reuse for one page import: copies each stored vector the reuse gate
  * admits onto its matching new chunk in `into`, and maps the chunk's index to
  * the stored row id when that row already holds exactly what the chunk would
- * insert (so a prepared import can keep it in place), else to null.
+ * insert (so a prepared import can keep it in place), else to null. A
+ * prepared import reuses nothing from a page stored under per-chunk synopsis.
  */
 export async function reuseStoredChunkVectors(
   exec: BrainEngine,
   into: ChunkInput[],
-  { slug, sourceId, title, corpusGeneration, tier }: { slug: string; sourceId: string; title: string; corpusGeneration: string | null; tier: 'title' | 'none' },
+  { slug, sourceId, title, corpusGeneration, tier, prepared }: { slug: string; sourceId: string; title: string; corpusGeneration: string | null; tier: 'title' | 'none'; prepared: boolean },
 ): Promise<Map<number, number | null>> {
   const reused = new Map<number, number | null>();
   const target = await embeddingWriteTarget(exec);
@@ -28,6 +30,9 @@ export async function reuseStoredChunkVectors(
       FROM content_chunks c JOIN pages p ON p.id = c.page_id
       WHERE p.source_id = $1 AND p.slug = $2`, [sourceId, slug]);
   if (rows.length === 0) return reused;
+  // A page stored under per-chunk synopsis re-embeds every chunk on its next
+  // prepared edit: its vectors carry synopses this import does not recompute.
+  if (prepared && rows[0]!.contextual_retrieval_mode && modeRequiresSynopsis(rows[0]!.contextual_retrieval_mode as CRMode)) return reused;
   const recorded = new Map(rows.map(row => [Number(row.chunk_index), row.embedding_input_hash]));
   const textOnly = new Set(rows.filter(row => row.text_only).map(row => Number(row.chunk_index)));
   // Reuse is keyed on chunk source + text, so a stored chunk's current-input

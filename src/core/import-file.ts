@@ -767,7 +767,7 @@ export async function importFromContent(
   const reusable = !!existing && !existing.deleted_at && !opts.forceRechunk && !opts.onPostCommitEmbedding && chunks.length > 0
     && !(opts.prepare && modeRequiresSynopsis(effectiveCRMode)) && !hasProtectedBody(`${existing.compiled_truth}\n${existing.timeline ?? ''}`) && !hasProtectedBody(`${parsed.compiled_truth}\n${parsed.timeline ?? ''}`);
   const reuseCtx = { slug, sourceId: sourceId ?? 'default', title: parsed.title, corpusGeneration, tier: effectiveCRMode === 'title' ? 'title' as const : 'none' as const };
-  const reuseStoredVectors = (exec: BrainEngine, into: ChunkInput[]) => reuseStoredChunkVectors(exec, into, reuseCtx);
+  const reuseStoredVectors = (exec: BrainEngine, into: ChunkInput[]) => reuseStoredChunkVectors(exec, into, { ...reuseCtx, prepared: !!opts.prepare });
   const reused = reusable && !opts.noEmbed && !opts.prepare ? await reuseStoredVectors(engine, chunks) : new Map<number, number | null>();
 
   let embeddingPartial: EmbeddingZeroNormError | undefined;
