@@ -10,7 +10,7 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
-## [0.60.132.0] - 2026-10-09
+## [0.60.133.0] - 2026-10-09
 
 **A page with ` ```lua ` fences no longer stalls the writer: the Lua grammar is replaced, Lua definitions become semantic chunks for the first time, and only Lua files re-chunk on upgrade.**
 
@@ -29,6 +29,41 @@ GBRA-49's LongMemEval scoreboard found `gbrain serve --surface starter` on PGLit
 - `src/assets/wasm/grammars/tree-sitter-lua.wasm`: the official tree-sitter-grammars/tree-sitter-lua v0.3.0 release asset (ABI 14, the newest the pinned `web-tree-sitter@0.22.6` accepts; v0.4.0+ are ABI 15), SHA-256 `8fe0afe3…ee0d`; `scripts/vendor-lua-wasm.sh` downloads it and checks the checksum before writing; provenance in `src/assets/wasm/README.md`.
 - `src/core/chunkers/code.ts`: `GRAMMAR_REVISIONS` (`{ lua: 1 }`) and `chunkerStamp()` (`8;lua=1`). `import-file.ts` folds a language's grammar revision into that language's code-file hash only. The `sources.chunker_version` gate (`sync/preflight.ts`, `sync/full.ts`, `sync/finalize.ts`, `persistence/sync-prepare.ts`, the doctor's extraction check) reads and writes the stamp. `sync-cost-gate.ts`: `grammarOnlyDrift` and a per-language estimate for a stamp whose version is unchanged.
 - Tests: `test/chunkers/code-lua.test.ts` (ABI and import check; forced probes: the same text parses identically on every parser instance, the stuck page's five fences chunk in under a second with a 1.5 s per-fence timeout pinned, a conversation page with them prepares in one pass, Lua definitions become named chunks; all five fail on the previous grammar; the stamp, `grammarOnlyDrift`, and the cost gate pricing a grammar drift by Lua files alone). End to end on a fresh keyless PGLite brain, `gbrain put` of the stuck page: 1.8 s committed (previous grammar on current master: the CLI's wait ran out after 92 s with the request still `queued` and `deadline_exceeded` on stderr).
+
+## [0.60.132.0] - 2026-10-09
+
+**Sync holds clear themselves. gbrain merges repeated fact tables, closes tables that were never ended, and removes stray `slug:` lines on its own; a repair model decides the cases that need judgment; a person is asked only when gbrain says so, in plain words, with the one command that applies what it proposes.**
+
+A managed sync holds a file it cannot import instead of failing the run. Until now every content hold ended with "gbrain will not guess this repair" and an operator editing the file. On one brain five holds sat for 16 hours; the week before, an external agent made hundreds of fence and frontmatter repairs by hand against gbrain's error messages. This release adds a content-repair lane that clears those holds itself, under the preview → hash-bound apply → receipt contract fence repair already uses, and runs it in the maintenance cycle and from `gbrain sync unblock --apply`.
+
+### What you'd see
+
+- Two `## Facts` (or `## Takes`) tables in one section (`repeated_marker`) become one: later rows append in order, byte-identical rows are dropped and recorded, colliding numbers are renumbered with their `superseded by #N` references following, and the second heading goes. The validator proves every original row survived the merge. No model, no cost.
+- A table that never got its end marker, with text after it (`unclosed_trailing_content`): on a private page gbrain adds the end marker after the last row. On a world-visible page those trailing lines would become visible to readers, so gbrain never does that unattended: the preview (`gbrain repair fences --source <id> --only <path>`) prints the exact lines and the apply command, and the hold reads `tail_exposure_approval` until you approve. A tail that holds a pipe goes to the repair model, which answers only prose / rows / unsure; rows or unsure is `unclosed_ambiguous_tail` with the exact edit.
+- A frontmatter `slug:` naming another page (`frontmatter_slug_conflict`): when nothing can be merged into (no such page, or a page of another type with no title in common) gbrain removes the line itself. Otherwise the model reads both pages and answers remove the line, "these are the same thing, merge into X", or ask a person. A merge is **recommended, never executed**: the hold shows `merge_recommended` with the canonical page in plain words. New kind `gbrain repair slug-conflicts`.
+- `gbrain repair content --source <id>` previews the whole lane (fences, then slug conflicts) with one hash per kind; `--apply --expect <h1>,<h2>` applies exactly that; `--max-usd` caps the run's model spend. `gbrain sync unblock --apply` now performs these repairs instead of refusing them and reports each path as `repaired`, `held`, `needs_human` or `skipped`; `--no-repair` restores the old behaviour, `--no-llm` keeps to the free tiers.
+- The maintenance cycle gains a `content_repair` phase right after `fence_repair`. Every repair commit carries the trailer `gbrain-repair: <hold_code> <tier> <confidence>` and a receipt with the sha256 before and after; `git revert` of that commit restores the file and the hold re-screens.
+- Which model may judge a slug conflict is measured, not assumed: `claude-opus-5-5`, `gpt-6.1-sol` and `claude-sonnet-5-5` each gave zero harmful answers on 48 preregistered pairs (never deleted a true duplicate's slug, never merged two different pages) and recognised 92%, 85% and 80% of true duplicates. `models.content_repair` overrides; the fence-repair caps (`fences.repair.max_usd_per_page` $0.30, `fences.repair.max_usd_per_day` $1.00) and ledger govern the whole lane, `fences.repair.llm false` turns its model tier off.
+
+### What to watch for
+
+- Fence merging and the private-page close also run on write paths under `fences.normalize` (default on), as every lossless Tier 1 rule does. A page that previously refused with `repeated_marker` now imports merged.
+- `gbrain sync unblock --apply` writes repairs; before this release it refused repair-class holds and wrote nothing. Use `--no-repair` for the old behaviour.
+- A hold the lane decided needs a person (`merge_recommended`, `content_repair_needs_human`, `tail_exposure_approval`, a manual fence reason) now reports `needs_human: true` in `gbrain sync status` with the paragraph in `human_reason`, and `unblock` lists it instead of retrying it.
+- Page merges are not executed in this release; the hold names the canonical page and nothing is changed until a person merges by hand. The executor is a follow-up (TODOS.md).
+
+### Itemized changes
+
+- **`merge_fences` (`src/core/fence-repair/merge.ts`, `structure.ts`, `validate.ts`, `receipt.ts`).** Tier 1 merges balanced same-kind fences in one section; the validator pairs merged rows through the mapping (gate (e) accepts exactly the recorded duplicates; (b), (c), (d), (f) run per mapped row); the receipt carries occurrence identities. `FENCE_RULES_VERSION` 3 re-screens older holds.
+- **`close_fence_trailing` and the tail classifier (`structure.ts`, `llm-tail.ts`, `repair-tiers.ts`, `hold-fix.ts`).** Gate (g) admits exactly the trailing lines the fix shows; the structural rule admits that fix only on a private page or under `approveTailExposure`, which explicit previews and `--expect` applies carry and unattended runs never do. New reasons `tail_exposure_approval` (actor user) and `unclosed_ambiguous_tail`; `unclosed_trailing_content` is now the Tier 3 tail question.
+- **`slug-conflicts` kind (`src/core/repair/slug-conflicts.ts`, `src/core/content-repair/*`).** Alias-resolved identity, the two deterministic rules, the judgment prompt and parser (`JUDGMENT_PROMPT_VERSION` 1), the model call under `FENCE_REPAIR_LEDGER` with a memo keyed on both participants, `content_repair` receipts and the commit trailer through the coordinated `managed_file_repair` intent. Hold metadata gains `content_repair` (codes and slugs only), kept across a re-screen of the same bytes; `sync status` renders the paragraph from templates.
+- **The lane (`src/core/repair/content-lane.ts`, `src/commands/repair-content.ts`, `src/core/cycle/content-repair.ts`, `sync-status.ts`).** `gbrain repair content`, the `content_repair` phase, `unblock --apply` repairs with structured per-path outcomes, and every hold surface routing fence and slug-conflict holds to the lane. An empty preview's hash binds "nothing to apply", so a lane apply with one hash per kind succeeds when a kind has no candidates.
+- **Eval (`evals/content-repair-judgment/`).** 48 pairs, preregistration, harness, scorer; verdict mirrored in gbrain-evals.
+
+### For contributors
+
+- `test/fence-repair-merge.test.ts`, `test/fence-repair-llm-tail.test.ts`, `test/repair-slug-conflicts.test.ts`, `test/content-repair-judgment.test.ts`, `test/repair-content.test.ts`, `test/cycle-content-repair.test.ts`, `test/eval-content-repair-judgment.test.ts`; `sync-status-unblock`, `persistence-sync-holds`, `fence-repair-normalize`, `fence-repair-validate`, `fence-repair-reasons`, `sync-hold-surfaces` extended. Goldens regenerated: `test/fixtures/goldens/exports/types.json` (new codes in the `canonical` union, `RepairResult.preview_hash`, `outcome_items[].llm_usd`).
+- Plan and review record: `docs/plans/2026-10-09-001-fix-content-repair-lane-6377-plan.md`.
 
 ## [0.60.131.0] - 2026-10-09
 
