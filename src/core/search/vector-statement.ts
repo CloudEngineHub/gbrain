@@ -119,7 +119,7 @@ export const INDEX_WALK_MIN_SCOPE_SHARE = 0.04;
  * up to SCOPE_SCAN_MAX_CHUNKS (estimated): first when at most
  * SCOPE_SCAN_FIRST_MAX_CHUNKS, otherwise after the walk comes back short.
  */
-export const SCOPE_SCAN_MAX_SHARE = 0.5;
+export const SCOPE_SCAN_MAX_SHARE = 0.3;
 export const SCOPE_SCAN_FIRST_MAX_CHUNKS = 25_000;
 export const SCOPE_SCAN_MAX_CHUNKS = 60_000;
 
