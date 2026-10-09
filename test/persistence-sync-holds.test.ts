@@ -390,7 +390,7 @@ test('#6377: a slug-conflict hold carries the content-repair verdict only for th
   const [hold] = await s.holds();
   expect(hold).toMatchObject({ code: 'frontmatter_slug_conflict' });
   expect(gitHoldItem(hold!).fix.argv).toEqual(['gbrain', 'repair', 'content', '--source', s.id, '--only', 'notes/slug.md']);
-  expect(gitHoldItem(hold!).fix.why).toContain('gbrain repairs this itself on the next maintenance run');
+  expect(gitHoldItem(hold!).fix.why).toContain('The content-repair lane clears this itself on the next maintenance run');
   const state = { action: 'merge_into' as const, reason: 'merge_recommended', canonical: 'notes/elsewhere', named: 'notes/elsewhere', model: 'anthropic:claude-opus-5-5', at: new Date().toISOString(), next_attempt_after: null };
   // Conditional on the judged bytes and the code: other bytes or another path record nothing.
   expect(await recordContentHoldRepair(engine, { sourceId: s.id, incarnation: hold!.incarnation, path: 'notes/slug.md', upstreamVersion: sha256('other bytes'), state })).toBe(false);
