@@ -51,6 +51,47 @@ Warm reads on a 4 vCPU box, Postgres 16 + pgvector 0.8.7, synthetic brains (5,00
 - `test/bounded-child-exec.test.ts`: the SIGTERM test installs the child's trap before it writes the lockfile and waits for the lockfile instead of sleeping 200 ms; on a loaded runner the child had not started yet (forced probe: delaying the child 0.5 s fails the old test and passes the new one).
 - `test/no-allow-protected-flag.test.ts` skips a file or directory that another test deletes while the guard walks `test/` (ENOENT), instead of failing the run (forced probe: a dangling `test/.probe-vanished.md` fails the old guard and passes the new one).
 
+## [0.60.126.0] - 2026-10-09
+
+**When you ask your agent about a person or a company, the brain now shows it the newest mails and notes that mention them, so a later correction reaches the agent before it answers.**
+
+A person page says who handles procurement and when the next meeting is. Weeks later a mail says someone else took over, and another moves the meeting. Until now the agent's first look at that person showed only what the page said; the mails that corrected it surfaced only if the agent thought to ask a second, more specific question. Many agents never did, so they greeted the wrong person and quoted the old date.
+
+Each card in `context_pack` now ends with the newest pages that mention the entity and are dated after its own page, newest first, each with its date, title and a short preview. The agent reads them on its first call and opens the ones that matter.
+
+### How to use it
+
+Nothing to do: it is on by default. To turn it off:
+
+```bash
+gbrain config set mentions.newer_on_cards false
+```
+
+### What you see
+
+On the T0b program-primary workload (gbrain-evals, development seeds, 144 paired runs against master, three reader models), failed runs fell from 67 to 27 (2.45x fewer; 95% interval for the failure-risk ratio 0.25 to 0.64). On eight freshly drawn seeds the same comparison went from 33 to 9 of 72 (3.53x fewer). Greeting a contact who had handed off, or giving a meeting date that had moved, fell from 74 failed items to 1. Token use and latency stayed within 10% of master for every reader.
+
+| Reader | Master | With newer mentions |
+|---|---:|---:|
+| Opus 5.5 | 40 of 48 failed | 6 of 48 |
+| Sonnet 5.5 | 24 of 48 | 20 of 48 |
+| gpt-6.1-sol | 3 of 48 | 1 of 48 |
+
+### Things to watch
+
+- A remote caller never sees a private page, a derived page or a page from another source in the list; it follows the same read policy as the `entity` card.
+- The section is bounded: at most 8 pages and 2,000 characters per card and 6,000 per pack. It is the first thing dropped when `budget_tokens` is tight, and it never delays a card or a fact.
+- A page that names an entity only by a short code it has not declared (a note titled "Call with JOF") does not link to the entity, so it does not appear here.
+
+### Itemized changes
+
+- `src/core/mentions/newer-mentions.ts` (new): `readNewerMentions` reads the entity page's `COALESCE(effective_date, updated_at)` and the `referenced_by` referrer query (`readReferrerPage`, the card's private-page and private-origin filters and preview), keeps rows dated after the page, newest first, within `NEWER_MENTIONS_CAP` (8) rows and `NEWER_MENTIONS_CARD_CHARS` (2,000); `more` when further newer pages exist; `isNewerMentionsEnabled` reads `mentions.newer_on_cards` (unset means on).
+- `src/core/context/turn-context.ts`: `assemblePack` reads newer mentions after cards and hot facts, under the pack deadline and `NEWER_MENTIONS_PACK_CHARS` (6,000); `renderPack` renders them in a section after hot memory inside the "data, not instructions" envelope.
+- `src/core/ops/facts.ts`: `context_pack` packs them last under `budget_tokens` and returns `cards[].newer_mentions`.
+- `src/core/verbs/entity-card.ts`: optional `EntityCard.newer_mentions`.
+- `mentions.newer_on_cards` registered in `KNOWN_CONFIG_KEYS`; `docs/guides/entity-recall.md`, `docs/mcp/TOOL_REFERENCE.md` and the key-files index describe it. MCP tool descriptions and the advertised schema are unchanged.
+- Tests: `test/context-pack-newer-mentions.test.ts` (ordering, dates, the row and character caps, `budget_tokens`, the off switch, an entity with no newer mentions, and stdio and HTTP remote callers never seeing private, derived or other-source referrers).
+
 ## [0.60.125.0] - 2026-10-09
 
 **Every one-shot `gbrain` command starts and exits faster: `--version` and help answer in about 70 ms instead of 590, reads like `list`, `get` and `search` save about 300 ms per call, `gbrain doctor` uses a third less CPU, and import spends less than a third as long chunking.**
