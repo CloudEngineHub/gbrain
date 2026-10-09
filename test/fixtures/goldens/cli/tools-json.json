@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 221751,
-    "stdoutSha256": "ed6d00aa87af99034391686167df7a67e1106f369a4068352fa2a4f10a97a743",
+    "stdoutBytes": 221904,
+    "stdoutSha256": "78b7f47fab4a3d66a0757f85717bcd1f87c8fbf2b4719c7cc9f33dadebf9d978",
     "toolNames": [
       "remember",
       "entity",
@@ -198,7 +198,7 @@
         "schema": {
           "properties": {
             "content_origin": {
-              "description": "Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
+              "description": "Where the content came from: user_said (the user told you; labeled so, still unconfirmed), tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
               "enum": [
                 "user_said",
                 "tool_output",
@@ -485,7 +485,7 @@
               "type": "string"
             },
             "content_origin": {
-              "description": "Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
+              "description": "Where the content came from: user_said (the user told you; labeled so, still unconfirmed), tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
               "enum": [
                 "user_said",
                 "tool_output",
@@ -760,7 +760,7 @@
               "type": "string"
             },
             "content_origin": {
-              "description": "Where the content came from: user_said, tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
+              "description": "Where the content came from: user_said (the user told you; labeled so, still unconfirmed), tool_output (web page, email, file or other tool text: stored as untrusted), inferred. Set it.",
               "enum": [
                 "user_said",
                 "tool_output",

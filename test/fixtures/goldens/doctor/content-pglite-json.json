@@ -535,7 +535,7 @@
         },
         {
           "category": "meta",
-          "message": "1003 column(s) verified against live schema",
+          "message": "1066 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
@@ -1903,6 +1903,111 @@
           },
           "message": "Every page has its revision; the page revision backfill is complete.",
           "name": "revision_backfill",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "backfill": {
+              "completed_at": "<ts>",
+              "interrupted": false
+            },
+            "by_tier": {
+              "agent_written": 0,
+              "external_untrusted": 0,
+              "operator_curated": 13,
+              "tool_observed": 0,
+              "unknown": 0,
+              "user_confirmed": 0
+            },
+            "derived": {
+              "external_pct": 0,
+              "external_untrusted": 0,
+              "rows": 0
+            },
+            "rows": 13,
+            "tables": [
+              {
+                "by_tier": {
+                  "agent_written": 0,
+                  "external_untrusted": 0,
+                  "operator_curated": 5,
+                  "tool_observed": 0,
+                  "unknown": 0,
+                  "user_confirmed": 0
+                },
+                "rows": 5,
+                "table": "pages"
+              },
+              {
+                "by_tier": {
+                  "agent_written": 0,
+                  "external_untrusted": 0,
+                  "operator_curated": 0,
+                  "tool_observed": 0,
+                  "unknown": 0,
+                  "user_confirmed": 0
+                },
+                "rows": 0,
+                "table": "facts"
+              },
+              {
+                "by_tier": {
+                  "agent_written": 0,
+                  "external_untrusted": 0,
+                  "operator_curated": 0,
+                  "tool_observed": 0,
+                  "unknown": 0,
+                  "user_confirmed": 0
+                },
+                "rows": 0,
+                "table": "takes"
+              },
+              {
+                "by_tier": {
+                  "agent_written": 0,
+                  "external_untrusted": 0,
+                  "operator_curated": 8,
+                  "tool_observed": 0,
+                  "unknown": 0,
+                  "user_confirmed": 0
+                },
+                "rows": 8,
+                "table": "timeline_entries"
+              }
+            ],
+            "unknown_pct": 0
+          },
+          "message": "0% of 13 row(s) have an unverified origin (unknown tier); the backfill has classified every row it has a signal for.",
+          "name": "trust_tiers",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "completed_at": null,
+            "detector_version": 2,
+            "total_unscanned": 0,
+            "unscanned": {
+              "facts": 0,
+              "pages": 0,
+              "takes": 0,
+              "timeline_entries": 0
+            }
+          },
+          "message": "Every agent-written or lower row has been scanned by the current write-gate detector; flagged rows carry their flag, and proactive surfaces withhold them when trust.agent_activation is suppress.",
+          "name": "trust_scan",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "legacy_unknown": 0,
+            "pending": [],
+            "unclaimed": []
+          },
+          "message": "No unclaimed source holds rows from before trust tiers.",
+          "name": "trust_sources_unclaimed",
           "status": "ok"
         },
         {
