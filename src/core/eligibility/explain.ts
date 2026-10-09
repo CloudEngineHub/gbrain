@@ -15,7 +15,7 @@ import { admitsTrust, compareTrust, storedTrustTier, trustLabel, type TrustTier 
 import { ACTIVATION_REASON_FAMILIES, ACTIVATION_TIER_CEILING, type EligibilityTable } from './sql.ts';
 import { FILTER_POLICY_FLOOR, loadTrustReadConfig, type TrustReadConfig } from './policy.ts';
 import { PROACTIVE_SURFACES, type ProactiveSurface } from './registry.ts';
-import { shortOrigin } from './labels.ts';
+import { trustFields, trustLabelWords } from './labels.ts';
 
 type Exec = Pick<BrainEngine, 'executeRaw' | 'getConfig'>;
 
@@ -99,7 +99,7 @@ export async function explainTrust(engine: Exec, ref: string): Promise<TrustExpl
     if (!hold) return empty();
     const tier = storedTrustTier(hold.tier);
     const held = hold.status === 'held' || hold.status === 'dropped';
-    return { ref, found: true, table: 'write_gate_holds', id: hold.id, trust_tier: tier, label: trustLabel(tier), origin: shortOrigin(hold.write_origin),
+    return { ref, found: true, table: 'write_gate_holds', id: hold.id, trust_tier: tier, label: trustLabel(tier), origin: trustFields(tier, hold.write_origin).origin,
       write_origin: hold.write_origin as Record<string, unknown> | null, verdict: 'quarantine', receipts: await receiptsFor(engine, 'write_gate_holds', hold.id),
       unconfirmed: false, quarantined_page: false, needs_rederive: false, config, activation: decisions(held ? 'held' : 'not_live', held ? 'held' : 'not_live'),
       ...(hold.status === 'held' ? { next: ['gbrain', 'trust', 'review'] } : {}) };
@@ -130,8 +130,9 @@ export async function explainTrust(engine: Exec, ref: string): Promise<TrustExpl
   const gone: SurfaceDecision | null = !row.live ? 'not_live' : row.quarantined ? 'quarantined' : needsRederive ? 'needs_rederive'
     : policyFloor && !admitsTrust(tier, policyFloor) ? 'below_floor' : null;
   const proactive: SurfaceDecision = gone ?? (unconfirmed && config.activation === 'suppress' ? 'suppressed' : 'eligible');
+  const fields = trustFields(tier, row.write_origin);
   return {
-    ref, found: true, table, id, trust_tier: tier, label: trustLabel(tier), origin: shortOrigin(row.write_origin),
+    ref, found: true, table, id, trust_tier: tier, label: trustLabelWords(fields, { unconfirmed }), origin: fields.origin,
     write_origin: typeof row.write_origin === 'string' ? JSON.parse(row.write_origin) : row.write_origin as Record<string, unknown> | null,
     verdict: receipts[0]?.verdict ?? 'allow', receipts, unconfirmed, quarantined_page: row.quarantined === true, needs_rederive: needsRederive, config,
     activation: decisions(proactive, gone ?? 'eligible'),

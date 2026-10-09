@@ -21,7 +21,9 @@ import { currentHoldStore, trustKillSwitchState } from './owner-actions.ts';
 import { getTrustProposal, listTrustProposals, pendingTrustProposalsFor, trustProposalRef, type TrustProposalAction, type TrustProposalRow } from './proposals.ts';
 import { lowerPageState, readPageTrustState } from './page-handlers.ts';
 import { formatTrustRef, pageRef, parseTrustRef, resolvePageRef } from './refs.ts';
-import { OWNER_TIER_FLOOR, storedTrustTier, trustLabel, type TrustTier } from './tier.ts';
+import { compareTrust, OWNER_TIER_FLOOR, storedTrustTier, trustLabel, USER_SAID_ORIGIN_MARKER, type TrustTier } from './tier.ts';
+import { isUserSaid, trustFields, trustLabelWords } from '../eligibility/labels.ts';
+import { ACTIVATION_REASON_FAMILIES, ACTIVATION_TIER_CEILING } from '../eligibility/sql.ts';
 import { claimPendingSql, TRUST_CLAIM_RESUME_COMMAND } from './claim-state.ts';
 import { listTrustAllowRules, type TrustAllowRule } from './allow-rules.ts';
 import { isQuarantined } from '../quarantine.ts';
@@ -251,6 +253,8 @@ export interface TrustExplanation {
   text?: string;
   /** The row is still `unknown` in a source the owner claimed whose lift has not finished: shown as owner tier. */
   claimed_source?: 'lift_pending';
+  /** The owner's confirm command for a row the user told their agent (labeled USER_SAID_TRUST_LABEL). */
+  confirm?: string[];
 }
 
 /**
@@ -258,12 +262,16 @@ export interface TrustExplanation {
  * labeled and explained as owner tier: the lift makes it so (or lower, by its
  * own signals; `gbrain trust claim-sources --resume` finishes it).
  */
-async function claimView(engine: BrainEngine, sourceId: string, tier: TrustTier): Promise<{ tier: TrustTier; label: string; claimed_source?: 'lift_pending' }> {
-  if (tier !== 'unknown') return { tier, label: trustLabel(tier) };
+async function claimView(engine: BrainEngine, sourceId: string, tier: TrustTier, writeOrigin: unknown, gate: TrustExplanation['gate']):
+  Promise<{ tier: TrustTier; label: string; claimed_source?: 'lift_pending'; user_said?: true }> {
+  // A flagged row reads "unconfirmed, …" (a user_said origin never softens it); a relayed user statement reads USER_SAID_TRUST_LABEL.
+  const unconfirmed = compareTrust(tier, ACTIVATION_TIER_CEILING) <= 0 && gate.receipts.some(r => r.verdict === 'flag' && r.reason_families.some(f => ACTIVATION_FAMILIES.includes(f)));
+  const fields = trustFields(tier, writeOrigin);
+  if (tier !== 'unknown') return { tier, label: trustLabelWords(fields, { unconfirmed }), ...(isUserSaid(fields) && !unconfirmed ? { user_said: true as const } : {}) };
   const [pending] = await engine.executeRaw<{ id: string }>(`SELECT s.id FROM sources s WHERE s.id = $1 AND ${claimPendingSql('s')}`, [sourceId]);
   return pending
     ? { tier: OWNER_TIER_FLOOR, label: `${trustLabel(OWNER_TIER_FLOOR)} (claimed source; finish with ${TRUST_CLAIM_RESUME_COMMAND.join(' ')})`, claimed_source: 'lift_pending' }
-    : { tier, label: trustLabel(tier) };
+    : { tier, label: trustLabelWords(fields, { unconfirmed }) };
 }
 
 // The write gate receipts for one row (write_gate_receipts), newest first.
@@ -277,12 +285,11 @@ async function gateReceipts(engine: BrainEngine, table: string, id: number): Pro
   return { verdict: (receipts[0]?.verdict as 'flag' | 'quarantine' | undefined) ?? 'none', receipts };
 }
 
-const ACTIVATION_FAMILIES = ['standing_instruction', 'override', 'exfiltration', 'credential'];
+const ACTIVATION_FAMILIES: readonly string[] = ACTIVATION_REASON_FAMILIES;
 
 /** CEO-20, per surface: where this row is used. */
-async function activationNote(engine: BrainEngine, tier: TrustTier, gate: TrustExplanation['gate'], quarantined: boolean): Promise<string> {
+async function activationNote(engine: BrainEngine, tier: TrustTier, gate: TrustExplanation['gate'], quarantined: boolean, label: string): Promise<string> {
   if (quarantined) return 'Quarantined: hidden from search, recall and every proactive surface until released.';
-  const label = trustLabel(tier);
   const flagged = gate.receipts.some(r => r.verdict === 'flag' && r.reason_families.some(f => ACTIVATION_FAMILIES.includes(f)));
   const lowTier = !['user_confirmed', 'operator_curated', 'tool_observed'].includes(tier);
   const mode = await engine.getConfig('trust.agent_activation') ?? 'allow';
@@ -316,12 +323,12 @@ export async function explainTrust(engine: BrainEngine, refOrQuery: string, opts
       const [row] = await engine.executeRaw<{ source_id: string; trust_tier: string; write_origin: unknown; text: string }>(sql, [ref.id]);
       if (!row) throw opError('not_found', `No ${ref.kind} ${formatTrustRef(ref)}.`, 'Check the ref; gbrain trust review lists items.');
       const tier = storedTrustTier(row.trust_tier);
-      const view = await claimView(engine, row.source_id, tier);
       const table = ref.kind === 'fact' ? 'facts' : 'takes';
       const gate = await gateReceipts(engine, table, ref.id);
+      const view = await claimView(engine, row.source_id, tier, row.write_origin, gate);
       return [{ ref: formatTrustRef(ref), kind: ref.kind, source_id: row.source_id, tier, label: view.label, write_origin: originOf(row.write_origin),
-        gate, pending_proposals: await proposalsFor(engine, table, ref.id), activation: await activationNote(engine, view.tier, gate, false), text: snippet(row.text, 200),
-        ...(view.claimed_source ? { claimed_source: view.claimed_source } : {}) }];
+        gate, pending_proposals: await proposalsFor(engine, table, ref.id), activation: await activationNote(engine, view.tier, gate, false, view.label), text: snippet(row.text, 200),
+        ...(view.claimed_source ? { claimed_source: view.claimed_source } : {}), ...(view.user_said ? { confirm: trust('confirm', formatTrustRef(ref)) } : {}) }];
     }
     case 'page': {
       let resolved;
@@ -333,10 +340,10 @@ export async function explainTrust(engine: BrainEngine, refOrQuery: string, opts
       const [row] = await engine.executeRaw<{ write_origin: unknown }>('SELECT write_origin FROM pages WHERE id = $1', [state.pageId]);
       const gate = await gateReceipts(engine, 'pages', state.pageId);
       const quarantined = isQuarantined(state.snapshot.page.frontmatter);
-      const view = await claimView(engine, sourceId, state.tier);
+      const view = await claimView(engine, sourceId, state.tier, row?.write_origin, gate);
       return [{ ref: pageRef(sourceId, slug), kind: 'page', source_id: sourceId, tier: state.tier, label: view.label, write_origin: originOf(row?.write_origin),
-        gate, quarantined, pending_proposals: await proposalsFor(engine, 'pages', state.pageId), activation: await activationNote(engine, view.tier, gate, quarantined),
-        ...(view.claimed_source ? { claimed_source: view.claimed_source } : {}) }];
+        gate, quarantined, pending_proposals: await proposalsFor(engine, 'pages', state.pageId), activation: await activationNote(engine, view.tier, gate, quarantined, view.label),
+        ...(view.claimed_source ? { claimed_source: view.claimed_source } : {}), ...(view.user_said ? { confirm: trust('confirm', pageRef(sourceId, slug)) } : {}) }];
     }
     case 'hold': {
       const hold = await currentHoldStore().get(engine, ref.id);
@@ -377,7 +384,7 @@ export function renderTrustExplanation(items: readonly TrustExplanation[]): stri
     if (e.text) lines.push(`  text: ${e.text}`);
     const o = e.write_origin;
     if (o) {
-      lines.push(`  origin: ${typeof o.channel === 'string' ? o.channel : JSON.stringify(o)}${typeof o.source_uri === 'string' ? ` from ${o.source_uri}` : ''}${typeof o.request_id === 'string' ? ` (request ${o.request_id})` : ''}`);
+      lines.push(`  origin: ${typeof o.channel === 'string' ? o.channel : JSON.stringify(o)}${e.tier === 'agent_written' && o.content_origin === USER_SAID_ORIGIN_MARKER ? ` (content_origin ${USER_SAID_ORIGIN_MARKER})` : ''}${typeof o.source_uri === 'string' ? ` from ${o.source_uri}` : ''}${typeof o.request_id === 'string' ? ` (request ${o.request_id})` : ''}`);
       const inputs = Array.isArray(o.taint_inputs) ? o.taint_inputs as Array<{ table: string; id: unknown; tier: TrustTier }> : [];
       if (inputs.length) lines.push(`  derived from: ${inputs.map(i => `${i.table}:${String(i.id)} (${trustLabel(i.tier)})`).join(', ')}${o.taint_inputs_truncated ? ` and more (${String(o.taint_input_count)} inputs)` : ''}`);
       const decision = o.owner_decision as Record<string, unknown> | undefined;
@@ -386,6 +393,7 @@ export function renderTrustExplanation(items: readonly TrustExplanation[]): stri
     lines.push(`  write gate: ${e.gate.verdict === 'unavailable' ? 'no receipts on this brain' : e.gate.verdict}${e.gate.receipts.length ? ` (${e.gate.receipts.map(r => `receipt ${r.id}: ${r.verdict} ${r.reason_families.join(',')}`).join('; ')})` : ''}`);
     for (const p of e.pending_proposals) lines.push(`  pending ${p.ref} (${p.action}): ${p.commands.map(renderArgv).join(' | ')}`);
     lines.push(`  activation: ${e.activation}`);
+    if (e.confirm) lines.push(`  confirm: ${renderArgv(e.confirm)}`);
   }
   return lines.join('\n');
 }

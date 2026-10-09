@@ -25,8 +25,8 @@ import type { BrainEngine } from '../engine.ts';
 import type { WriteRequest } from '../persistence/model.ts';
 import { CONNECTOR_SOURCE_KINDS } from '../persistence/connector-identity.ts';
 import {
-  OWNER_TIER_FLOOR, TRUST_TIER_RANK, compareTrust, contentOriginTier, effectiveWriteTrust, isTrustTier, minTrust, trustRankSql,
-  type TrustTier, type WriteTrust,
+  CONTENT_ORIGINS, OWNER_TIER_FLOOR, TRUST_TIER_RANK, compareTrust, contentOriginTier, effectiveWriteTrust, isTrustTier, minTrust, trustRankSql,
+  type ContentOrigin, type TrustTier, type WriteTrust,
 } from './tier.ts';
 
 /** Journaled verbs an agent (remote or local) calls directly; their rows are agent_written unless lowered. */
@@ -86,7 +86,9 @@ export function intentContentOrigin(intent: Record<string, unknown> | null | und
  */
 export function requestChannelTrust(row: Pick<WriteRequest, 'id' | 'operation' | 'authority' | 'intent'>): WriteTrust | undefined {
   const kind = internalIntentKind(row.intent);
-  const origin = { channel: requestChannel(row), request_id: row.id };
+  const declared = row.intent?.content_origin;
+  const origin = { channel: requestChannel(row), request_id: row.id,
+    ...((CONTENT_ORIGINS as readonly unknown[]).includes(declared) ? { content_origin: declared as ContentOrigin } : {}) };
   if (kind.startsWith('connector_v2_') || kind.startsWith('managed_connector_')) return effectiveWriteTrust({ channel: 'external_untrusted', origin });
   if (row.authority?.remote === true) {
     const lowered = intentContentOrigin(row.intent);

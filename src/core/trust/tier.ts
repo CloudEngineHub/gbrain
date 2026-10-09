@@ -79,6 +79,18 @@ export function trustLabel(tier: TrustTier): string {
   return TRUST_TIER_LABELS[tier];
 }
 
+/**
+ * The label of an agent-written row whose agent declared `content_origin: "user_said"`, i.e. the user's own words relayed by
+ * their agent. The tier stays agent_written (no authority raise); only the
+ * wording changes, so models stop discounting the user's own preferences as
+ * an agent's guess. Distinct from "confirmed by you" and "your notes". A
+ * flagged (instruction-like, unconfirmed) row never gets it: it keeps
+ * "unconfirmed, agent-written". The eval harness reads this constant.
+ */
+export const USER_SAID_TRUST_LABEL = 'you told your agent this (not yet confirmed)';
+/** The marker appended to a user_said row's short origin (`mcp:remember:user_said`) on every read surface. */
+export const USER_SAID_ORIGIN_MARKER = 'user_said';
+
 /** A stored tier read back from the database; NULL (a legacy page_versions row) and unrecognized values read as `unknown`. */
 export function storedTrustTier(value: unknown): TrustTier {
   return isTrustTier(value) ? value : 'unknown';
@@ -132,6 +144,8 @@ export const TAINT_INPUT_SAMPLE_LIMIT = 32;
 /** Stored in `write_origin` (jsonb). `channel` names the write path, e.g. `mcp:put_page`, `sync`, `connector:google`. */
 export interface WriteOrigin {
   channel: string;
+  /** The agent's declared `content_origin` (validated at admission); `user_said` changes the read label, never the tier. */
+  content_origin?: ContentOrigin;
   connector?: string;
   source_uri?: string;
   request_id?: string;

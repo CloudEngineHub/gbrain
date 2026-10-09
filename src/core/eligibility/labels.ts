@@ -13,7 +13,7 @@
  * reduced to a safe character set; attacker-controllable origin fields
  * (source_uri) are never rendered as text (ENG-9).
  */
-import { compareTrust, storedTrustTier, trustLabel, type TrustTier } from '../trust/tier.ts';
+import { compareTrust, storedTrustTier, trustLabel, USER_SAID_ORIGIN_MARKER, USER_SAID_TRUST_LABEL, type TrustTier } from '../trust/tier.ts';
 
 export interface TrustFields {
   trust_tier: TrustTier;
@@ -59,9 +59,29 @@ export function shortOrigin(writeOrigin: unknown): string {
   return safe || 'legacy';
 }
 
-/** `trust_tier` + `origin` for a stored row's raw column values. */
+/**
+ * `trust_tier` + `origin` for a stored row's raw column values. An agent_written row whose agent declared
+ * `content_origin: "user_said"` gets the origin marker (`mcp:remember:user_said`), which its label reads.
+ */
 export function trustFields(tier: unknown, writeOrigin: unknown): TrustFields {
-  return { trust_tier: storedTrustTier(tier), origin: shortOrigin(writeOrigin) };
+  const trust_tier = storedTrustTier(tier);
+  const origin = shortOrigin(writeOrigin);
+  const userSaid = trust_tier === 'agent_written' && originObject(writeOrigin)?.content_origin === USER_SAID_ORIGIN_MARKER;
+  return { trust_tier, origin: userSaid ? `${origin}:${USER_SAID_ORIGIN_MARKER}` : origin };
+}
+
+/** The row is the user's own words relayed by their agent (agent_written, origin marked user_said). */
+export function isUserSaid(fields: Pick<TrustFields, 'trust_tier' | 'origin'>): boolean {
+  return fields.trust_tier === 'agent_written' && fields.origin.endsWith(`:${USER_SAID_ORIGIN_MARKER}`);
+}
+
+/**
+ * The words of a row's label: "unconfirmed, …" for a flagged row (never softened by user_said),
+ * USER_SAID_TRUST_LABEL for a relayed user statement, else the tier's label.
+ */
+export function trustLabelWords(fields: Pick<TrustFields, 'trust_tier' | 'origin' | 'unconfirmed'>, opts: LabelOpts = {}): string {
+  if (opts.unconfirmed || fields.unconfirmed) return `unconfirmed, ${fields.trust_tier === 'agent_written' ? 'agent-written' : trustLabel(fields.trust_tier)}`;
+  return isUserSaid(fields) ? USER_SAID_TRUST_LABEL : trustLabel(fields.trust_tier);
 }
 
 export interface LabelOpts {
@@ -70,15 +90,14 @@ export interface LabelOpts {
 }
 
 /**
- * The compact per-item text label, e.g. `[written by an agent · mcp:remember]`.
+ * The compact per-item text label, e.g. `[written by an agent · mcp:remember]`, or for the user's own
+ * words relayed by their agent `[you told your agent this (not yet confirmed) · mcp:remember:user_said]`.
  * An unconfirmed flagged row says so (`[unconfirmed, agent-written · …]`, or
  * `[unconfirmed, external, untrusted · …]` below agent_written); a contested
  * row names its pending proposal (`· contested tp7`).
  */
 export function compactTrustLabel(fields: TrustFields, opts: LabelOpts = {}): string {
-  const words = opts.unconfirmed || fields.unconfirmed
-    ? `unconfirmed, ${fields.trust_tier === 'agent_written' ? 'agent-written' : trustLabel(fields.trust_tier)}`
-    : trustLabel(fields.trust_tier);
+  const words = trustLabelWords(fields, opts);
   return `[${words} · ${fields.origin}${fields.contested ? ` · contested ${fields.contested.proposal_ref}` : ''}]`;
 }
 

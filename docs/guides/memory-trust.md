@@ -20,6 +20,16 @@ it as a label:
 | `unknown` | unverified origin | rows saved before trust tiers existed |
 | `external_untrusted` | external, untrusted | connectors, webhooks, clipped pages, third-party transcripts |
 
+When an agent saves something you told it and says so (`content_origin:
+"user_said"` on `remember`, `put_page` or `capture`), the row stays
+`agent_written` but reads **you told your agent this (not yet confirmed)**, and
+its origin gains a `:user_said` marker (`mcp:remember:user_said`). It is not
+"confirmed by you" or "your notes": `gbrain trust explain` shows the
+`gbrain trust confirm` command that raises it. An instruction-like write the
+gate flags keeps "unconfirmed, agent-written" even when tagged `user_said`, so
+the tag buys poisoned text no softer label. The exact wording is
+`USER_SAID_TRUST_LABEL` in `src/core/trust/tier.ts`.
+
 Nothing ever becomes "confirmed by you" without you typing a confirmation
 token at a terminal on the brain host. `--yes` never confirms.
 

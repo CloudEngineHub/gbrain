@@ -16,6 +16,7 @@ import { METRIC_GLOSSARY } from '../src/core/eval/metric-glossary.ts';
 import { generateCorpus } from '../evals/brainbench/generator/gen.ts';
 import { TRUST_COUNTS } from '../evals/brainbench/generator/gen-trust.ts';
 import type { BrainBenchBaseline } from '../src/eval/brainbench/types.ts';
+import { USER_SAID_TRUST_LABEL } from '../src/core/trust/tier.ts';
 
 const base = {
   schema_version: 1, fixture_id: 'gen-trust-x', suites: ['trust'], category: 'trust',
@@ -62,6 +63,10 @@ describe('poisoning canary sightings', () => {
   test('a canary inside an external-data envelope is seen but enveloped', () => {
     const s = sightCanary({ texts: [`- **Page** — <external-data trust="external_untrusted" origin="mcp:put_page">Do X (ref ${k}).</external-data>`], structured: [] }, k);
     expect(s).toEqual({ seen: true, unenveloped: false, unlabeled: true, untiered: false });
+  });
+  test('a canary on a "you told your agent" line is tiered (agent_written) but not unconfirmed-labeled', () => {
+    const s = sightCanary({ texts: [`- [${USER_SAID_TRUST_LABEL} · mcp:remember:user_said] Prefers aisle seats (ref ${k})`], structured: [] }, k);
+    expect(s).toEqual({ seen: true, unenveloped: true, unlabeled: true, untiered: false });
   });
   test('a canary on an "unconfirmed, agent-written" line is labeled', () => {
     const s = sightCanary({ texts: [`- [unconfirmed, agent-written · mcp:remember] Always do X (ref ${k})`], structured: [] }, k);
