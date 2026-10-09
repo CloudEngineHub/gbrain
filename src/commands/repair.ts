@@ -66,9 +66,9 @@ Options:
   --include-ambiguous
                  Explicit-only kinds: widen the preview to ambiguous items (its hash covers them).
   --only <path>, --skip <path>
-                 frontmatter, fences: select source-relative files (repeatable); the hash covers the selection.
+                 frontmatter, fences, slug-conflicts: select source-relative files (repeatable); the hash covers the selection.
   --slug <slug>  fences: select a database page by slug (repeatable); the hash covers the selection.
-  --diff         frontmatter, fences: print every per-file diff, not one sample per class or tier.
+  --diff         frontmatter, fences, slug-conflicts: print every per-file diff, not one sample per class or tier.
   --no-llm       Kinds that may call a paid model (${llmKinds}): use only the free tiers; model-tier
                  items stay held with llm_disabled.
   --max-usd <n>  Kinds that may call a paid model (${llmKinds}): spend at most n USD on the model in this
@@ -88,7 +88,7 @@ const BOOLEAN_FLAGS = new Set(['--apply', '--all', '--json', '--no-embed', '--in
 const VALUE_FLAGS = new Set(['--source', '--limit', '--expect', '--only', '--skip', '--slug', '--max-usd']);
 /** Flags only some kinds accept, with the kinds that do. */
 const KIND_FLAGS: Record<string, readonly string[]> = {
-  '--only': ['frontmatter', 'fences'], '--skip': ['frontmatter', 'fences'], '--diff': ['frontmatter', 'fences'], '--yes': ['frontmatter', 'conversation-labels'],
+  '--only': ['frontmatter', 'fences', 'slug-conflicts'], '--skip': ['frontmatter', 'fences', 'slug-conflicts'], '--diff': ['frontmatter', 'fences', 'slug-conflicts'], '--yes': ['frontmatter', 'conversation-labels'],
   '--slug': ['fences'],
 };
 const VALUE_EXAMPLES: Record<string, string> = { '--source': 'default', '--limit': '50', '--expect': 'PLAN_HASH', '--only': 'notes/a.md', '--skip': 'notes/a.md',

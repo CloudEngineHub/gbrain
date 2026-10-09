@@ -78,7 +78,7 @@ async function cursorHeader(engine: BrainEngine, sourceId: string): Promise<Curs
 
 function holdStatus(record: GitHoldRecord): SyncStatusHold {
   const attempts = record.meta.attempts ?? 1;
-  const verdict = classifySyncFault({ code: record.code, attempts });
+  const verdict = classifySyncFault({ code: record.code, attempts, ...(record.meta.content_repair ? { content_repair: { ...record.meta.content_repair, path: record.path, slug: record.slug } } : {}) });
   return { code: record.code, slug: record.slug, path: record.path, attempts, held_since: record.held_at, ...verdict,
     retry_after: verdict.safe_actions[0] === 'retry' || verdict.safe_actions[0] === 'retry_when_clean' ? null : 'after the named step', fix: gitHoldFix(record) };
 }

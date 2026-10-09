@@ -610,6 +610,16 @@ More: [docs/guides/troubleshooting.md#consumers-without-heartbeat](../../docs/gu
 |---|---|---|---|---|---|---|
 | The content-sanity gate rejected the content because the operator set `content_sanity.junk_disposition` to `reject`. | A junk-pattern or operator-literal hit is refused instead of quarantined under that setting, so the page was not written. The same content refuses on every retry. | Remove the matched junk from the file, or switch `content_sanity.junk_disposition` back to `quarantine` (a user decision), then import it again. | agent | `repeat the read that failed` | 1 | no |
 
+### content_repair_needs_human
+
+<a id="content_repair_needs_human"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The content-repair model could not decide whether a held file and the page its frontmatter `slug:` names are the same page, so nothing was written and a person decides which keeps the slug. | A `frontmatter_slug_conflict` hold that the deterministic rules cannot clear (the named page exists and shares a type or a title word with the file) goes to the judgment model; `needs_human` is its answer when the shown frontmatter, headings, opening lines and cross-mentions do not decide identity. Removing the `slug:` line on a guess would mint a second page for the same thing, and merging on a guess would fold two different things together, so gbrain records the verdict on the hold as codes and slugs, retries nothing until the file changes, and the rest of the source keeps syncing. | Show the user the paragraph gbrain sources status <id> --json renders for the hold (the path and the two slugs). If the two differ, remove the slug: line of the file; if they are one page, merge the unique sections into the page that keeps the slug and delete the other file; then commit and run gbrain sync --source <id> --no-pull. Run: gbrain sources status '{source_id}' --json | user | `gbrain sources status '{source_id}' --json` | 1 | no |
+
+More: [docs/guides/write-refusals.md#content_repair_needs_human](../../docs/guides/write-refusals.md#content_repair_needs_human)
+
 ### core_budget_exceeded
 
 <a id="core_budget_exceeded"></a>
@@ -1663,6 +1673,16 @@ More: [docs/guides/shared-brain-skills.md#membership-inactive-after-a-re-enrollm
 | This principal has no shared-skills membership with that installation id. | The request itself was wrong or no longer matches the brain; nothing was changed. | Correct the request using the message above, then retry. | agent | `repeat the read that failed` | 1 | no |
 
 More: [docs/guides/shared-brain-skills.md#troubleshoot-leave-and-recover](../../docs/guides/shared-brain-skills.md#troubleshoot-leave-and-recover)
+
+### merge_recommended
+
+<a id="merge_recommended"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The content-repair model judged a held file and the page its frontmatter `slug:` names to be the same page, so gbrain recommends merging them instead of removing the slug line; nothing was written. | A `frontmatter_slug_conflict` hold whose two sides describe the same person, company or topic is a duplicate, and the deterministic repair (delete the `slug:` line) would mint a second page for it. gbrain does not merge pages by itself yet (a lossless merge needs a coordinated two-page write with both revisions, withdrawal and metadata preservation; it ships separately), so the lane records the recommendation on the hold as codes and slugs (`meta.content_repair`: the canonical slug that keeps the page), `gbrain sync status` renders a paragraph for a person, and nothing retries it until the file changes. | Show the user the paragraph gbrain sources status <id> --json renders for the hold (the path, the canonical slug and the recommendation). After they agree, merge the unique sections of the duplicate into the canonical page, delete the duplicate file, commit, and run gbrain sync --source <id> --no-pull; the hold clears on that sync. Run: gbrain sources status '{source_id}' --json | user | `gbrain sources status '{source_id}' --json` | 1 | no |
+
+More: [docs/guides/write-refusals.md#merge_recommended](../../docs/guides/write-refusals.md#merge_recommended)
 
 ### method_not_allowed
 

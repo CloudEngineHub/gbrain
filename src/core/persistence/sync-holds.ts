@@ -23,7 +23,13 @@
  * summary also counts them (`fences`) so every surface can route a source to
  * the right repair (`holdRepairSteps`, D6): `gbrain repair fences` for fence
  * holds, `gbrain repair frontmatter` for the rest. A fence hold's own fix
- * depends on its state (`fence-repair/hold-fix.ts`, D17).
+ * depends on its state (`fence-repair/hold-fix.ts`, D17). #6377
+ * `frontmatter_slug_conflict` holds carry the content-repair lane's last
+ * verdict (`meta.content_repair`: action, reason code, slugs, model, when it
+ * is tried again; never the model's prose), written by
+ * `recordContentHoldRepair` and kept across a re-screen of the same bytes;
+ * their fix is that file's `gbrain repair content --only <path>` preview and,
+ * for a recommended merge or an undecidable pair, a paragraph for a person.
  */
 import type { BrainEngine } from '../engine.ts';
 import type { Action } from '../agent-output.ts';
@@ -33,6 +39,7 @@ import { FENCE_REASONS, type FenceMessageLocation } from '../fence-repair/reason
 import type { FenceReason, FenceTier, GateLetter } from '../fence-repair/types.ts';
 import { FENCE_VERSION } from '../fence-repair/refusal.ts';
 import { fenceHoldFix, fenceHoldLocation, fencePreviewArgv, readFenceAutoRepair, type FenceAutoRepair, type FenceHoldLocation } from '../fence-repair/hold-fix.ts';
+import { contentHoldDocs, contentHoldFix } from '../content-repair/hold-fix.ts';
 import { STRUCTURED_WRITE_ADVICE, type FencesNormalized } from '../fence-repair/report.ts';
 import type { SyncRename } from './sync-discovery.ts';
 import { VERSION } from '../../version.ts';
@@ -97,6 +104,8 @@ export interface GitHoldMeta {
   attempts?: number;
   /** #6188: the last fence repair attempt (repair kind or maintenance phase) that left this hold in place; location and reason only. */
   fence_repair?: FenceHoldRepairState;
+  /** #6377 `frontmatter_slug_conflict`: the content-repair lane's last verdict or attempt on this hold; codes and slugs only. */
+  content_repair?: ContentHoldRepairState;
   /** #6278 `preparation_stalled`: the failed receipt's step, wait cause and attempt count. */
   stall?: PreparationStallMeta;
   /** #6278: the held entry is a deletion (the file is gone); discovery re-screens it on request or a gbrain change, not on its absence. */
@@ -111,6 +120,27 @@ export interface FenceHoldRepairState {
   next_attempt_after: string | null;
   gate?: GateLetter;
   rows?: number[];
+}
+
+/**
+ * #6377: what the content-repair lane last decided about a `frontmatter_slug_conflict` hold. `action` is the verdict
+ * (`remove_slug` recorded only when the edit could not be written; `merge_into` and `needs_human` wait for a person;
+ * `pending` when no verdict was reached: the model tier was off, unavailable, unpriced or over budget). `reason` is the
+ * code behind it (`merge_recommended`, `content_repair_needs_human`, `llm_unavailable`, `budget_exhausted`, ...).
+ * `canonical` and `named` are slugs; `next_attempt_after` null means nothing retries it until the file changes.
+ */
+export interface ContentHoldRepairState {
+  action: 'remove_slug' | 'merge_into' | 'needs_human' | 'pending';
+  reason: string;
+  /** `merge_into`: the slug that keeps the page. */
+  canonical?: string;
+  /** The slug the held file's `slug:` line resolved to (when a page has it). */
+  named?: string;
+  /** The named page's type, for the rendered paragraph. */
+  type?: string;
+  model?: string;
+  at: string;
+  next_attempt_after: string | null;
 }
 
 export interface GitHoldRecord {
@@ -149,6 +179,8 @@ export interface GitHoldItem {
   line?: number;
   /** #6188 `invalid_fence` (D16): reason, fence, section, rows, columns, section line, classes, planned tier, auto_retry and next_attempt_after. */
   fence?: FenceHoldLocation;
+  /** #6377 `frontmatter_slug_conflict`: the content-repair lane's last verdict or attempt (codes and slugs). */
+  content_repair?: ContentHoldRepairState;
   message: string;
   slug: string | null;
   /** True when a page exists and keeps its last good revision; false when the file's page is missing. */
@@ -215,7 +247,11 @@ export async function writeGitHold(tx: Exec, input: Omit<GitHoldRecord, 'version
   const now = new Date().toISOString();
   // #6340: a path held again with the same code counts an attempt, so a page that keeps moving can be named.
   const attempts = existing && existing.code === input.code ? (existing.meta.attempts ?? 1) + 1 : 1;
-  const record: GitHoldRecord = { version: 1, ...input, meta: { ...input.meta, attempts },
+  // #6188/#6377: a re-screen of the same bytes under the same code keeps the last repair verdict; a changed file drops it.
+  const sameBytes = existing && existing.code === input.code && existing.upstream_version === input.upstream_version;
+  const kept = sameBytes ? { ...(existing.meta.fence_repair && !input.meta.fence_repair ? { fence_repair: existing.meta.fence_repair } : {}),
+    ...(existing.meta.content_repair && !input.meta.content_repair ? { content_repair: existing.meta.content_repair } : {}) } : {};
+  const record: GitHoldRecord = { version: 1, ...input, meta: { ...kept, ...input.meta, attempts },
     held_at: existing && existing.upstream_version === input.upstream_version && existing.code === input.code ? existing.held_at : now, updated_at: now };
   await tx.executeRaw(`INSERT INTO op_checkpoints(op,fingerprint,completed_keys) VALUES($1,$2,$3::text::jsonb)
     ON CONFLICT(op,fingerprint) DO UPDATE SET completed_keys=EXCLUDED.completed_keys,updated_at=now()`,
@@ -262,6 +298,18 @@ export async function recordFenceHoldRepair(engine: Exec, input: { sourceId: str
   const rows = await engine.executeRaw(`UPDATE op_checkpoints SET completed_keys=jsonb_set(completed_keys,'{0,meta,fence_repair}',$3::text::jsonb),updated_at=now()
     WHERE op=$1 AND fingerprint=$2 AND completed_keys->0->>'code'='invalid_fence' RETURNING 1`,
   [GIT_HOLD_OP, gitHoldFingerprint(input.sourceId, input.incarnation, input.path), JSON.stringify(input.state)]);
+  return rows.length === 1;
+}
+
+/**
+ * #6377: records on a `frontmatter_slug_conflict` hold what the content-repair lane last decided, conditional on the
+ * bytes it judged (`upstreamVersion`, the hold's `upstream_version`): a hold re-written for changed bytes is left alone.
+ * Observation time and counts are untouched. False when the hold is gone, holds other bytes or has another code.
+ */
+export async function recordContentHoldRepair(engine: Exec, input: { sourceId: string; incarnation: string; path: string; upstreamVersion: string | null; state: ContentHoldRepairState }): Promise<boolean> {
+  const rows = await engine.executeRaw(`UPDATE op_checkpoints SET completed_keys=jsonb_set(completed_keys,'{0,meta,content_repair}',$3::text::jsonb),updated_at=now()
+    WHERE op=$1 AND fingerprint=$2 AND completed_keys->0->>'code'='frontmatter_slug_conflict' AND completed_keys->0->>'upstream_version' IS NOT DISTINCT FROM $4 RETURNING 1`,
+  [GIT_HOLD_OP, gitHoldFingerprint(input.sourceId, input.incarnation, input.path), JSON.stringify(input.state), input.upstreamVersion]);
   return rows.length === 1;
 }
 
@@ -473,7 +521,7 @@ export function gitHoldFix(record: Pick<GitHoldRecord, 'source_id' | 'path' | 'c
     case 'rename_held':
       return repair(true, `The page that ${record.path} renames changed after the rename was recorded, so it was not moved; the preview proposes re-binding the rename to the current page for approval.`);
     case 'frontmatter_slug_conflict':
-      return repair(true, `The frontmatter slug of ${record.path} names another page; the preview proposes removing that line for approval.`);
+      return contentHoldFix(record);
     default:
       return record.meta.reason === 'needs_interpretation'
         ? repair(true, `Reading ${record.path} needs an interpretation (folded lines, a duplicate key or an unclosed list); the preview shows the exact proposal for approval.`)
@@ -481,9 +529,11 @@ export function gitHoldFix(record: Pick<GitHoldRecord, 'source_id' | 'path' | 'c
   }
 }
 
-export function gitHoldDocs(code: GitHoldCode, reason?: GitHoldReason): string {
+export function gitHoldDocs(code: GitHoldCode, reason?: GitHoldReason, meta?: Pick<GitHoldMeta, 'content_repair'>): string {
   // #6188: fence reasons carry their own anchors (`#fence-<reason>`).
   if (code === 'invalid_fence') return reason && reason in FENCE_REASONS ? FENCE_REASONS[reason as FenceReason].docs : 'docs/guides/write-refusals.md#invalid_fence';
+  // #6377: a judged slug conflict points at its verdict's anchor.
+  if (code === 'frontmatter_slug_conflict') return contentHoldDocs(meta?.content_repair);
   if (code === 'preparation_stalled') return 'docs/guides/write-refusals.md#preparation_stalled';
   if (code === 'worktree_dirty') return 'docs/guides/write-refusals.md#worktree_dirty';
   return `docs/guides/write-refusals.md#${reason ? `${code}-${reason}` : code}`;
@@ -495,8 +545,9 @@ export function gitHoldItem(record: GitHoldRecord, auto?: FenceAutoRepair): GitH
   return { path: record.path, code: record.code, ...(record.meta.reason ? { reason: record.meta.reason } : {}),
     ...(record.meta.key ? { key: record.meta.key } : {}), ...(record.meta.line !== undefined ? { line: record.meta.line } : {}),
     ...(fence ? { fence } : {}),
+    ...(record.code === 'frontmatter_slug_conflict' && record.meta.content_repair ? { content_repair: record.meta.content_repair } : {}),
     message: record.message, slug: record.slug, stale: record.page_id !== null, held_since: record.held_at,
-    fix: gitHoldFix(record, auto), docs: gitHoldDocs(record.code, record.meta.reason) };
+    fix: gitHoldFix(record, auto), docs: gitHoldDocs(record.code, record.meta.reason, record.meta) };
 }
 
 /** What the maintenance run does about fence holds, read only when some of these holds are fence holds. */
