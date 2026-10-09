@@ -116,13 +116,18 @@ export async function withChunkStatisticsRefresh<T>(engine: BrainEngine, changed
  */
 async function statisticsStillCurrent(engine: BrainEngine, changedPages: number): Promise<boolean> {
   if (!Number.isFinite(changedPages)) return false;
+  // PGLite has no autovacuum, and its full ANALYZE is what covers the tables outside the planner-stats deltas: a brain
+  // under 500 pages (where it is cheap), or a table holding rows it never sampled or grown more than 10% (+8 pages)
+  // past the size it last sampled, refreshes.
   const [state] = await engine.executeRaw<{ reltuples: number; columns: boolean }>(
     `SELECT c.reltuples::float8 AS reltuples,
-            $1::text <> 'postgres' OR (SELECT count(*) FROM pg_stats s WHERE s.schemaname = current_schema()
-              AND ((s.tablename = 'pages' AND s.attname = 'deleted_at') OR (s.tablename = 'content_chunks' AND s.attname = 'model'))) = 2 AS columns
+            CASE WHEN $1::text = 'postgres' THEN (SELECT count(*) FROM pg_stats s WHERE s.schemaname = current_schema()
+              AND ((s.tablename = 'pages' AND s.attname = 'deleted_at') OR (s.tablename = 'content_chunks' AND s.attname = 'model'))) = 2
+            ELSE NOT EXISTS (SELECT 1 FROM pg_class t WHERE t.relnamespace = c.relnamespace AND t.relkind = 'r' AND pg_relation_size(t.oid) > 0
+              AND (t.reltuples < 0 OR pg_relation_size(t.oid) / current_setting('block_size')::int > t.relpages * 1.1 + 8)) END AS columns
        FROM pg_class c WHERE c.oid = 'pages'::regclass`, [engine.kind]);
   const rows = Number(state?.reltuples ?? -1);
-  if (!state?.columns || rows <= 0 || changedPages >= 50 + 0.1 * rows) return false;
+  if (!state?.columns || rows <= (engine.kind === 'pglite' ? 500 : 0) || changedPages >= 50 + 0.1 * rows) return false;
   return verifyProjectionStatistics(engine).then(() => true, () => false);
 }
 
