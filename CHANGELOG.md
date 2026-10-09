@@ -10,19 +10,65 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
-## [0.60.126.0] - 2026-10-09
+## [0.60.134.0] - 2026-10-09
 
-**CI headroom: the PostgreSQL unit arms run as three balanced shards, the graduation custody suites run 30–42% faster, and the Tier 2 agent-journey file is split so no serial file sits near its 300-second cap.**
+**An MCP client sees `gbrain serve`'s tool list sooner, importing and syncing chunk pages about twice as fast, editing a page through `put_page` re-embeds only the chunks you changed, and a scoped vector search on a source of long pages finds its true neighbours. Chunks, tool lists and unscoped search come out the same.**
 
-Nothing changes for users. This release keeps the CI gate from failing on slow runners. The PostgreSQL unit-arm shard 2 overran its 20-minute step twice in one day, and the Tier 2 journey file took up to 235 of its 300 seconds.
+`gbrain serve` used to load every operation's code and start its background services before it answered the MCP handshake. It now answers `initialize` and `tools/list` from a generated list of the operations' names, schemas and descriptions, then loads the handlers and starts the IPC socket, persistence consumer and startup sweep right after. The chunker counted words by rescanning the growing chunk on every merge; it now counts each piece once. A page edit through the persistence path (serve `put_page`, managed sync) used to delete every chunk and send all of them back to the embedding provider; unchanged chunks now keep their rows and vectors. Scoped vector search now counts a source's chunks instead of inferring them from its share of pages, so a source of long pages is routed by its real size.
+
+### What you'd see
+
+4 vCPU box, Bun 1.4.2, Postgres 16 + pgvector 0.8.7, synthetic brains of 5,001 pages / 25,331 chunks and 50,010 pages / 248,802 chunks (1024-dim vectors), before and after on the same machine.
+
+| what | before p50/p95 | after p50/p95 |
+|---|---|---|
+| `gbrain serve` spawn → `tools/list`, Postgres (cold, N=20) | 535/619 ms | 467/513 ms |
+| `gbrain serve` spawn → `tools/list`, PGLite (cold, N=20) | 828/962 ms | 675/713 ms |
+| chunk every page, 5k brain (warm, N=20 passes) | 8.3/8.7 s | 4.1/4.3 s |
+| chunk every page, 50k brain (warm, N=20 passes) | 80.5/84.0 s | 41.7/44.6 s |
+| chunk 2,000 CJK-heavy pages (warm, N=20 passes) | 13.3/13.7 s | 11.5/11.9 s |
+
+Editing one paragraph of an 8-chunk page through `put_page` on the 50k brain sends 2 chunks to the embedding provider instead of 8 and writes 295 KB of WAL instead of 736 KB; the embed step takes 54-75 ms instead of 101-126 ms (p50). A source holding 26% of the 50k brain's pages but 93,500 chunks now gets the exact scan when the index comes back short: recall 0.69 → 0.94 (N=25 queries, local reader), p95 79 → 502 ms. A sessions-like source (16% of pages, 75,000 chunks) keeps recall 0.95 at the same latency.
+
+### What to watch for
+
+- A client that calls a tool in the same breath as `tools/list` waits for the deferred boot: its first call takes about 120-150 ms longer, and spawn to first answer stays within about 60 ms of before. A client that pauses even briefly between listing and calling pays nothing.
+- The resolve IPC socket, persistence consumer and startup sweep now come up just after the MCP handshake instead of before it (within about 1 s when no client ever connects).
+- A chunk kept across an edit keeps its row id, `created_at` and `embedded_at`.
+- Scoped vector search on a source of 25,000-120,000 chunks whose content sits away from the query now pays for the exact scan after the walk (about 0.6 s at 120,000 chunks) in exchange for complete results. The scope's chunk count is refreshed in the background at most once a minute per scope; the first search after a start routes on the old estimate.
 
 ### Itemized changes
 
+- **Static tool list (`src/core/operation-manifest.generated.ts`, `scripts/build-operation-manifest.ts`).** Every operation minus its handler, in registry order; `bun run build:operation-manifest` regenerates it, and `test/operation-manifest.test.ts` fails when it is stale. `src/mcp/server.ts`, `src/cli/main.ts` and the listing helpers read it; handlers load on the first tool call. `test/mcp-tool-list-snapshot.test.ts` pins `initialize` and `tools/list` byte for byte against the live registry in six surface and gate modes.
+- **Deferred serve boot (`src/mcp/server.ts`).** Boot starts once the first `tools/list` is answered, 25 ms after `initialize` when none is in flight, or after 1 s without a client. Every tool call and skill resource read waits for it and rejects with the boot error if it failed.
+- **Word counting (`src/core/cjk.ts`, `src/core/chunkers/recursive.ts`).** `wordStats` gathers whitespace runs, non-whitespace and CJK code units in one pass, and `concatWordStats` combines two pieces in constant time, so `greedyMerge` never recounts its chunk. A 1,500-case mixed CJK / Latin / emoji golden captured before the change pins every chunk boundary.
+- **Prepared edits (`src/core/import-file.ts`).** The prepared publish applies the same vector-reuse rules as the inline import inside its publication transaction, keeps each stored row identical to its new chunk, and writes only the rest.
+- **Scope chunk count (`src/core/search/vector-statement.ts`).** `SCOPE_CHUNKS_SQL` counts a scope's live pages and the chunks of a hash-stride sample of about 400 of them; the scope scan cap is 120,000 counted chunks (was 60,000 estimated).
+
 ### For contributors
 
-- **Faster graduation custody tests.** Every `test/graduation-rollback.test.ts` and `test/graduation-state.test.ts` case built its source brain from scratch: a PGLite initdb plus the full schema replay, about 2 s per harness and dozens of harnesses per file. `test/helpers/graduation-harness.ts` now builds one seeded source datastore per test process and copies it for each harness. It opens the copy once at its own path, so the owner sidecars are written there, and draws the per-brain identity values (brain id, shared-skill secret) fresh. Same machine, Postgres arm included, N=3 medians: rollback 141 s → 98 s, state 227 s → 131 s. No assertion changed.
-- **Three PostgreSQL arm shards.** `unit-postgres-arms` runs three shards instead of two, balanced on weights re-mined from 76 recent job logs. Before, 35 of the 106 listed files had no weight. Replayed over 36 historical CI runs, each shard's p95 test time is at most 10.0 minutes, inside the 20-minute step even on a runner twice as slow.
-- **Tier 2 split.** The read-op `--json` sweep (row 1) moved to `test/agent-journey-tier2-json.serial.test.ts`. Its shared fixtures now live in `test/helpers/agent-journey-tier2.ts`. Locally the original file took 77 s; the two files now take 43 s and 34 s.
+- `bun run bench:efficiency` runs the efficiency bench harness (`scripts/bench/efficiency/`): synthetic brains, import and hot-path benches, Postgres statement and cold-start probes, the chunk pass (`bench-chunk.ts`), MCP start (`probe-mcp-start.ts`) and per-scope vector recall (`vector-scope-share.ts`, moved from `scripts/bench/`).
+- After editing any operation's description or params, run `bun run build:operation-manifest` (also part of `bun run regen:all`).
+
+## [0.60.133.0] - 2026-10-09
+
+**A page with ` ```lua ` fences no longer stalls the writer: the Lua grammar is replaced, Lua definitions become semantic chunks for the first time, and only Lua files re-chunk on upgrade.**
+
+GBRA-49's LongMemEval scoreboard found `gbrain serve --surface starter` on PGLite at 99.5% CPU for 9.5 hours after a `put_page` had been admitted, never reading stdin again, with `[persistence] phase=preparation reason=deadline_exceeded` repeating (376 times) and 47 later writes queued behind it. The page was an exported chat whose assistant turns wrapped shell commands in ChatGPT-style ` ```lua ` fences (`sudo aa-status`, `sudo aa-status | grep snap.discord.discord`). The vendored Lua grammar (the `tree-sitter-wasms` build of the unmaintained Azganoth/tree-sitter-lua 2.1.3) allocated its external scanner state with `malloc` and reset it only when `deserialize` was handed two bytes, so every parse after the first in a process started from whatever the recycled heap held: `x = 1` misparsed as an error, and the fence texts spun inside the parser until the chunker's 30 s timeout. Five fences made each preparation attempt about 150 s of blocked event loop (a CPU profile puts about 80% in the runtime's parse loop driven by the scanner), past its 30 s deadline, so the consumer abandoned and retried it. On 0.60.106.0 that loop never ended; since #6278 (`persistence.max_preparation_attempts`, default 2) the request fails `preparation_stalled` after two attempts, which still costs five minutes of unresponsive serve and loses the write. Reproduced on current master before the fix. Independently, no Lua definition had ever become a semantic chunk, because the old grammar's node types never matched `TOP_LEVEL_TYPES.lua`.
+
+### What you see
+
+| Where | What changed |
+|---|---|
+| A page or file with Lua fences or `.lua` code | Chunks in milliseconds, on every parse, with `function`, `local function` and `function M.f()` definitions as named semantic chunks (`code-def` / `code-callers` work for Lua). |
+| `gbrain serve` writing such a page | The write commits as any other; no preparation deadline, no retry loop, stdin keeps being read. |
+| Existing indexes, on the next sync | Each source is walked once (hash compare) and only its `.lua` files re-import, re-chunk and re-embed; every other code page keeps its hash and its chunks. `CHUNKER_VERSION` stays 8. The sync cost gate prices the walk by the Lua files alone (`grammar_drift`), not the whole tree. Lua fences inside Markdown pages already indexed stay text chunks until the page changes or `gbrain sync --source <id> --full`. |
+
+### Itemized changes
+
+- `src/assets/wasm/grammars/tree-sitter-lua.wasm`: the official tree-sitter-grammars/tree-sitter-lua v0.3.0 release asset (ABI 14, the newest the pinned `web-tree-sitter@0.22.6` accepts; v0.4.0+ are ABI 15), SHA-256 `8fe0afe3…ee0d`; `scripts/vendor-lua-wasm.sh` downloads it and checks the checksum before writing; provenance in `src/assets/wasm/README.md`.
+- `src/core/chunkers/code.ts`: `GRAMMAR_REVISIONS` (`{ lua: 1 }`) and `chunkerStamp()` (`8;lua=1`). `import-file.ts` folds a language's grammar revision into that language's code-file hash only. The `sources.chunker_version` gate (`sync/preflight.ts`, `sync/full.ts`, `sync/finalize.ts`, `persistence/sync-prepare.ts`, the doctor's extraction check) reads and writes the stamp. `sync-cost-gate.ts`: `grammarOnlyDrift` and a per-language estimate for a stamp whose version is unchanged.
+- Tests: `test/chunkers/code-lua.test.ts` (ABI and import check; forced probes: the same text parses identically on every parser instance, the stuck page's five fences chunk in under a second with a 1.5 s per-fence timeout pinned, a conversation page with them prepares in one pass, Lua definitions become named chunks; all five fail on the previous grammar; the stamp, `grammarOnlyDrift`, and the cost gate pricing a grammar drift by Lua files alone). End to end on a fresh keyless PGLite brain, `gbrain put` of the stuck page: 1.8 s committed (previous grammar on current master: the CLI's wait ran out after 92 s with the request still `queued` and `deadline_exceeded` on stderr).
 
 ## [0.60.132.0] - 2026-10-09
 
