@@ -254,13 +254,20 @@ test('a batch admission whose COMMIT acknowledgment is lost replays its admitted
     try { settled = await importManagedFiles(brain.engine, once, { sourceId, noEmbed: true }); } finally { restore(); }
     expect(drops()).toBe(1);
     expect(settled.map(result => result.status === 'fulfilled' && result.value.status)).toEqual(once.map(() => 'imported'));
-    expect(await brain.engine.executeRaw("SELECT id FROM persistence_requests WHERE source_id=$1 AND slug LIKE 'once-%'", [sourceId])).toHaveLength(once.length);
+    // The re-run is a read: one row per file, under the request id and digest its durable intent recorded before admission.
+    const recorded = async (prefix: string) => (await brain.engine.executeRaw<{ slug: string; request_id: string; digest: string }>(
+      `SELECT slug,request_id::text AS request_id,digest FROM persistence_requests WHERE source_id=$1 AND slug LIKE $2 ORDER BY slug`, [sourceId, `${prefix}-%`]));
+    expect((await recorded('once')).map(row => row.slug)).toEqual(once.map((_, i) => `once-${i}`));
     const always = write(join(home, `${brain.label}-${sourceId}-always`), Object.fromEntries(Array.from({ length: 4 }, (_, i) => [`always-${i}.md`, page(`Always ${i}`)])));
     lose(Number.POSITIVE_INFINITY);
     try { settled = await importManagedFiles(brain.engine, always, { sourceId, noEmbed: true }); } finally { restore(); }
     expect(settled.map(result => result.status === 'rejected' && (result.reason as { code?: string }).code)).toEqual(always.map(() => 'write_outcome_unknown'));
+    const admitted = await recorded('always');
+    expect(admitted).toHaveLength(always.length);
+    // Each file's error names its own request id to read, the one its row was admitted under.
+    expect(settled.map(result => (result as PromiseRejectedResult).reason.fix?.argv?.at(-1))).toEqual(admitted.map(row => row.request_id));
     const resumed = await importManagedFiles(brain.engine, always, { sourceId, noEmbed: true });
     expect(resumed.map(result => result.status === 'fulfilled' && result.value.status)).toEqual(always.map(() => 'imported'));
-    expect(await brain.engine.executeRaw("SELECT id FROM persistence_requests WHERE source_id=$1 AND slug LIKE 'always-%'", [sourceId])).toHaveLength(always.length);
+    expect(await recorded('always')).toEqual(admitted);
   }
 }), 300_000);

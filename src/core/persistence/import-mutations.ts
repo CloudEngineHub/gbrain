@@ -10,6 +10,7 @@ import { currentVerifiedLocalWriter, localHostId } from './identity.ts';
 import { getWorktreeBinding } from './ownership.ts';
 import { batchSharedReads, emitFenceNotice, initializeLocalPersistence, pendingAwareResponse, preparePageAdmission, requestPrincipalForContext, withBatchAdmission } from './page-mutations.ts';
 import { admitBatch } from './page-batch.ts';
+import { writeOutcomeUnknown } from './admission-retry.ts';
 import { assertPersistenceAccepting, waitForWrites } from './service.ts';
 import type { WriteAdmission } from './journal.ts';
 import type { WriteRequest } from './model.ts';
@@ -202,7 +203,12 @@ async function submitManagedImports(ctx: OperationContext, batch: string, params
       try {
         const admitted = await admitBatch(ctx, batch, admissions.map(entry => entry.admission));
         admissions.forEach((entry, position) => rows.push({ index: entry.index, row: admitted[position]!, admitted: true, typeWarning: entry.typeWarning, slugAdvisory: entry.slugAdvisory }));
-      } catch (reason) { for (const entry of admissions) settled[entry.index] = { status: 'rejected', reason }; }
+      } catch (reason) {
+        // #6355: the batch's outcome is unknown for every file; each file names its own request id to read (and replay).
+        const unknown = reason instanceof OperationError && reason.code === 'write_outcome_unknown';
+        for (const entry of admissions) settled[entry.index] = { status: 'rejected',
+          reason: unknown ? writeOutcomeUnknown(entry.admission.requestId!, new Error(String(reason.detail ?? reason.message))) : reason };
+      }
     });
   } catch (reason) {
     for (let index = 0; index < params.length; index++) settled[index] ??= { status: 'rejected', reason };
