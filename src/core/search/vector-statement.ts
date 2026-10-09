@@ -116,12 +116,18 @@ export const INDEX_WALK_MIN_SCOPE_SHARE = 0.04;
 
 /**
  * Source scopes under SCOPE_SCAN_MAX_SHARE of pages get the exact scope scan
- * up to SCOPE_SCAN_MAX_CHUNKS (estimated): first when at most
+ * up to SCOPE_SCAN_MAX_CHUNKS (counted, SCOPE_CHUNKS_SQL): first when at most
  * SCOPE_SCAN_FIRST_MAX_CHUNKS, otherwise after the walk comes back short.
+ * The scan costs about 5 µs per scope chunk (75k chunks: 340 ms, 157k:
+ * 760 ms on a 50k-page brain), so the 120k cap keeps the fallback near
+ * 600 ms, under the joined statement's 820 ms on a clustered 75k-chunk scope
+ * and well inside the attempt's 2 s budget. The cap was 60k when the count
+ * was the page share of chunk reltuples, which put that 75k-chunk scope at
+ * 39k.
  */
 export const SCOPE_SCAN_MAX_SHARE = 0.3;
 export const SCOPE_SCAN_FIRST_MAX_CHUNKS = 25_000;
-export const SCOPE_SCAN_MAX_CHUNKS = 60_000;
+export const SCOPE_SCAN_MAX_CHUNKS = 120_000;
 
 /** Walk overfetch for a scope holding `share` of pages: the window keeps about INDEX_WALK_OVERFETCH in-scope rows per slot. */
 export function indexWalkOverfetch(share: number | undefined): number {
