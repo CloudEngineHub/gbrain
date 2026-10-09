@@ -197,7 +197,8 @@ export async function resolveModalityAndQueries(req: HybridRequest) {
     explicitModality === undefined &&
     regexModality === 'text' &&
     resolvedMode.cross_modal_llm_intent &&
-    isAmbiguousModalityQuery(query)
+    isAmbiguousModalityQuery(query) &&
+    (await import('../../ai/gateway.ts')).multimodalEmbeddingModel() !== null
   ) {
     try {
       const { classifyModalityWithLLM } = await import('../llm-intent.ts');

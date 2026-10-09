@@ -2169,6 +2169,27 @@ async function embedMultimodalOpenAICompat(
  * model (typically OpenAI text-embedding-3-large at 1536d or 2560d, NOT
  * compatible with the 1024d multimodal column).
  */
+/**
+ * The model `embedMultimodal` would embed with (`embedding_multimodal_model`,
+ * else `embedding_model`) when it can embed multimodal input, otherwise null.
+ * Hybrid search routes a query to the image column only when this is set: on
+ * a text-only install (the default `voyage:voyage-4`) the image embed always
+ * throws, and routing there only dropped the keyword arm and expansion.
+ */
+export function multimodalEmbeddingModel(): string | null {
+  if (!_config) return null;
+  const modelStr = _config.embedding_multimodal_model ?? getEmbeddingModel();
+  try {
+    const { parsed, recipe } = resolveRecipe(modelStr);
+    const touchpoint = recipe.touchpoints.embedding;
+    if (!touchpoint?.supports_multimodal) return null;
+    if (touchpoint.multimodal_models && !touchpoint.multimodal_models.includes(parsed.modelId)) return null;
+    return modelStr;
+  } catch {
+    return null;
+  }
+}
+
 export async function embedQueryMultimodal(text: string): Promise<Float32Array> {
   const [vec] = await embedMultimodal([{ kind: 'text', text }], { inputType: 'query' });
   if (!vec) {

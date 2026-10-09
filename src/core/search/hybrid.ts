@@ -1091,7 +1091,7 @@ export async function hybridSearch(
   const postFusionOpts = buildPostFusionOpts(req);
   const relationalList = await buildRelationalList(req);
 
-  const { isAvailable } = await import('../ai/gateway.ts');
+  const { isAvailable, multimodalEmbeddingModel } = await import('../ai/gateway.ts');
   const providerProbe = resolvedCol.embeddingModel || undefined;
   // Image/both/unified routing embeds via the MULTIMODAL provider, not the
   // text provider — so a multimodal-only install (text provider absent) must
@@ -1100,8 +1100,7 @@ export async function hybridSearch(
   // multimodal-routed queries) the multimodal provider is reachable. Without
   // this guard a multimodal-only install would fall to keyword-only here and
   // never run the image/unified vector path.
-  const multimodalProviderProbe =
-    cfgForColumn?.embedding_multimodal_model ?? 'voyage:voyage-multimodal-3';
+  const multimodalProviderProbe = multimodalEmbeddingModel();
   // The LLM intent tie-break (below) can escalate a regex-'text' query to
   // 'image'/'both'; account for that possibility so an ambiguous query on a
   // multimodal-only install still reaches the multimodal branch.
@@ -1115,6 +1114,7 @@ export async function hybridSearch(
       earlyModality === 'both' ||
       mayEscalateToMultimodal) &&
     !opts?._embeddingOptedOut &&
+    multimodalProviderProbe !== null &&
     isAvailable('embedding', multimodalProviderProbe);
   // Hermetic eval canaries/CI: a caller-supplied queryEmbedFn produces the
   // vector-arm query embedding without the gateway, so provider
@@ -1125,7 +1125,8 @@ export async function hybridSearch(
 
   const { effectiveModality, unifiedRouting, queries } = await resolveModalityAndQueries(req);
   const { vectorArms, queryEmbedding, imageQueryEmbedding, unifiedDone } =
-    await runVectorArms(req, { effectiveModality, unifiedRouting, queries, multimodalProviderProbe });
+    await runVectorArms(req, { effectiveModality, unifiedRouting, queries,
+      multimodalProviderProbe: multimodalProviderProbe ?? cfgForColumn?.embedding_multimodal_model ?? 'voyage:voyage-multimodal-3' });
   if (vectorArms.length === 0) {
     return searchVectorFallback(req, lexical, relationalList, postFusionOpts);
   }
