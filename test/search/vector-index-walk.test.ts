@@ -92,8 +92,7 @@ describe('vector index walk (PGLite)', () => {
     ['remote reader (private-page rule)', { excludePrivate: true }],
     ['remote reader, limit 50', { excludePrivate: true, limit: 50 }],
     ['granted sources', { excludePrivate: true, sourceIds: ['default', 'side'] }],
-    ['common types', { types: ['note', 'person', 'company'] }],
-    ['date range and slug exclusion', { afterDate: '2000-01-01', beforeDate: '2100-01-01', exclude_slugs: ['notes/n-5'] }],
+    ['slug exclusion', { exclude_slugs: ['notes/n-5', 'notes/n-6'] }],
     ['compiled truth only', { detail: 'low', excludePrivate: true }],
   ];
 

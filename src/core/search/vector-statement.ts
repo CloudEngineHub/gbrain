@@ -31,7 +31,9 @@
  * the joined statement selects whenever that many survive. Callers run it
  * with sorting disabled so the HNSW scan is the only ordered path, accept it
  * when its window is full, and otherwise run the joined statement as before,
- * whose plans stay with the planner for selective filters.
+ * whose plans stay with the planner for selective filters. A type or date
+ * filter skips the walk: it is an explicit narrowing that usually leaves the
+ * window short, so the walk would only add its cost.
  */
 import type { SearchOpts } from '../types.ts';
 import { hnswIndexExpected } from '../vector-index.ts';
@@ -64,7 +66,7 @@ export interface VectorSearchStatement {
   indexed: boolean;
   /** True when freshness moved out of the candidate CTE (indexed `embedding`, legacy guard off). */
   relaxed: boolean;
-  /** Index-walk statement (relaxed variant only), same parameters as `sql`; trusted when `candidate_pool` reaches the window. */
+  /** Index-walk statement (relaxed variant without a type or date filter), same parameters as `sql`; trusted when `candidate_pool` reaches the window. */
   indexWalkSql?: string;
 }
 
@@ -120,6 +122,9 @@ export function buildVectorSearchStatement(input: VectorSearchStatementInput): V
   let modelParam: string | undefined;
   if (resolvedCol.name === 'embedding') modelParam = bind(resolvedCol.embeddingModel || null);
   const relaxed = indexed && modelParam !== undefined && opts?.vectorLegacyGuard !== true;
+  // A type or date filter is the caller narrowing the search; the walk would
+  // usually come back short, so those keep the joined statement alone.
+  const narrowed = !!(opts?.type || opts?.types?.length || opts?.afterDate || opts?.beforeDate);
   const preMigration = modelParam ? `(${modelParam}::text IS NULL AND NOT EXISTS(SELECT 1 FROM config WHERE key='embedding_migration.state'))` : '';
   const hashCurrent = `(cc.embedded_text_hash=md5(cc.chunk_text) OR cc.embedded_text_hash IS NULL)`;
   const guardedGeneration = modelParam ? `AND ((cc.model=${modelParam} AND ${hashCurrent})
@@ -243,6 +248,6 @@ export function buildVectorSearchStatement(input: VectorSearchStatementInput): V
     innerLimit,
     indexed,
     relaxed,
-    ...(relaxed ? { indexWalkSql: statement(indexWalkCandidates, true) } : {}),
+    ...(relaxed && !narrowed ? { indexWalkSql: statement(indexWalkCandidates, true) } : {}),
   };
 }
