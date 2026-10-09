@@ -222,7 +222,9 @@ export async function resolveEvidencePlan(engine: BrainEngine, input: ResolvePla
     if (input.legacyBudget === true) unit = 'chunk';
   }
   if (unit === 'chunk') return null;
-  const budgetExplicit = typeof input.budget === 'number';
+  // A budget that is not a positive number keeps its old meaning (no budget)
+  // unless the call also named its unit; then it is validated below.
+  const budgetExplicit = typeof input.budget === 'number' && (explicit !== undefined || (Number.isFinite(input.budget) && input.budget > 0));
   const packing = parseAutoPacking(input.autoPacking) ?? await configPacking(engine);
   if (unit === 'auto' && budgetExplicit && packing !== 'off') {
     const raw = input.budget as number;

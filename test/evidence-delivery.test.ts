@@ -720,6 +720,10 @@ describe('explicit budget: the cap', () => {
     expect(await plan(5, { autoPacking: 'off' })).toMatchObject({ budgetTokens: 5, budgetExplicit: true, packing: 'off' });
     expect(await plan(5, { returnUnit: 'page' })).toMatchObject({ unit: 'page', budgetTokens: 5 });
     expect(await plan(undefined)).toMatchObject({ budgetTokens: 24000, budgetExplicit: false });
+    // With the unit implied, a budget that is not a positive number still means no budget, as before.
+    for (const budget of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(await plan(budget, { returnUnit: undefined, op: 'recall' })).toMatchObject({ unit: 'auto', budgetTokens: 24000, budgetExplicit: false });
+    }
     await expect(plan(4000, { autoPacking: 'widest' })).rejects.toMatchObject({ code: 'invalid_params', message: expect.stringContaining('auto_packing must be one of off, cap_only, breadth_capped, depth_first') });
     // At the minimum a non-empty hit list yields non-empty evidence within it.
     const r = rng(77);

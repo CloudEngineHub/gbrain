@@ -179,8 +179,10 @@ passes no budget) and every call without a budget are byte-identical whatever
 it is set to.
 
 The smallest explicit `auto` budget is **32 tokens** (room for a cut marker, a
-shortened title and a non-empty body). A smaller, zero, negative or
-non-finite budget fails with `invalid_params` naming the minimum; above it, a
+shortened title and a non-empty body). A smaller budget fails with
+`invalid_params` naming the minimum, and so does a zero, negative or
+non-finite one when the call passes `return_unit: "auto"` (with the unit
+omitted such a budget still means no budget, as before). Above the minimum, a
 non-empty, readable hit list always returns non-empty evidence. A remote
 budget is clamped first (`search.return_budget_max_remote`), and the cap
 applies to the clamped value.
@@ -298,8 +300,8 @@ An unknown `return_unit` or an out-of-range `return_window` fails with
 return_window must be an integer from 1 to 3 (got 7). Example: {"query": "launch date", "return_unit": "window", "return_window": 2}
 ```
 
-An explicit `auto` budget below 32 tokens (or zero, negative or non-finite)
-fails with `invalid_params`, e.g.
+An explicit `auto` budget below 32 tokens (or a zero, negative or non-finite
+one passed with `return_unit: "auto"`) fails with `invalid_params`, e.g.
 
 ```
 token_budget must be at least 32 tokens under return_unit auto (got 10): an explicit budget is a hard cap, and a smaller one cannot hold a title, a cut marker and any evidence.
