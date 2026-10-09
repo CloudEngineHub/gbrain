@@ -40,7 +40,7 @@ export async function assertUpgradedServeLoopSchema(engine: BrainEngine): Promis
   await engine.executeRaw(`CREATE INDEX persistence_requests_committed_watermark ON persistence_requests(worktree_id,completed_at DESC) WHERE state='committed'`);
   await engine.executeRaw('CREATE INDEX pages_last_retrieved_at_idx ON pages (last_retrieved_at)');
   expect((await engine.executeRaw<{ name: string }>(INDEXES_SQL)).map(r => r.name)).toEqual(['pages_last_retrieved_at_idx', 'persistence_requests_committed_watermark']);
-  const column = async () => (await engine.executeRaw<{ id: number; at: string | null }>(
+  const column = async (): Promise<Array<[number, string | null]>> => (await engine.executeRaw<{ id: number; at: string | null }>(
     'SELECT id, last_retrieved_at::text AS at FROM pages WHERE id = ANY($1::int[]) ORDER BY id', [ids])).map(r => [Number(r.id), r.at]);
   const before = await column();
 
@@ -50,7 +50,7 @@ export async function assertUpgradedServeLoopSchema(engine: BrainEngine): Promis
     expect(result.current).toBe(LATEST_VERSION);
     await assertFreshServeLoopSchema(engine);
     const copied = (await engine.executeRaw<{ page_id: number; at: string }>('SELECT page_id, last_retrieved_at::text AS at FROM page_retrievals ORDER BY page_id'))
-      .map(r => [Number(r.page_id), r.at]);
+      .map((r): [number, string | null] => [Number(r.page_id), r.at]);
     expect(copied).toEqual(before.filter(([, at]) => at !== null));
     expect(copied).toHaveLength(6);
     expect(await column()).toEqual(before);
