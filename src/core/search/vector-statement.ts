@@ -93,16 +93,13 @@ export function buildVectorSearchStatement(input: VectorSearchStatementInput): V
   const params: unknown[] = ['[' + Array.from(input.embedding).join(',') + ']'];
   const bind = (value: unknown) => { params.push(value); return `$${params.length}`; };
   const filters: string[] = [];
-  const chunkFilters: string[] = [];
-  const pageFilters: string[] = [];
-  const filter = (sql: string, onChunk = false) => { filters.push(sql); (onChunk ? chunkFilters : pageFilters).push(sql); };
-  if (opts?.detail === 'low') filter(`AND cc.chunk_source = 'compiled_truth'`, true);
-  if (opts?.type) filter(`AND p.type = ${bind(opts.type)}`);
+  if (opts?.detail === 'low') filters.push(`AND cc.chunk_source = 'compiled_truth'`);
+  if (opts?.type) filters.push(`AND p.type = ${bind(opts.type)}`);
   // v0.33: multi-type filter for whoknows, AND-applied with `type`.
-  if (opts?.types && opts.types.length > 0) filter(`AND p.type = ANY(${bind(opts.types)}::text[])`);
-  if (opts?.exclude_slugs?.length) filter(`AND p.slug != ALL(${bind(opts.exclude_slugs)}::text[])`);
-  if (opts?.language) filter(`AND cc.language = ${bind(opts.language)}`, true);
-  if (opts?.symbolKind) filter(`AND cc.symbol_type = ${bind(opts.symbolKind)}`, true);
+  if (opts?.types && opts.types.length > 0) filters.push(`AND p.type = ANY(${bind(opts.types)}::text[])`);
+  if (opts?.exclude_slugs?.length) filters.push(`AND p.slug != ALL(${bind(opts.exclude_slugs)}::text[])`);
+  if (opts?.language) filters.push(`AND cc.language = ${bind(opts.language)}`);
+  if (opts?.symbolKind) filters.push(`AND cc.symbol_type = ${bind(opts.symbolKind)}`);
   // v0.29.1: since/until filter by effective date, with import-time fallback.
   // Spelled per column rather than as COALESCE(effective_date, updated_at,
   // created_at) <op> $n: same rows, but each arm has column statistics. The
@@ -112,12 +109,15 @@ export function buildVectorSearchStatement(input: VectorSearchStatementInput): V
     const bound = `${bind(value)}::text::timestamptz`;
     return `AND (p.effective_date ${op} ${bound} OR (p.effective_date IS NULL AND (p.updated_at ${op} ${bound} OR (p.updated_at IS NULL AND p.created_at ${op} ${bound}))))`;
   };
-  if (opts?.afterDate) filter(dateBound(opts.afterDateInclusive ? '>=' : '>', opts.afterDate));
-  if (opts?.beforeDate) filter(dateBound(opts.beforeDateInclusive ? '<=' : '<', opts.beforeDate));
+  if (opts?.afterDate) filters.push(dateBound(opts.afterDateInclusive ? '>=' : '>', opts.afterDate));
+  if (opts?.beforeDate) filters.push(dateBound(opts.beforeDateInclusive ? '<=' : '<', opts.beforeDate));
   // v0.34.1 (#861): source isolation in the INNER CTE narrows the HNSW
   // candidate set before re-rank. Array form wins over scalar.
-  if (opts?.sourceIds && opts.sourceIds.length > 0) filter(`AND p.source_id = ANY(${bind(opts.sourceIds)}::text[])`);
-  else if (opts?.sourceId) filter(`AND p.source_id = ${bind(opts.sourceId)}`);
+  if (opts?.sourceIds && opts.sourceIds.length > 0) filters.push(`AND p.source_id = ANY(${bind(opts.sourceIds)}::text[])`);
+  else if (opts?.sourceId) filters.push(`AND p.source_id = ${bind(opts.sourceId)}`);
+  // The index walk applies chunk-level filters while it orders the index and page-level ones after the key joins.
+  const chunkFilters = filters.filter(sql => sql.startsWith('AND cc.'));
+  const pageFilters = filters.filter(sql => !sql.startsWith('AND cc.'));
 
   let modelParam: string | undefined;
   if (resolvedCol.name === 'embedding') modelParam = bind(resolvedCol.embeddingModel || null);
