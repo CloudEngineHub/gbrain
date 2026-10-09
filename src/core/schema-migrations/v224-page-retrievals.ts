@@ -29,10 +29,10 @@ export const v224: Migration = {
     );
     CREATE OR REPLACE FUNCTION gbrain_forget_page_retrievals() RETURNS trigger
       LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
-    BEGIN
-      DELETE FROM page_retrievals r USING gbrain_deleted_pages d WHERE r.page_id = d.id;
-      RETURN NULL;
-    END $$;
+BEGIN
+  DELETE FROM page_retrievals r USING gbrain_deleted_pages d WHERE r.page_id = d.id;
+  RETURN NULL;
+END $$;
     DROP TRIGGER IF EXISTS pages_forget_retrievals ON pages;
     CREATE TRIGGER pages_forget_retrievals AFTER DELETE ON pages
       REFERENCING OLD TABLE AS gbrain_deleted_pages

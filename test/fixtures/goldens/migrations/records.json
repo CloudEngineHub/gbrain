@@ -3340,8 +3340,8 @@
         "idempotent": true,
         "name": "page_retrievals",
         "sql": {
-          "length": 955,
-          "sha256": "f01694979eb29a1d905263fde31056816d0c7517322236cd340dd2795d32430a"
+          "length": 939,
+          "sha256": "ad15e7b001f794e4ef42aa5936e3797588bd1e3f2d296579e92705a672a42d3a"
         },
         "sqlFor": "absent",
         "transaction": "absent",
