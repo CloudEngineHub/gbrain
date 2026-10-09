@@ -44,6 +44,7 @@ A managed sync holds a file it cannot import instead of failing the run. Until n
 
 - `test/fence-repair-merge.test.ts`, `test/fence-repair-llm-tail.test.ts`, `test/repair-slug-conflicts.test.ts`, `test/content-repair-judgment.test.ts`, `test/repair-content.test.ts`, `test/cycle-content-repair.test.ts`, `test/eval-content-repair-judgment.test.ts`; `sync-status-unblock`, `persistence-sync-holds`, `fence-repair-normalize`, `fence-repair-validate`, `fence-repair-reasons`, `sync-hold-surfaces` extended. Goldens regenerated: `test/fixtures/goldens/exports/types.json` (new codes in the `canonical` union, `RepairResult.preview_hash`, `outcome_items[].llm_usd`).
 - Plan and review record: `docs/plans/2026-10-09-001-fix-content-repair-lane-6377-plan.md`.
+
 ## [0.60.131.0] - 2026-10-09
 
 **Vector search scoped to one source now finds that source's true nearest chunks, and a remote reader's scoped search no longer runs for seconds. Unscoped search runs the same statement as before. Rescoring fetches embeddings about twice as fast.**
