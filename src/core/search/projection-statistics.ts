@@ -1,5 +1,5 @@
 import type { BrainEngine } from '../engine.ts';
-import { beginFullAnalyze, maybeRefreshPlannerStats, plannerAutoAnalyzeEnabled, plannerStatsThreshold } from '../planner-stats.ts';
+import { beginFullAnalyze, maybeRefreshPlannerStats, plannerAutoAnalyzeEnabled } from '../planner-stats.ts';
 
 export const PROJECTION_STATISTICS_NAME = 'pages_text_projection_current_stats';
 
@@ -108,10 +108,11 @@ export async function withChunkStatisticsRefresh<T>(engine: BrainEngine, changed
 }
 
 /**
- * Whether a write pass that changed `changedPages` pages can leave the planner statistics alone: it changed fewer
- * pages than the planner-statistics threshold (max(500, 10% of pages), autovacuum's scale) and the statistics this
- * refresh collects already exist. Such a pass barely moves them, and the refresh cost 170 ms per one-page sync at
- * 50k pages on Postgres and a full ANALYZE of every table on PGLite.
+ * Whether a write pass that changed `changedPages` pages can leave the planner statistics alone: pages were sampled
+ * with rows, the statistics this refresh collects exist, and the pass changed fewer than 50 + 10% of the sampled
+ * pages (autovacuum's analyze threshold, as the projection-recovery debt in page-state/projections.ts). Such a pass
+ * barely moves them, and the refresh cost ~650 ms per one-page sync at 50k pages on Postgres and a full ANALYZE of
+ * every table on PGLite.
  */
 async function statisticsStillCurrent(engine: BrainEngine, changedPages: number): Promise<boolean> {
   if (!Number.isFinite(changedPages)) return false;
@@ -120,7 +121,8 @@ async function statisticsStillCurrent(engine: BrainEngine, changedPages: number)
             $1::text <> 'postgres' OR (SELECT count(*) FROM pg_stats s WHERE s.schemaname = current_schema()
               AND ((s.tablename = 'pages' AND s.attname = 'deleted_at') OR (s.tablename = 'content_chunks' AND s.attname = 'model'))) = 2 AS columns
        FROM pg_class c WHERE c.oid = 'pages'::regclass`, [engine.kind]);
-  if (!state?.columns || changedPages >= plannerStatsThreshold(Number(state.reltuples))) return false;
+  const rows = Number(state?.reltuples ?? -1);
+  if (!state?.columns || rows <= 0 || changedPages >= 50 + 0.1 * rows) return false;
   return verifyProjectionStatistics(engine).then(() => true, () => false);
 }
 

@@ -73,7 +73,7 @@ describe('projection statistics refresh after a write pass', () => {
   const planRows = async (db: PGlite) => (await db.query<{ 'QUERY PLAN': Array<{ Plan: { 'Plan Rows': number } }> }>(
     `EXPLAIN (FORMAT JSON) SELECT * FROM pages p WHERE ${currentTextProjectionFilter('p')}`)).rows[0]['QUERY PLAN'][0].Plan['Plan Rows'];
 
-  test('a pass below max(500, 10% of pages) keeps collected statistics; a larger pass or uncollected statistics refresh', async () => {
+  test('a pass below 50 + 10% of pages keeps collected statistics; a larger pass or uncollected statistics refresh', async () => {
     const db = new PGlite();
     try {
       const engine = fixtureEngine(db);
@@ -86,7 +86,9 @@ describe('projection statistics refresh after a write pass', () => {
       expect(stale).toBeGreaterThan(9001);
       expect(await refreshProjectionStatistics(engine, 999)).toBe(true);
       expect(await planRows(db)).toBe(stale);
-      expect(await refreshProjectionStatistics(engine, 1000)).toBe(true);
+      expect(await refreshProjectionStatistics(engine, 1049)).toBe(true);
+      expect(await planRows(db)).toBe(stale);
+      expect(await refreshProjectionStatistics(engine, 1050)).toBe(true);
       expect(await planRows(db)).toBe(9001);
       await db.exec(`DROP STATISTICS pages_text_projection_current_stats;
         CREATE STATISTICS pages_text_projection_current_stats ON ((text_projection_revision = knowledge_revision)) FROM pages;`);
