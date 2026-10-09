@@ -174,9 +174,16 @@ export function _resetTrackRetrievalCacheForTests(): void {
   _trackRetrievalCache = null;
 }
 
-/** $1 page ids. Ids of pages that do not exist are skipped, as the UPDATE of `pages` skipped them. */
+/**
+ * $1 page ids. Ids of pages that do not exist are skipped, as the UPDATE of
+ * `pages` skipped them. The SELECT drops rows still inside the window before
+ * the upsert, because ON CONFLICT locks (and so dirties) a conflicting row even
+ * when its WHERE then skips it; the ON CONFLICT test keeps a concurrent bump
+ * from moving a row twice.
+ */
 export const BUMP_LAST_RETRIEVED_SQL = `INSERT INTO page_retrievals (page_id, last_retrieved_at)
-  SELECT p.id, NOW() FROM pages p WHERE p.id = ANY($1::int[])
+  SELECT p.id, NOW() FROM pages p LEFT JOIN page_retrievals r ON r.page_id = p.id
+   WHERE p.id = ANY($1::int[]) AND (r.page_id IS NULL OR r.last_retrieved_at < NOW() - INTERVAL '5 minutes')
   ON CONFLICT (page_id) DO UPDATE SET last_retrieved_at = EXCLUDED.last_retrieved_at
     WHERE page_retrievals.last_retrieved_at < NOW() - INTERVAL '5 minutes'`;
 
