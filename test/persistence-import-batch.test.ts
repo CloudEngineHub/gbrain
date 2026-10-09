@@ -222,3 +222,45 @@ test('an import batch admits its members as one independent publication group', 
   const settled = await waitForWrites(brain.engine, rows, ctx.config, 60_000);
   expect(settled.map(row => row.state)).toEqual(files.map(() => 'committed'));
 }), 300_000);
+
+test('a batch admission whose COMMIT acknowledgment is lost replays its admitted rows; one that keeps dropping is write_outcome_unknown and resumes', async () => withEnv(env, async () => {
+  for (const [, brain] of pairs) {
+    const sourceId = `loss-${randomUUID().slice(0, 8)}`;
+    await managedSource(brain.engine, sourceId, brain.label);
+    const original = { transaction: brain.engine.transaction, reconnect: brain.engine.reconnect };
+    // Group admission transactions (the ones that read and insert request rows) commit, then the socket closes before the client hears back.
+    const lose = (times: number) => {
+      let drops = 0;
+      brain.engine.reconnect = (async () => undefined) as BrainEngine['reconnect'];
+      brain.engine.transaction = (async <T>(fn: (tx: BrainEngine) => Promise<T>) => {
+        let admits = false;
+        const value = await original.transaction.call(brain.engine, (tx: BrainEngine) => {
+          const seen = Object.create(tx) as BrainEngine;
+          seen.executeRaw = ((sql: string, params?: unknown[], opts?: unknown) => {
+            if (sql.includes('INSERT INTO persistence_requests') || sql.includes('principal_id=$2 AND request_id=ANY($3::uuid[])')) admits = true;
+            return tx.executeRaw(sql, params, opts as never);
+          }) as BrainEngine['executeRaw'];
+          return fn(seen);
+        });
+        if (admits && drops < times && ++drops) throw Object.assign(new Error('write CONNECTION_CLOSED 127.0.0.1:5432'), { code: 'CONNECTION_CLOSED' });
+        return value as T;
+      }) as BrainEngine['transaction'];
+      return () => drops;
+    };
+    const restore = () => Object.assign(brain.engine, original);
+    const once = write(join(home, `${brain.label}-${sourceId}-once`), Object.fromEntries(Array.from({ length: 4 }, (_, i) => [`once-${i}.md`, page(`Once ${i}`)])));
+    const drops = lose(1);
+    let settled: PromiseSettledResult<{ status: string }>[];
+    try { settled = await importManagedFiles(brain.engine, once, { sourceId, noEmbed: true }); } finally { restore(); }
+    expect(drops()).toBe(1);
+    expect(settled.map(result => result.status === 'fulfilled' && result.value.status)).toEqual(once.map(() => 'imported'));
+    expect(await brain.engine.executeRaw("SELECT id FROM persistence_requests WHERE source_id=$1 AND slug LIKE 'once-%'", [sourceId])).toHaveLength(once.length);
+    const always = write(join(home, `${brain.label}-${sourceId}-always`), Object.fromEntries(Array.from({ length: 4 }, (_, i) => [`always-${i}.md`, page(`Always ${i}`)])));
+    lose(Number.POSITIVE_INFINITY);
+    try { settled = await importManagedFiles(brain.engine, always, { sourceId, noEmbed: true }); } finally { restore(); }
+    expect(settled.map(result => result.status === 'rejected' && (result.reason as { code?: string }).code)).toEqual(always.map(() => 'write_outcome_unknown'));
+    const resumed = await importManagedFiles(brain.engine, always, { sourceId, noEmbed: true });
+    expect(resumed.map(result => result.status === 'fulfilled' && result.value.status)).toEqual(always.map(() => 'imported'));
+    expect(await brain.engine.executeRaw("SELECT id FROM persistence_requests WHERE source_id=$1 AND slug LIKE 'always-%'", [sourceId])).toHaveLength(always.length);
+  }
+}), 300_000);
