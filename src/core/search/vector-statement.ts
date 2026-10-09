@@ -35,12 +35,12 @@
  * planner for selective filters. A type or date filter skips the walk: it is
  * an explicit narrowing that usually leaves the window short, so the walk
  * would only add its cost. So does a source scope whose share of pages
- * (`pages.source_id` planner statistics, `scopeShare`) is below
+ * (`pages.source_id` planner statistics, `scope.share`) is below
  * INDEX_WALK_MIN_SCOPE_SHARE: the nearest chunks overall rarely fill its
  * window.
  *
  * `scopeScanSql` serves a source scope under SCOPE_SCAN_MAX_SHARE of pages
- * whose estimated chunk count (`scopeChunks`, the share times
+ * whose estimated chunk count (`scope.chunks`, the share times
  * `content_chunks` reltuples) is at most SCOPE_SCAN_MAX_CHUNKS: an exact
  * distance scan over the scope's chunks with every filter applied, ordering
  * only chunk ids (`+ 0` keeps the index out), then the window joins back for
@@ -73,10 +73,12 @@ export interface VectorSearchStatementInput {
   limit: number;
   offset: number;
   opts?: SearchOpts;
-  /** Estimated share of pages the source scope holds (`vectorScopeLoader`); below INDEX_WALK_MIN_SCOPE_SHARE the walk is omitted. */
-  scopeShare?: number;
-  /** Estimated chunks in the source scope (`vectorScopeLoader`); at most SCOPE_SCAN_MAX_CHUNKS adds the scope scan. */
-  scopeChunks?: number;
+  /**
+   * Estimated share of pages and chunks the source scope holds
+   * (`vectorScopeLoader`): below INDEX_WALK_MIN_SCOPE_SHARE the walk is
+   * omitted; at most SCOPE_SCAN_MAX_CHUNKS adds the scope scan.
+   */
+  scope?: VectorScope;
 }
 
 export interface VectorSearchStatement {
@@ -229,12 +231,12 @@ export function buildVectorSearchStatement(input: VectorSearchStatementInput): V
   // A type or date filter, or a source scope with a small share of pages, is
   // the caller narrowing the search; the walk would usually come back short,
   // so those keep the joined statement alone.
+  const share = input.scope?.share, chunks = input.scope?.chunks;
   const narrowed = !!(opts?.type || opts?.types?.length || opts?.afterDate || opts?.beforeDate)
-    || (input.scopeShare !== undefined && input.scopeShare < INDEX_WALK_MIN_SCOPE_SHARE);
-  const scopeScan = relaxed && input.scopeShare !== undefined && input.scopeShare < SCOPE_SCAN_MAX_SHARE
-    && input.scopeChunks !== undefined && input.scopeChunks <= SCOPE_SCAN_MAX_CHUNKS;
-  const walk = relaxed && !narrowed && !(scopeScan && input.scopeChunks! <= SCOPE_SCAN_FIRST_MAX_CHUNKS);
-  const overfetch = indexWalkOverfetch(input.scopeShare);
+    || (share !== undefined && share < INDEX_WALK_MIN_SCOPE_SHARE);
+  const scopeScan = relaxed && share !== undefined && share < SCOPE_SCAN_MAX_SHARE && chunks !== undefined && chunks <= SCOPE_SCAN_MAX_CHUNKS;
+  const walk = relaxed && !narrowed && !(scopeScan && chunks! <= SCOPE_SCAN_FIRST_MAX_CHUNKS);
+  const overfetch = indexWalkOverfetch(share);
   const preMigration = modelParam ? `(${modelParam}::text IS NULL AND NOT EXISTS(SELECT 1 FROM config WHERE key='embedding_migration.state'))` : '';
   const hashCurrent = `(cc.embedded_text_hash=md5(cc.chunk_text) OR cc.embedded_text_hash IS NULL)`;
   const guardedGeneration = modelParam ? `AND ((cc.model=${modelParam} AND ${hashCurrent})

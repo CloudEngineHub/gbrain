@@ -151,7 +151,7 @@ describe('vector index walk (PGLite)', () => {
     const share = sourceScopeShare(stats, opts)!;
     expect(share).toBeGreaterThan(0);
     expect(share).toBeLessThan(INDEX_WALK_MIN_SCOPE_SHARE);
-    const stmt = buildVectorSearchStatement({ dialect: 'pglite', embedding: vec(7), limit: 10, offset: 0, opts, scopeShare: share });
+    const stmt = buildVectorSearchStatement({ dialect: 'pglite', embedding: vec(7), limit: 10, offset: 0, opts, scope: { share } });
     expect(stmt.indexWalkSql).toBeUndefined();
     const unscoped = buildVectorSearchStatement({ dialect: 'pglite', embedding: vec(7), limit: 10, offset: 0, opts });
     expect(stmt.sql).toBe(unscoped.sql);
@@ -168,7 +168,7 @@ describe('vector index walk (PGLite)', () => {
     expect(sourceScopeShare(stats, opts)!).toBeGreaterThanOrEqual(INDEX_WALK_MIN_SCOPE_SHARE);
     const scope = sourceScope(stats, opts)!;
     const { hits, seen } = await statementsSearched(opts);
-    expect(seen).toEqual([buildVectorSearchStatement({ dialect: 'pglite', embedding: vec(7), limit: 20, offset: 0, opts, scopeShare: scope.share, scopeChunks: scope.chunks }).indexWalkSql!]);
+    expect(seen).toEqual([buildVectorSearchStatement({ dialect: 'pglite', embedding: vec(7), limit: 20, offset: 0, opts, scope }).indexWalkSql!]);
     expect(hits).toHaveLength(20);
   });
 
@@ -184,7 +184,7 @@ describe('vector index walk (PGLite)', () => {
   for (const [label, opts] of scanMatrix) {
     test(`${label}: the scope scan returns the joined statement's rows in the same order`, async () => {
       for (const seed of [11, 202, 3003]) {
-        const stmt = buildVectorSearchStatement({ dialect: 'pglite', embedding: vec(seed), limit: opts.limit ?? 20, offset: opts.offset ?? 0, opts: { embeddingColumn: column, ...opts }, scopeShare: 0.2, scopeChunks: 500 });
+        const stmt = buildVectorSearchStatement({ dialect: 'pglite', embedding: vec(seed), limit: opts.limit ?? 20, offset: opts.offset ?? 0, opts: { embeddingColumn: column, ...opts }, scope: { share: 0.2, chunks: 500 } });
         expect(stmt.scopeScanSql).toBeDefined();
         const params = [...stmt.params];
         expect(shape(await exactRows(stmt.scopeScanSql!, params))).toEqual(shape(await exactRows(stmt.sql, params)));
@@ -196,7 +196,7 @@ describe('vector index walk (PGLite)', () => {
     const opts: SearchOpts = { limit: 10, embeddingColumn: column, sourceId: 'side', excludePrivate: true };
     const [stats] = await engine.executeRaw<PageSourceStats>(PAGE_SOURCE_STATS_SQL);
     const scope = sourceScope(stats, opts)!;
-    const stmt = buildVectorSearchStatement({ dialect: 'pglite', embedding: vec(7), limit: 10, offset: 0, opts, scopeShare: scope.share, scopeChunks: scope.chunks });
+    const stmt = buildVectorSearchStatement({ dialect: 'pglite', embedding: vec(7), limit: 10, offset: 0, opts, scope });
     expect(stmt.scopeScanSql).toBeDefined();
     expect(stmt.indexWalkSql).toBeUndefined();
     const kinds: string[] = [];

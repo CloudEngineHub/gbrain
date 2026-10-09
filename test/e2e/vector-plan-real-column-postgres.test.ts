@@ -390,7 +390,7 @@ function axis(d: number): Float32Array {
     const scope = sourceScope(stats, opts)!;
     expect(scope.share).toBeLessThan(INDEX_WALK_MIN_SCOPE_SHARE);
     expect(scope.chunks!).toBeLessThanOrEqual(SCOPE_SCAN_FIRST_MAX_CHUNKS);
-    const stmt = buildVectorSearchStatement({ dialect: 'postgres', embedding: query, limit: 10, offset: 0, opts, scopeShare: scope.share, scopeChunks: scope.chunks });
+    const stmt = buildVectorSearchStatement({ dialect: 'postgres', embedding: query, limit: 10, offset: 0, opts, scope });
     expect(stmt.indexWalkSql).toBeUndefined();
     expect(stmt.scopeScanSql).toBeDefined();
 

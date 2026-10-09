@@ -1682,8 +1682,7 @@ export class PGLiteEngine implements BrainEngine {
     }
     // Same statement as postgres-engine (search/vector-statement.ts); the
     // PGLite dialect adds the timeline `stale` flag and has no exact fallback.
-    const scope = await this.vectorScope(opts);
-    const stmt = buildVectorSearchStatement({ dialect: 'pglite', embedding, limit, offset: opts?.offset || 0, opts, scopeShare: scope?.share, scopeChunks: scope?.chunks });
+    const stmt = buildVectorSearchStatement({ dialect: 'pglite', embedding, limit, offset: opts?.offset || 0, opts, scope: await this.vectorScope(opts) });
     this.vectorIterativeScan ??= this.executeRaw<{ extversion: string }>(VECTOR_EXTENSION_VERSION_SQL)
       .then(rows => supportsHnswIterativeScan(rows[0]?.extversion));
     const probe = this.vectorIterativeScan;

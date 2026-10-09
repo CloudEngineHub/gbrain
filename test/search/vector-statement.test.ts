@@ -16,7 +16,7 @@ const indexedColumn = { name: 'embedding', type: 'vector' as const, dimensions: 
 const wideColumn = { name: 'embedding', type: 'vector' as const, dimensions: 3072, embeddingModel: 'openai:text-embedding-3-large' };
 
 function build(overrides: Partial<VectorSearchStatementInput['opts']> = {}, dialect: 'postgres' | 'pglite' = 'postgres', scopeShare?: number, scopeChunks?: number) {
-  return buildVectorSearchStatement({ dialect, embedding: new Float32Array([1, 0, 0]), limit: 10, offset: 0, opts: { embeddingColumn: indexedColumn, ...overrides }, scopeShare, scopeChunks });
+  return buildVectorSearchStatement({ dialect, embedding: new Float32Array([1, 0, 0]), limit: 10, offset: 0, opts: { embeddingColumn: indexedColumn, ...overrides }, scope: scopeShare === undefined ? undefined : { share: scopeShare, chunks: scopeChunks } });
 }
 
 /** The WHERE of the `hnsw_candidates` CTE, between its FROM and its ORDER BY. */
