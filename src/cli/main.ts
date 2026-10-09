@@ -2839,8 +2839,11 @@ async function completeEngineStartup(engine: BrainEngine): Promise<void> {
   // itself (the common case); the revised wording fires only when
   // migrations are genuinely stuck.
   try {
-    const { tryRunPendingMigrations } = await import('../core/migrate.ts');
-    const result = await tryRunPendingMigrations(engine);
+    // migrate.ts loads every migration module; only a brain that is behind needs it.
+    const { hasPendingMigrations } = await import('../core/migrate-pending.ts');
+    const result = await hasPendingMigrations(engine)
+      ? await (await import('../core/migrate.ts')).tryRunPendingMigrations(engine)
+      : { status: 'not_needed' as const };
     if (result.status === 'persistent') {
       writeCliNotice(migrationsNotice('Schema migrations are pending: another process attempted them but they did not complete within the retry window (usually transient). If it persists, check `gbrain doctor` for stale advisory locks and `gbrain jobs supervisor status` for crashed migration workers.'));
     } else if (result.status === 'error') {
