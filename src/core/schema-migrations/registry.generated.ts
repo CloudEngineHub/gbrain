@@ -225,11 +225,12 @@ import { v221 } from './v221-chunk-embedding-pending-since.ts';
 import { v222 } from './v222-persistence-consumers.ts';
 import { v223 } from './v223-persistence-serve-loop-indexes.ts';
 import { v224 } from './v224-page-retrievals.ts';
-import { v225 } from './v225-trust-tiers.ts';
-import { v226 } from './v226-write-gate.ts';
-import { v227 } from './v227-memory-purge.ts';
-import { v228 } from './v228-trust-allow-rules.ts';
-import { v229 } from './v229-trust-generation.ts';
+import { v225 } from './v225-drop-duplicate-embedding-null-index.ts';
+import { v226 } from './v226-trust-tiers.ts';
+import { v227 } from './v227-write-gate.ts';
+import { v228 } from './v228-memory-purge.ts';
+import { v229 } from './v229-trust-allow-rules.ts';
+import { v230 } from './v230-trust-generation.ts';
 
 // Array order is historical (see HISTORICAL_ARRAY_ORDER in the generator); the
 // runner sorts by version before applying.
@@ -458,4 +459,5 @@ export const MIGRATIONS: Migration[] = [
   v227,
   v228,
   v229,
+  v230,
 ];

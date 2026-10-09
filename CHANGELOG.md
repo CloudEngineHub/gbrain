@@ -10,6 +10,43 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.137.0] - 2026-10-09
+
+**A one-page sync stops re-analyzing the whole brain, edits rewrite only the chunks they changed, Postgres search and doctor stop compiling JIT code, and CJK pages chunk up to 6.7x faster with identical chunks.**
+
+Wave 6 of the efficiency work. Nothing changes in search results, chunk boundaries or rankings.
+
+### What you'd see
+
+4 vCPU / 16 GiB, Bun 1.4.2, Postgres 16 + pgvector 0.8.7, synthetic brains (5k = 5,001 pages / 25,331 chunks, 50k = 50,010 / 248,802, 1,024-dim vectors), base and branch interleaved on the same machine, p50:
+
+| path | brain | before | after |
+|---|---|---|---|
+| `gbrain sync`, 1-page edit | Postgres 50k | 2,173 ms | 1,503 ms |
+| `gbrain import` of one edited file | Postgres 50k | 1,507 ms | 929 ms |
+| `gbrain sync`, 1-page edit | PGLite 5k | 3,614 ms | 1,522 ms |
+| `query` with expansion, warm MCP | Postgres 50k | 2,355 ms | 2,101 ms |
+| `gbrain doctor --json`, database time | Postgres 50k | 8.6 s | 5.2 s |
+| extract-atoms backlog count | Postgres 50k | 1,665 ms | 225 ms |
+| cold `gbrain get` | PGLite 5k | 746 ms | 667 ms |
+| unchanged re-import, 3,700 pages | PGLite 5k | 23.7 s | 19.7 s |
+| chunk pass, 2,000 CJK prose pages | in-process | 1,214 ms | 180 ms |
+
+- **Write passes.** Import, sync and reindex refreshed the planner statistics after every pass that changed a page: on Postgres `ANALYZE pages(...)` plus `ANALYZE content_chunks(...)` (about 650 ms at 50k), on PGLite a full `ANALYZE` of every table. A pass that changed fewer than 50 + 10% of pages now leaves statistics that already exist alone; PGLite still analyzes any hot table its row deltas mark stale, and runs its full ANALYZE as before on a brain under 500 pages or when any table holds unsampled rows or grew more than 10% past its last sample. Larger passes and brains without statistics refresh as before.
+- **PGLite queue upkeep.** Every short-lived CLI process vacuumed all five persistence queue tables on its first tick (0.6 s per sync at 5k). A queue table is now vacuumed once its heap grows more than 10% past the size its last VACUUM or ANALYZE recorded.
+- **Edits.** `gbrain import` and a classic sync now keep every stored chunk row identical to its new chunk in place, as `put_page` and managed sync already did, `--no-embed` included: unchanged chunks keep their vectors, and `embed --stale` re-embeds only the chunks that changed. A never-embedded row stays in place under a chunk that gets no vector either. A one-paragraph edit now deletes and inserts one chunk row instead of every row of the page.
+- **Postgres JIT.** Search's backlink count (about 370 candidate ids under query expansion) and `doctor`'s three health statements crossed `jit_above_cost` at 50k, and LLVM compilation was most of their time (backlink count 170 → 20 ms). They now run with JIT off, like the search statements.
+- **Doctor's extract-atoms backlog** decompressed every page body to count its characters. The count now reads the byte length from the TOAST header and counts characters only for bodies between 500 and 2,000 bytes. Same counts.
+- **CJK chunking.** The chunker's token cap skips the tiktoken count when a chunk's UTF-8 byte length already fits the budget (bytes bound the count). Typical CJK chunks (about 1 KB) never reach the WASM encoder. Chunk hashes are identical on every corpus measured.
+- **PGLite cold start.** A command that opens a local PGLite brain starts compiling its WASM while its own modules load. The schema checks on connect cost about 3 ms; the rest of the ~340 ms is WASM compile (now overlapped) and PGLite's own startup.
+- **Managed re-import.** The unchanged-file screen answers the batch's shared reads (source, writer, skill-pack roots, config) once per batch instead of once per file.
+- **Migration v225** drops `idx_chunks_embedding_null`, which was byte-identical to `content_chunks_stale_idx` on every install path (v66 and v103 created both, v134 restored both). `DROP INDEX CONCURRENTLY` on Postgres, and only while the kept index is valid and identical.
+
+### For contributors
+
+- `scripts/bench/efficiency/bench-chunk.ts --cjk-prose <pages>` generates CJK prose (frequent characters, sentence punctuation, a few Latin terms).
+- New tests: `test/import-inline-chunk-keep.test.ts` (both engines), `test/chunkers/fits-embed-tokens.test.ts` (byte bound fuzz plus chunker output with the bound forced off), `test/persistence-queue-vacuum.test.ts`, refresh gating in `test/projection-statistics.test.ts`, JIT-off checks in `test/e2e/jit-off-reads-postgres.test.ts`, the backlog count at the 500-character edge for 1- to 4-byte text, and v225 in `test/migrate.test.ts`. Schema and migration goldens are regenerated for the dropped index.
+
 ## [0.60.136.0] - 2026-10-09
 
 **CI headroom: the PostgreSQL unit arms run as three balanced shards, the graduation custody suites run 30–42% faster, and the Tier 2 agent-journey file is split so no serial file sits near its 300-second cap.**

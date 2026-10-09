@@ -23,8 +23,8 @@ import { MANAGED_WRITER_GUARD_FUNCTION_SQL } from '../persistence/writer-guard-s
 // doctor trust_tiers then never asks a new brain to backfill. Graduation
 // replaces the target's config rows with the source's, so a copy carries the
 // source's own backfill state.
-export const v225: Migration = {
-  version: 225,
+export const v226: Migration = {
+  version: 226,
   name: 'trust_tiers',
   idempotent: true,
   sql: `${TRUST_SCHEMA_SQL}

@@ -149,8 +149,8 @@ describe('PGLiteEngine#applyForwardReferenceBootstrap', () => {
         ALTER TABLE pages DROP CONSTRAINT IF EXISTS pages_source_slug_key;
         ALTER TABLE pages ADD CONSTRAINT pages_slug_key UNIQUE (slug);
         DROP INDEX IF EXISTS idx_pages_source_id;
-        -- The v229 trust generation trigger's WHEN reads pages.source_id, slug and
-        -- deleted_at; a pre-v0.18 brain predates it (v229 recreates it).
+        -- The v230 trust generation trigger's WHEN reads pages.source_id, slug and
+        -- deleted_at; a pre-v0.18 brain predates it (v230 recreates it).
         DROP TRIGGER IF EXISTS trust_generation_update ON pages;
         ALTER TABLE pages DROP COLUMN IF EXISTS source_id;
         DROP TABLE IF EXISTS sources CASCADE;
@@ -206,8 +206,8 @@ describe('PGLiteEngine#applyForwardReferenceBootstrap', () => {
         ALTER TABLE pages DROP CONSTRAINT IF EXISTS pages_source_slug_key;
         ALTER TABLE pages ADD CONSTRAINT pages_slug_key UNIQUE (slug);
         DROP INDEX IF EXISTS idx_pages_source_id;
-        -- The v229 trust generation trigger's WHEN reads pages.source_id, slug and
-        -- deleted_at; a pre-v0.18 brain predates it (v229 recreates it).
+        -- The v230 trust generation trigger's WHEN reads pages.source_id, slug and
+        -- deleted_at; a pre-v0.18 brain predates it (v230 recreates it).
         DROP TRIGGER IF EXISTS trust_generation_update ON pages;
         ALTER TABLE pages DROP COLUMN IF EXISTS source_id;
         DROP TABLE IF EXISTS sources CASCADE;

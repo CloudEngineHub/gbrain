@@ -119,7 +119,7 @@ export async function setupDB(options: { replayMigrations?: boolean } = {}): Pro
   }
 
   // A warm reset keeps what the migrations seeded on the empty brain: the version and the trust bookkeeping
-  // (v225 backfill completion, v226 scan baseline), both still true of the emptied tables.
+  // (v226 backfill completion, v227 scan baseline), both still true of the emptied tables.
   if (options.replayMigrations) await conn.unsafe('TRUNCATE config');
   else await conn.unsafe('DELETE FROM config WHERE key <> ALL($1::text[])', [['version', TRUST_BACKFILL_COMPLETED_KEY, WRITE_GATE_SCAN_BASELINE_KEY]]);
 
