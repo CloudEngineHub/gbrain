@@ -3,7 +3,8 @@
  * SCOPE_CHUNK_SAMPLE_PAGES pages is counted exactly (soft-deleted pages
  * excluded), a larger one through its hash-stride sample lands near the true
  * count, and the engine's loader routes a source of long pages on that count
- * where the page share would have undercounted it. No embeddings are needed:
+ * where the page share would have undercounted it (once the background count
+ * lands; the first search routes on the share). No embeddings are needed:
  * routing reads only pages, chunks and planner statistics.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -84,7 +85,10 @@ describe('SCOPE_CHUNKS_SQL', () => {
     const opts: SearchOpts = { embeddingColumn: column, sourceId: 'sessions' };
     const [stats] = await engine.executeRaw<PageSourceStats>(PAGE_SOURCE_STATS_SQL);
     const byShare = sourceScope(stats, opts)!;
-    const routed = await (engine as unknown as { vectorScope: (o?: SearchOpts) => Promise<VectorScope | undefined> }).vectorScope(opts);
+    const loader = (engine as unknown as { vectorScope: (o?: SearchOpts) => Promise<VectorScope | undefined> }).vectorScope;
+    expect(await loader(opts)).toEqual(byShare);
+    let routed = await loader(opts);
+    for (let i = 0; i < 50 && routed!.chunks === byShare.chunks; i++) routed = (await Bun.sleep(20), await loader(opts));
     const truth = await trueChunks(['sessions']);
     expect(byShare.chunks!).toBeLessThan(SCOPE_SCAN_FIRST_MAX_CHUNKS);
     expect(Math.abs(routed!.chunks! - truth) / truth).toBeLessThan(0.05);

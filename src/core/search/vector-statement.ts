@@ -219,17 +219,22 @@ export function sourceScope(stats: PageSourceStats | undefined, opts?: SearchOpt
  * The engines' scope lookup, only for source-scoped searches:
  * PAGE_SOURCE_STATS_SQL through `load` at most once a minute, and for a scope
  * under SCOPE_SCAN_MAX_SHARE of pages (the only scopes whose chunk count picks
- * a path) SCOPE_CHUNKS_SQL through `count`, at most once a minute per scope.
- * The estimate only picks the walk, the scope scan or the joined statement,
- * each of which falls back to the joined statement when it comes back short,
- * so stale or missing statistics, or a failed count, cost speed at most.
+ * a path) SCOPE_CHUNKS_SQL through `count`, refreshed at most once a minute
+ * per scope. The count never blocks a search: until a scope's first count
+ * lands, and while a refresh runs, the search routes on the last count or the
+ * share estimate. (`count` runs on the engine's own pool, so a search inside
+ * a caller's transaction on a one-connection pool would otherwise wait on
+ * itself.) The estimate only picks the walk, the scope scan or the joined
+ * statement, each of which falls back to the joined statement when it comes
+ * back short, so stale or missing statistics, or a failed count, cost speed
+ * at most.
  */
 export function vectorScopeLoader(
   load: () => Promise<PageSourceStats[]>,
   count?: (sourceIds: string[]) => Promise<ScopeChunkCount[]>,
 ): (opts?: SearchOpts) => Promise<VectorScope | undefined> {
   let cached: { at: number; stats: Promise<PageSourceStats | undefined> } | undefined;
-  const counts = new Map<string, { at: number; count: Promise<ScopeChunkCount | undefined> }>();
+  const counts = new Map<string, { at: number; value?: ScopeChunkCount }>();
   return async opts => {
     const ids = scopeSourceIds(opts);
     if (!ids) return undefined;
@@ -238,12 +243,13 @@ export function vectorScopeLoader(
     const share = sourceScopeShare(stats, opts);
     if (!count || share === undefined || share >= SCOPE_SCAN_MAX_SHARE) return sourceScope(stats, opts);
     const key = [...ids].sort().join('\u0000');
-    let entry = counts.get(key);
+    const entry = counts.get(key);
     if (!entry || performance.now() - entry.at > 60_000) {
-      entry = { at: performance.now(), count: count(ids).then(rows => rows[0], () => undefined) };
-      counts.set(key, entry);
+      const next: { at: number; value?: ScopeChunkCount } = { at: performance.now(), value: entry?.value };
+      counts.set(key, next);
+      count(ids).then(rows => { if (rows[0]) next.value = rows[0]; }, () => { /* keep the last count or the share estimate */ });
     }
-    return sourceScope(stats, opts, await entry.count);
+    return sourceScope(stats, opts, counts.get(key)!.value);
   };
 }
 

@@ -263,26 +263,36 @@ describe('source scope strategy: walk overfetch, walk skip and scope scan', () =
     expect(walkFirst.scopeScanSql).toBe(scanFirst.scopeScanSql!);
   });
 
-  test('the loader counts chunks only for scopes under SCOPE_SCAN_MAX_SHARE, once a minute per scope, and falls back on a failed count', async () => {
+  test('the loader counts chunks only for scopes under SCOPE_SCAN_MAX_SHARE, in the background, once a minute per scope, and keeps the estimate on a failed count', async () => {
     const asked: string[][] = [];
-    const scope = vectorScopeLoader(async () => [stats], async ids => { asked.push(ids); return [{ pages: 250, sampled: 250, sample_chunks: 90_000 }]; });
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const scope = vectorScopeLoader(async () => [stats], async ids => { asked.push(ids); await gate; return [{ pages: 250, sampled: 250, sample_chunks: 90_000 }]; });
     expect(await scope({ sourceIds: ['notes'] })).toEqual({ share: 0.7, chunks: 140_000 });
     expect(asked).toEqual([]);
-    expect(await scope({ sourceId: 'sessions' })).toEqual({ share: 0.25, chunks: 90_000 });
-    expect(await scope({ sourceIds: ['sessions', 'sessions'] })).toEqual({ share: 0.25, chunks: 90_000 });
+    // The first search routes on the share estimate while the count runs.
+    expect(await scope({ sourceId: 'sessions' })).toEqual({ share: 0.25, chunks: 50_000 });
+    expect(await scope({ sourceIds: ['sessions', 'sessions'] })).toEqual({ share: 0.25, chunks: 50_000 });
     expect(asked).toEqual([['sessions']]);
-    expect((await scope({ sourceIds: ['small', 'sessions'] }))?.chunks).toBe(90_000);
+    release();
+    await Bun.sleep(0);
+    expect(await scope({ sourceId: 'sessions' })).toEqual({ share: 0.25, chunks: 90_000 });
+    await scope({ sourceIds: ['small', 'sessions'] });
+    await Bun.sleep(0);
     expect((await scope({ sourceIds: ['sessions', 'small'] }))?.chunks).toBe(90_000);
     expect(asked).toEqual([['sessions'], ['small', 'sessions']]);
     const now = performance.now();
     const clock = spyOn(performance, 'now').mockReturnValue(now + 61_000);
     try {
-      await scope({ sourceId: 'sessions' });
+      // A refresh keeps routing on the last count until it lands.
+      expect((await scope({ sourceId: 'sessions' }))?.chunks).toBe(90_000);
       expect(asked).toHaveLength(3);
     } finally {
       clock.mockRestore();
     }
     const failing = vectorScopeLoader(async () => [stats], async () => { throw new Error('canceling statement due to statement timeout'); });
+    await failing({ sourceId: 'sessions' });
+    await Bun.sleep(0);
     expect(await failing({ sourceId: 'sessions' })).toEqual({ share: 0.25, chunks: 50_000 });
   });
 
