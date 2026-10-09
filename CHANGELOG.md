@@ -10,6 +10,16 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.128.0] - 2026-10-09
+
+**The nightly Heavy Tests run is green again.**
+
+v0.60.113.0 made `full` the one MCP registration surface for every plugin manifest, but the real-binary codex plugin install test, which only runs in the nightly Heavy Tests workflow, still expected `starter` in the installed manifest's arguments and in its tools/list oracle. Both now read `REGISTRATION_SURFACE`, so the test follows the manifest instead of a copy of it. This is a test-only change; gbrain itself behaves the same.
+
+## To take advantage of v0.60.128.0
+
+`gbrain upgrade` installs the binary. There are no schema migrations.
+
 ## [0.60.127.0] - 2026-10-09
 
 **Postgres search, list, page and backlink reads stop taking the slow plan: vector search walks the vector index first, remote reads stop compiling every statement before running it, and `get_page` looks up the exact page before trying aliases.**
