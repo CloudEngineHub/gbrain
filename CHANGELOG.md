@@ -12,28 +12,40 @@ identifiers and attribution are available in the pre-removal Git revision
 
 ## [0.60.137.0] - 2026-10-09
 
-**A query that quotes a passage verbatim now returns a clean read. Pasted text with a long dash rule no longer breaks keyword search, an inferred image query on a text-only brain keeps its keyword arm and expansion, and the query confidence block always reports the reranker score.**
+**A one-page sync stops re-analyzing the whole brain, edits rewrite only the chunks they changed, Postgres search and doctor stop compiling JIT code, and CJK pages chunk up to 6.7x faster with identical chunks.**
 
-An eval readiness probe quotes the first 300 characters of a stored conversation turn and expects that conversation back. It counted 89 of 500 LongMemEval-S haystacks as misses. Rebuilt the same way, gbrain returned the target at rank 1 in all 89, but each read looked degraded to the probe for one of three reasons:
-- A verbatim quote embeds almost identically to its chunk, so the confidence grade was `high_vector_match`. That grade returned before the reranker score was attached, so `retrieval.crag.top_rerank_score` was missing even though the reranker ran (84 of 89).
-- A turn holding a markdown rule of 32 or more dashes overflowed `websearch_to_tsquery`'s operator stack (`tsquery stack too small`), failing the keyword and title arms (1 of 89).
-- Text such as "a photo of Half Dome" was routed to image search on a text-only install. That skipped the keyword arm and expansion, then the multimodal embed failed and reported `vector_arm_failed` (4 of 89).
+Wave 6 of the efficiency work. Nothing changes in search results, chunk boundaries or rankings.
 
 ### What you'd see
 
-The same 89 missed haystacks plus 20 controls, rebuilt with the eval shim's page format through `put_page` on PGLite with shipped defaults (voyage-4, rerank-2.5, expansion on). This build reads 109 of 109 clean, with the target at rank 1. 0.60.106.0 read 36 of 108 clean.
+4 vCPU / 16 GiB, Bun 1.4.2, Postgres 16 + pgvector 0.8.7, synthetic brains (5k = 5,001 pages / 25,331 chunks, 50k = 50,010 / 248,802, 1,024-dim vectors), base and branch interleaved on the same machine, p50:
 
-### What to watch for
+| path | brain | before | after |
+|---|---|---|---|
+| `gbrain sync`, 1-page edit | Postgres 50k | 2,173 ms | 1,503 ms |
+| `gbrain import` of one edited file | Postgres 50k | 1,507 ms | 929 ms |
+| `gbrain sync`, 1-page edit | PGLite 5k | 3,614 ms | 1,522 ms |
+| `query` with expansion, warm MCP | Postgres 50k | 2,355 ms | 2,101 ms |
+| `gbrain doctor --json`, database time | Postgres 50k | 8.6 s | 5.2 s |
+| extract-atoms backlog count | Postgres 50k | 1,665 ms | 225 ms |
+| cold `gbrain get` | PGLite 5k | 746 ms | 667 ms |
+| unchanged re-import, 3,700 pages | PGLite 5k | 23.7 s | 19.7 s |
+| chunk pass, 2,000 CJK prose pages | in-process | 1,214 ms | 180 ms |
 
-- `retrieval.crag.top_rerank_score` is now present whenever the reranker ran, whatever the grade's reason.
-- A query whose wording suggests images ("show me photos of ...") routes to the image arm only when `embedding_multimodal_model` (or `embedding_model`) can embed images. Otherwise it runs as a text query. An explicit `cross_modal: image` still routes as asked.
-- A run of 32 or more dash negations in a keyword query collapses to its parity, which is the query a deeper parser stack would build. Every query that parsed before is unchanged.
+- **Write passes.** Import, sync and reindex refreshed the planner statistics after every pass that changed a page: on Postgres `ANALYZE pages(...)` plus `ANALYZE content_chunks(...)` (about 650 ms at 50k), on PGLite a full `ANALYZE` of every table. A pass that changed fewer than 50 + 10% of pages now leaves statistics that already exist alone; PGLite still analyzes any hot table its row deltas mark stale, and runs its full ANALYZE as before on a brain under 500 pages or when any table holds unsampled rows or grew more than 10% past its last sample. Larger passes and brains without statistics refresh as before.
+- **PGLite queue upkeep.** Every short-lived CLI process vacuumed all five persistence queue tables on its first tick (0.6 s per sync at 5k). A queue table is now vacuumed once its heap grows more than 10% past the size its last VACUUM or ANALYZE recorded.
+- **Edits.** `gbrain import` and a classic sync now keep every stored chunk row identical to its new chunk in place, as `put_page` and managed sync already did, `--no-embed` included: unchanged chunks keep their vectors, and `embed --stale` re-embeds only the chunks that changed. A never-embedded row stays in place under a chunk that gets no vector either. A one-paragraph edit now deletes and inserts one chunk row instead of every row of the page.
+- **Postgres JIT.** Search's backlink count (about 370 candidate ids under query expansion) and `doctor`'s three health statements crossed `jit_above_cost` at 50k, and LLVM compilation was most of their time (backlink count 170 → 20 ms). They now run with JIT off, like the search statements.
+- **Doctor's extract-atoms backlog** decompressed every page body to count its characters. The count now reads the byte length from the TOAST header and counts characters only for bodies between 500 and 2,000 bytes. Same counts.
+- **CJK chunking.** The chunker's token cap skips the tiktoken count when a chunk's UTF-8 byte length already fits the budget (bytes bound the count). Typical CJK chunks (about 1 KB) never reach the WASM encoder. Chunk hashes are identical on every corpus measured.
+- **PGLite cold start.** A command that opens a local PGLite brain starts compiling its WASM while its own modules load. The schema checks on connect cost about 3 ms; the rest of the ~340 ms is WASM compile (now overlapped) and PGLite's own startup.
+- **Managed re-import.** The unchanged-file screen answers the batch's shared reads (source, writer, skill-pack roots, config) once per batch instead of once per file.
+- **Migration v225** drops `idx_chunks_embedding_null`, which was byte-identical to `content_chunks_stale_idx` on every install path (v66 and v103 created both, v134 restored both). `DROP INDEX CONCURRENTLY` on Postgres, and only while the kept index is valid and identical.
 
-### Itemized changes
+### For contributors
 
-- **Rerank score on every grade (`src/core/search/crag.ts`).** `gradeRetrievalConfidence` attaches the rank-1 cross-encoder score to identity-tier grades too (`exact_lookup`, `alias_hit`, `exact_title_match`, `high_vector_match`, `decide_evidence`).
-- **Dash runs (`src/core/search/sql-ranking.ts`).** `collapseWebsearchDashRuns` runs before both engines' keyword statements and inside `boundWebsearchQuery`, which covers the title arm.
-- **Image routing (`src/core/ai/gateway.ts`, `src/core/search/hybrid/request.ts`).** `multimodalEmbeddingModel()` returns the model `embedMultimodal` would use when it can embed images. An inferred image intent and the LLM modality tie-break need it.
+- `scripts/bench/efficiency/bench-chunk.ts --cjk-prose <pages>` generates CJK prose (frequent characters, sentence punctuation, a few Latin terms).
+- New tests: `test/import-inline-chunk-keep.test.ts` (both engines), `test/chunkers/fits-embed-tokens.test.ts` (byte bound fuzz plus chunker output with the bound forced off), `test/persistence-queue-vacuum.test.ts`, refresh gating in `test/projection-statistics.test.ts`, JIT-off checks in `test/e2e/jit-off-reads-postgres.test.ts`, the backlog count at the 500-character edge for 1- to 4-byte text, and v225 in `test/migrate.test.ts`. Schema and migration goldens are regenerated for the dropped index.
 
 ## [0.60.136.0] - 2026-10-09
 
