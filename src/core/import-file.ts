@@ -767,7 +767,7 @@ export async function importFromContent(
   const reusable = !!existing && !existing.deleted_at && !opts.forceRechunk && !opts.onPostCommitEmbedding && chunks.length > 0
     && !(opts.prepare && modeRequiresSynopsis(effectiveCRMode)) && !hasProtectedBody(`${existing.compiled_truth}\n${existing.timeline ?? ''}`) && !hasProtectedBody(`${parsed.compiled_truth}\n${parsed.timeline ?? ''}`);
   const reuseCtx = { slug, sourceId: sourceId ?? 'default', title: parsed.title, corpusGeneration, tier: effectiveCRMode === 'title' ? 'title' as const : 'none' as const };
-  const reuseStoredVectors = (exec: BrainEngine, into: ChunkInput[]) => reuseStoredChunkVectors(exec, into, { ...reuseCtx, prepared: !!opts.prepare });
+  const reuseStoredVectors = (exec: BrainEngine, into: ChunkInput[], keepUnembedded = false) => reuseStoredChunkVectors(exec, into, { ...reuseCtx, prepared: !!opts.prepare, keepUnembedded });
   const reused = reusable && !opts.noEmbed && !opts.prepare ? await reuseStoredVectors(engine, chunks) : new Map<number, number | null>();
 
   let embeddingPartial: EmbeddingZeroNormError | undefined;
@@ -847,7 +847,7 @@ export async function importFromContent(
     // reuse is re-read here, under the page lock, so a kept row is one this
     // transaction sees; --no-embed and deferred-embed imports keep vectors too.
     const fresh = reusable ? chunks.map(chunk => ({ ...chunk })) : chunks;
-    const kept = new Map([...(fresh !== chunks ? await reuseStoredVectors(tx, fresh) : [])].filter(([, id]) => id !== null));
+    const kept = new Map([...(fresh !== chunks ? await reuseStoredVectors(tx, fresh, true) : [])].filter(([, id]) => id !== null));
     const keptIds = [...kept.values()];
     let written: Page | undefined;
     await pipelined(tx, [

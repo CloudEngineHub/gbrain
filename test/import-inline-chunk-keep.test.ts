@@ -113,6 +113,29 @@ for (const kind of ['pglite', 'postgres'] as const) {
       expect(strip(await rows('notes/no-embed-reference'))).toEqual(strip(after));
     }, 120_000);
 
+    test('a --no-embed edit of a never-embedded page keeps its identical rows; an embedding import embeds them all', async () => {
+      const words = ['quebec', 'romeo', 'sierra', 'tango', 'uniform'];
+      await write('notes/keyless', page('Keyless', words), true);
+      const before = await rows('notes/keyless');
+      expect(before.every(row => row.embedding === null)).toBe(true);
+      words[3] = 'victor';
+      await write('notes/keyless', page('Keyless', words), true);
+      const after = await rows('notes/keyless');
+      const kept = after.filter(row => before.some(old => old.id === row.id));
+      const unchanged = after.filter(row => before.some(old => old.chunk_index === row.chunk_index && old.chunk_text === row.chunk_text));
+      expect(kept.length).toBeGreaterThan(0);
+      expect(kept.map(row => row.id)).toEqual(unchanged.map(row => row.id));
+      for (const row of kept) expect(row).toEqual(before.find(old => old.id === row.id)!);
+      await write('notes/keyless-reference', page('Keyless', words), true);
+      expect(withoutId(await rows('notes/keyless-reference'))).toEqual(withoutId(after));
+      embedded = [];
+      words[0] = 'whiskey';
+      await write('notes/keyless', page('Keyless', words));
+      const embeddedRows = await rows('notes/keyless');
+      expect(embedded.length).toBe(embeddedRows.length);
+      expect(embeddedRows.every(row => row.embedding !== null)).toBe(true);
+    }, 120_000);
+
     test('an unchanged re-import with a protected fence keeps nothing', async () => {
       const fence = '\n<!--- gbrain:takes:begin -->\nPRIVATE_CANARY\n<!--- gbrain:takes:end -->\n';
       await write('notes/protected', page('Protected', ['mike', 'november', 'oscar'], fence));
