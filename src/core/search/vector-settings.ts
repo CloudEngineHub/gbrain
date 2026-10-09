@@ -1,6 +1,13 @@
 import { hnswEfSearchFor, HNSW_EF_SEARCH_DEFAULT } from '../vector-index.ts';
 import { remainingVectorBudget } from './vector-pool.ts';
 import { HNSW_ITERATIVE_SCAN_DEFAULT, type HnswIterativeScanMode } from './hnsw-iterative-scan.ts';
+import { INDEX_WALK_OVERFETCH, INDEX_WALK_SETTINGS } from './vector-statement.ts';
+
+/**
+ * `indexWalk` adds INDEX_WALK_SETTINGS; without iterative scans it also sizes
+ * `hnsw.ef_search` for the walk's over-fetched window, which a non-iterative
+ * scan cannot return past.
+ */
 
 export async function withVectorSettings<T>(
   query: (sql: string, params: unknown[]) => Promise<Record<string, unknown>[]>,
@@ -10,8 +17,10 @@ export async function withVectorSettings<T>(
   run: () => Promise<T>,
   deadline?: number,
   iterativeMode: HnswIterativeScanMode = HNSW_ITERATIVE_SCAN_DEFAULT,
+  indexWalk = false,
 ): Promise<T> {
-  const settings: Record<string, string> = { 'hnsw.ef_search': String(hnswEfSearchFor(candidateLimit)) };
+  const window = indexWalk && !iterative ? candidateLimit * INDEX_WALK_OVERFETCH : candidateLimit;
+  const settings: Record<string, string> = { 'hnsw.ef_search': String(hnswEfSearchFor(window)), ...(indexWalk ? INDEX_WALK_SETTINGS : {}) };
   const defaults: Record<string, string> = { 'hnsw.ef_search': String(HNSW_EF_SEARCH_DEFAULT), 'hnsw.iterative_scan': 'off', 'hnsw.max_scan_tuples': '20000' };
   if (iterative) {
     settings['hnsw.iterative_scan'] = iterativeMode;
