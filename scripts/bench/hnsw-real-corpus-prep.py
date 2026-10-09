@@ -61,6 +61,7 @@ def main():
         for shard in range(41):
             path = os.path.join(args.out, f'shard-{shard:05d}.parquet')
             if not os.path.exists(path):
+                # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- the URL is the fixed https Hugging Face BASE with an integer shard number; no caller input reaches it
                 urllib.request.urlretrieve(BASE.format(shard), path + '.part')
                 os.rename(path + '.part', path)
             table = pq.read_table(path, columns=['id', 'text'])
