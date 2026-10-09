@@ -10,6 +10,20 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.135.0] - 2026-10-09
+
+**CI headroom: the PostgreSQL unit arms run as three balanced shards, the graduation custody suites run 30–42% faster, and the Tier 2 agent-journey file is split so no serial file sits near its 300-second cap.**
+
+Nothing changes for users. This release keeps the CI gate from failing on slow runners. The PostgreSQL unit-arm shard 2 overran its 20-minute step twice in one day, and the Tier 2 journey file took up to 235 of its 300 seconds.
+
+### Itemized changes
+
+### For contributors
+
+- **Faster graduation custody tests.** Every `test/graduation-rollback.test.ts` and `test/graduation-state.test.ts` case built its source brain from scratch: a PGLite initdb plus the full schema replay, about 2 s per harness and dozens of harnesses per file. `test/helpers/graduation-harness.ts` now builds one seeded source datastore per test process and copies it for each harness. It opens the copy once at its own path, so the owner sidecars are written there, and draws the per-brain identity values (brain id, shared-skill secret) fresh. Same machine, Postgres arm included, N=3 medians: rollback 141 s → 98 s, state 227 s → 131 s. No assertion changed.
+- **Three PostgreSQL arm shards.** `unit-postgres-arms` runs three shards instead of two, balanced on weights re-mined from 76 recent job logs. Before, 35 of the 106 listed files had no weight. Replayed over 36 historical CI runs, each shard's p95 test time is at most 10.0 minutes, inside the 20-minute step even on a runner twice as slow.
+- **Tier 2 split.** The read-op `--json` sweep (row 1) moved to `test/agent-journey-tier2-json.serial.test.ts`. Its shared fixtures now live in `test/helpers/agent-journey-tier2.ts`. Locally the original file took 77 s; the two files now take 43 s and 34 s.
+
 ## [0.60.134.0] - 2026-10-09
 
 **An MCP client sees `gbrain serve`'s tool list sooner, importing and syncing chunk pages about twice as fast, editing a page through `put_page` re-embeds only the chunks you changed, and a scoped vector search on a source of long pages finds its true neighbours. Chunks, tool lists and unscoped search come out the same.**
