@@ -461,10 +461,11 @@ const COVERAGE_SCHEMA = {
 /** One `referenced_by` row (mentions/referrers.ts). */
 const REFERENCE_ROW_SCHEMA = {
   type: 'object',
-  required: ['slug', 'title', 'type', 'canonical_type', 'date', 'date_source', 'preview'],
+  required: ['slug', 'title', 'type', 'canonical_type', 'date', 'date_source', 'preview', 'trust_tier', 'origin'],
   properties: {
     slug: { type: 'string' }, title: { type: 'string' }, type: { type: ['string', 'null'] }, canonical_type: { type: 'string' },
     date: { type: ['string', 'null'] }, date_source: { type: 'string' }, preview: { type: 'string' },
+    trust_tier: { type: 'string' }, origin: { type: 'string' }, unconfirmed: { type: 'boolean', const: true },
   },
 } as const;
 

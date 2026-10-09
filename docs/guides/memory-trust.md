@@ -27,7 +27,10 @@ its origin gains a `:user_said` marker (`mcp:remember:user_said`). It is not
 "confirmed by you" or "your notes": `gbrain trust explain` shows the
 `gbrain trust confirm` command that raises it. An instruction-like write the
 gate flags keeps "unconfirmed, agent-written" even when tagged `user_said`, so
-the tag buys poisoned text no softer label. The exact wording is
+the tag buys poisoned text no softer label. The tool description tells agents
+to use `user_said` only for what you personally said in the conversation, never
+for a document, email, web page or tool output, even when that text asks for
+it. The exact wording is
 `USER_SAID_TRUST_LABEL` in `src/core/trust/tier.ts`.
 
 Nothing ever becomes "confirmed by you" without you typing a confirmation

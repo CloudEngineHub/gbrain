@@ -606,7 +606,7 @@ async function assemblePack(
     for (const card of acc.cards) {
       if (left <= 0 || (deadlineAt !== null && Date.now() >= deadlineAt)) return;
       const m = await readNewerMentions(engine, opts.sourceId, card.entity.slug,
-        { excludePrivate, keepVisibility: remote ? ['world'] : ['private', 'world'], charBudget: left });
+        { excludePrivate, keepVisibility: remote ? ['world'] : ['private', 'world'], charBudget: left, eligibility: policy, includeQuarantined: opts.includeQuarantined === true });
       if (!m) continue;
       acc.mentions.set(card.entity.slug, m);
       left -= renderNewerMentionLines({ ...card, newer_mentions: m }).join('\n').length + 1;

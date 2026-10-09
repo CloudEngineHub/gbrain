@@ -332,7 +332,7 @@ async function cardReferences(engine: BrainEngine, sourceId: string, row: CardPa
   try {
     const { pack } = await loadLinkableTypes(engine, sourceId);
     const { total, groups } = await readReferrerGroups(engine, { slug: row.slug, sourceId, referrerSources: [sourceId], excludePrivate, pack,
-      keepVisibility: opts.remote ? ['world'] : ['private', 'world'] });
+      keepVisibility: opts.remote ? ['world'] : ['private', 'world'], eligibility: opts.eligibility });
     let coverage = await readMentionCoverage(engine, [sourceId]);
     if (coverage.state !== 'disabled' && !entityTypes.has(row.type ?? '')) coverage = { ...coverage, state: 'type_not_linkable', degraded: true };
     const referenced_by = groups.map((g): ReferenceGroupView => {
