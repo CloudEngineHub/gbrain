@@ -146,12 +146,12 @@ const MATRIX: Record<CyclePhase, Entry> = {
     },
   },
   content_repair: {
-    // #6377: the lane minus `fences`; with no other content-repair kind registered in this release the phase runs nothing
-    // and says so, so it must finish skipped with `no_kinds` and never refuse or stop.
+    // #6377: the lane minus `fences` (today the `slug-conflicts` kind) runs as a trusted apply on the managed brain; with no
+    // slug-conflict hold seeded it must finish without a refusal or a stop and report the kind's (empty) result.
     seed: async ({ engine, sourceId }) => put(engine, sourceId, 'people/alice-example', page('person', 'Alice', 'A person with no holds.')),
     assert: async ({ result }) => {
-      expect(result.status).toBe('skipped');
-      expect(result.details).toMatchObject({ reason: 'no_kinds', kinds: [] });
+      expect(result.status).toBe('ok');
+      expect(result.details).toMatchObject({ mode: 'apply', kinds: ['slug-conflicts'] });
     },
   },
   synthesize: {

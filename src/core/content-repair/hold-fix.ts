@@ -65,7 +65,7 @@ export function contentHoldFix(record: { source_id: string; path: string; slug?:
   const base = { argv: preview, consent: [] as Effect[], requires_exclusive: false, verify, docs };
   if (!state) {
     return { ...base, actor: 'agent',
-      why: `The frontmatter slug of ${record.path} names another page. gbrain repairs this itself on the next maintenance run or with gbrain sync unblock --source ${source} --apply: `
+      why: `The frontmatter slug of ${record.path} names another page. The content-repair lane clears this itself on the next maintenance run or with gbrain sync unblock --source ${source} --apply: `
         + 'a stray slug (no such page, or a page of another type with nothing in common) is removed deterministically; anything else is judged by the content-repair model under the fences.repair caps. '
         + 'The preview is read-only and calls no model: it lists the planned action, the estimated model cost and the cap left, and prints the apply command.' };
   }
