@@ -87,11 +87,17 @@ function valueText(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** Whether a body line mentions a slug: the full slug, or its last segment as a word. */
+/** Whether a body line mentions a slug: the full slug, or its last segment as a whole word (a plain scan; no regex is built from page text). */
 function mentions(line: string, slug: string): boolean {
   if (line.includes(slug)) return true;
-  const leaf = slug.split('/').pop() ?? slug;
-  return leaf.length >= 3 && new RegExp(`(^|[^a-z0-9])${leaf.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`, 'i').test(line);
+  const leaf = (slug.split('/').pop() ?? slug).toLowerCase();
+  if (leaf.length < 3) return false;
+  const lower = line.toLowerCase();
+  const word = (c: string | undefined) => c !== undefined && /[a-z0-9]/.test(c);
+  for (let at = lower.indexOf(leaf); at !== -1; at = lower.indexOf(leaf, at + 1)) {
+    if (!word(lower[at - 1]) && !word(lower[at + leaf.length])) return true;
+  }
+  return false;
 }
 
 /**
