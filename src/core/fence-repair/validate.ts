@@ -10,7 +10,9 @@
  *   (f) cell_changed         per row, a valid non-claim cell keeps its column and text; a misaligned cell may move
  *                            with its text unchanged; text changes only where an issue names the row and column
  *                            and a named rule produced it (TE2)
- *   (g) protection_loosened  nothing the privacy boundary hid is shown after
+ *   (g) protection_loosened  nothing the privacy boundary hid is shown after, except the trailing lines of a fence a
+ *                            `close_fence_trailing` fix closed (#6377): the structural rule admits that fix only on a private
+ *                            page or under the user's hash-bound approval, and the gate accepts exactly those lines
  *
  * Gates (b), (c), (e) and (f) read the raw-row extraction of the
  * before-region, never strict-parser output. (e) runs before (b) so a dropped
@@ -31,6 +33,7 @@ import { mergePlans, rowKey, type MergePlan } from './merge.ts';
 import { normalizeFences } from './normalize.ts';
 import { exposedLines, sectionsOf, strictFailures } from './page-checks.ts';
 import { extractRawRows, primaryFence, rowNumOf, type RawFence, type RawRow } from './raw-rows.ts';
+import { trailingLinesOf } from './structure.ts';
 import { cellsChanged } from './validate-cells.ts';
 import { GATE_REASONS } from './reasons.ts';
 import { cellValid, collapse, enumSynonym, supersededRef } from './schema.ts';
@@ -105,7 +108,7 @@ function firstFailure(before: FencePage, after: FencePage, ctx: ValidateCtx): Fa
     const failed = check(pairs, ctx);
     if (failed) return failed;
   }
-  return protection(before, after);
+  return protection(before, after, ctx);
 }
 
 /** Null when the fixes name a merge the before page does not admit (nothing the mapping could vouch for). */
@@ -238,11 +241,20 @@ function withFollowedRef(pair: FencePair, p: Paired): RawRow {
 }
 
 /** (g) */
-function protection(before: FencePage, after: FencePage): Failure | null {
+function protection(before: FencePage, after: FencePage, ctx: ValidateCtx): Failure | null {
   const afterSections = new Map(sectionsOf(after));
   for (const [section, text] of sectionsOf(before)) {
-    if (exposedLines(text, afterSections.get(section) ?? '').length) {
-      return { gate: 'g', fence: null, section, rows: [] };
+    const exposed = exposedLines(text, afterSections.get(section) ?? '');
+    if (!exposed.length) continue;
+    const closed = ctx.issues.filter((i): i is FenceLocation & { class: 'close_fence_trailing' } => 'class' in i && i.class === 'close_fence_trailing' && i.section === section);
+    if (!closed.length) return { gate: 'g', fence: null, section, rows: [] };
+    const allowed = new Map<string, number>();
+    const tails = trailingLinesOf(text, section);
+    for (const fix of closed) for (const line of tails.get(`${section}:${fix.fence}`) ?? []) allowed.set(line, (allowed.get(line) ?? 0) + 1);
+    for (const line of exposed) {
+      const left = allowed.get(line) ?? 0;
+      if (left <= 0) return { gate: 'g', fence: closed[0]!.fence, section, rows: [] };
+      allowed.set(line, left - 1);
     }
   }
   return null;

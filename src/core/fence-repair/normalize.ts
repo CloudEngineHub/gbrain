@@ -43,7 +43,7 @@ export function normalizeFences<T extends FencePage>(page: T, ctx: FenceCtx): No
   const texts: Record<FenceSection, string> = { body: '', timeline: '' };
   const merges: MergeOrigins[] = [];
   for (const [section, text] of sectionsOf(page)) {
-    const pass = structuralPass(text, section);
+    const pass = structuralPass(text, section, ctx);
     const stray = strayCellPass(pass.text, section);
     texts[section] = stray.text;
     fixes.push(...pass.fixes, ...stray.fixes);

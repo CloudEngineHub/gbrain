@@ -1,7 +1,8 @@
 /**
- * Structural Tier 1 rules for one section (#6188): `merge_fences` (several
- * balanced fences of a kind, #6377, merge.ts), `marker_form` (takes two-dash
- * markers) and `close_fence` (a missing end marker).
+ * Structural Tier 1 rules for one section (#6188, #6377): `merge_fences`
+ * (balanced same-kind fences, merge.ts), `marker_form` (takes two-dash
+ * markers), `close_fence` (a missing end marker) and `close_fence_trailing`
+ * (a missing end marker with page text after the table).
  *
  * `close_fence` inserts the end marker after the last table row only when
  * every row of the before-region is one contiguous block and nothing but
@@ -9,12 +10,23 @@
  * hides everything after an unpaired begin marker, so closing the fence
  * early would publish whatever trails it (gate (g)). Every structural edit
  * is also checked against `exposedLines` before it is kept.
+ *
+ * `close_fence_trailing` (#6377) is the one rule that shows hidden lines on
+ * purpose, and only when showing them discloses nothing or the user agreed:
+ * the trailing lines hold no pipe and no fence marker (so no parser can read
+ * them as rows), or the tail classifier judged them prose (`ctx.tailProse`),
+ * and the page is private (remote readers never see its body) or the caller
+ * holds the user's hash-bound approval (`ctx.approveTailExposure`). A
+ * pipe-free tail on a world page without approval is `tail_exposure_approval`;
+ * a tail with a pipe the classifier has not judged is
+ * `unclosed_trailing_content` (Tier 3); a marker mention is
+ * `unclosed_ambiguous_tail` (manual).
  */
 import { TAKES_FENCE_BEGIN, TAKES_FENCE_END } from '../takes-fence.ts';
 import { mergeEdits, mergeOrigins, mergePlan, type MergeOrigins, type MergePlan } from './merge.ts';
 import { exposedLines } from './page-checks.ts';
 import { extractRawRows, MARKERS, parseRowSpans, primaryFence, type RawFence, type RawSection } from './raw-rows.ts';
-import type { FenceFix, FenceIssue, FenceReason, FenceSection, FixClass } from './types.ts';
+import type { FenceCtx, FenceFix, FenceIssue, FenceReason, FenceSection, FixClass } from './types.ts';
 
 export interface Edit {
   start: number;
@@ -46,12 +58,14 @@ export function applyEdits(text: string, edits: readonly Edit[]): string {
 }
 
 /** Run the structural rules until they settle (a converted marker may then need closing). */
-export function structuralPass(text: string, section: FenceSection): PassResult {
+export type StructuralCtx = Pick<FenceCtx, 'pageVisibility' | 'approveTailExposure' | 'tailProse'>;
+
+export function structuralPass(text: string, section: FenceSection, ctx: StructuralCtx = { pageVisibility: 'world' }): PassResult {
   let current = text;
   const fixes: FenceFix[] = [];
   const merges: MergeOrigins[] = [];
   for (let round = 0; round < 3; round++) {
-    const step = structuralStep(current, section);
+    const step = structuralStep(current, section, ctx);
     if (!step.edits.length) return { text: current, fixes, residual: step.residual, merges };
     current = applyEdits(current, step.edits);
     fixes.push(...step.fixes);
@@ -66,7 +80,7 @@ export function fenceBlocked(raw: RawSection, fence: RawFence): boolean {
     || raw.issues.some(i => i.fence === fence.kind && i.reason === 'missing_begin');
 }
 
-function structuralStep(text: string, section: FenceSection): Step {
+function structuralStep(text: string, section: FenceSection, ctx: StructuralCtx): Step {
   const raw = extractRawRows(text, section);
   const step: Step = { edits: [], fixes: [], residual: [], merged: [] };
   for (const kind of ['facts', 'takes'] as const) {
@@ -89,7 +103,7 @@ function structuralStep(text: string, section: FenceSection): Step {
       continue;
     }
     if (edits.length) keep(step, text, fence, edits, 'marker_form', 'marker_near_miss');
-    else if (!fence.end) planClose(step, text, fence);
+    else if (!fence.end) planClose(step, text, fence, ctx);
   }
   return step;
 }
@@ -131,7 +145,7 @@ function tableFollows(text: string, from: number): boolean {
   return false;
 }
 
-function planClose(step: Step, text: string, fence: RawFence): void {
+function planClose(step: Step, text: string, fence: RawFence, ctx: StructuralCtx): void {
   const lines = [fence.header, ...fence.separators, ...fence.rows].filter(r => r !== null).sort((a, b) => a.line - b.line);
   const last = lines[lines.length - 1];
   if (lines.some((row, i) => i > 0 && row.line !== lines[i - 1]!.line + 1)) {
@@ -139,11 +153,52 @@ function planClose(step: Step, text: string, fence: RawFence): void {
     return;
   }
   const after = last ? last.end : fence.begin.end;
-  if (text.slice(after, fence.regionEnd).trim()) {
+  const tail = trailingLines(text.slice(after, fence.regionEnd));
+  if (!tail.length) {
+    keep(step, text, fence, [closeEdit(text, after, MARKERS[fence.kind].end)], 'close_fence', 'unclosed_trailing_content');
+    return;
+  }
+  if (tail.some(line => line.includes('gbrain:'))) {
+    step.residual.push(fenceIssue(fence, 'unclosed_ambiguous_tail', fence.begin.line));
+    return;
+  }
+  const judged = tailAmbiguous(tail) ? ctx.tailProse?.has(`${fence.section}:${fence.kind}`) === true || ctx.tailProse?.has('*') === true : true;
+  if (!judged) {
     step.residual.push(fenceIssue(fence, 'unclosed_trailing_content', fence.begin.line));
     return;
   }
-  keep(step, text, fence, [closeEdit(text, after, MARKERS[fence.kind].end)], 'close_fence', 'unclosed_trailing_content');
+  if (ctx.pageVisibility !== 'private' && !ctx.approveTailExposure) {
+    step.residual.push(fenceIssue(fence, 'tail_exposure_approval', fence.begin.line));
+    return;
+  }
+  step.edits.push(closeEdit(text, after, MARKERS[fence.kind].end));
+  step.fixes.push({ fence: fence.kind, section: fence.section, row: null, column: null, line: fence.begin.line, class: 'close_fence_trailing' });
+}
+
+/** The non-blank lines of a fence's tail, trimmed, as written. */
+export function trailingLines(tail: string): string[] {
+  return tail.split(/\r\n|\r|\n/).map(line => line.trim()).filter(Boolean);
+}
+
+/** The tail holds a pipe, so a line could be a table row; without one every line is prose under every parser. */
+export function tailAmbiguous(tail: readonly string[]): boolean {
+  return tail.some(line => line.includes('|'));
+}
+
+/**
+ * The trailing lines a `close_fence_trailing` fix shows, per unclosed fence of
+ * the before section: what gate (g) may accept as exposed, and nothing else.
+ */
+export function trailingLinesOf(text: string, section: FenceSection): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const raw = extractRawRows(text, section);
+  for (const fence of raw.fences) {
+    if (!fence.primary || fence.end) continue;
+    const lines = [fence.header, ...fence.separators, ...fence.rows].filter(r => r !== null).sort((a, b) => a.line - b.line);
+    const last = lines[lines.length - 1];
+    out.set(`${section}:${fence.kind}`, trailingLines(text.slice(last ? last.end : fence.begin.end, fence.regionEnd)));
+  }
+  return out;
 }
 
 /** Insert `marker` on its own line after the line that ends at or after `at`, keeping that line's ending. */
