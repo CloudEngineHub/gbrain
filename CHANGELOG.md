@@ -12,28 +12,40 @@ identifiers and attribution are available in the pre-removal Git revision
 
 ## [0.60.135.0] - 2026-10-09
 
-**A query that quotes a passage verbatim now returns a clean read. Pasted text with a long dash rule no longer breaks keyword search, an inferred image query on a text-only brain keeps its keyword arm and expansion, and the query confidence block always reports the reranker score.**
+**Scoped vector search that reaches the candidate pool finds its true nearest pages, and a freshly imported brain keeps its vector index plan. Unscoped search returns the same results.**
 
-An eval readiness probe quotes the first 300 characters of a stored conversation turn and expects that conversation back. It counted 89 of 500 LongMemEval-S haystacks as misses. Rebuilt the same way, gbrain returned the target at rank 1 in all 89, but each read looked degraded to the probe for one of three reasons:
-- A verbatim quote embeds almost identically to its chunk, so the confidence grade was `high_vector_match`. That grade returned before the reranker score was attached, so `retrieval.crag.top_rerank_score` was missing even though the reranker ran (84 of 89).
-- A turn holding a markdown rule of 32 or more dashes overflowed `websearch_to_tsquery`'s operator stack (`tsquery stack too small`), failing the keyword and title arms (1 of 89).
-- Text such as "a photo of Half Dome" was routed to image search on a text-only install. That skipped the keyword arm and expansion, then the multimodal embed failed and reported `vector_arm_failed` (4 of 89).
+A vector search under a visibility scope, a type or date filter, or a source too large for the exact scope scan ends in the bounded candidate pool. Its first attempt visited at most 2,000 index entries and was accepted as soon as the eligible chunks it found covered the requested pages. Under a 10% scope that was about 200 chunks, which was enough to be accepted but too few to hold the true neighbours. Every pooled attempt now visits up to 20,000, pgvector's own default. Separately, import, sync, reindex and embed drains refreshed only two page columns' planner statistics, so on a freshly loaded large brain the vector statement sorted every eligible chunk instead of walking the HNSW index until autovacuum ran. They now analyze `content_chunks(model, modality, page_id)` and the page columns search filters read.
 
 ### What you'd see
 
-The same 89 missed haystacks plus 20 controls, rebuilt with the eval shim's page format through `put_page` on PGLite with shipped defaults (voyage-4, rerank-2.5, expansion on). This build reads 109 of 109 clean, with the target at rank 1. 0.60.106.0 read 36 of 108 clean.
+16 vCPU host, Postgres 16 + pgvector 0.8.7, 1,024-dim vectors, 100 queries, `limit 50`, recall of result pages against the exact statement, measured on top of 0.60.131.0's exact scope scan:
+
+| corpus and scope | recall@50 before | after | p50 cost |
+|---|---|---|---|
+| 1M voyage-4 Wikipedia chunks, random 10% visibility scope | 0.767 | 0.969 | +25 ms |
+| same, topic-coherent 50% source | 0.870 | 0.954 | none |
+| same, topic-coherent 10% source (104,000 chunks) | 0.655 | 0.758 | +36 ms |
+| 1M synthetic chunks, random 10% visibility scope | 0.615 | 0.984 | +18 ms |
+| 1M synthetic chunks, 10% source + type filter | 0.601 | 0.979 | +18 ms |
+| 352k synthetic chunks, 30% source | 0.860 | 0.985 | +14 ms |
+| unscoped, and sources the exact scope scan covers | unchanged | unchanged | none |
+
+These rows were measured before 0.60.134.0 raised the exact scope scan's cap to 120,000 counted chunks. The 104,000-chunk source and the 1M synthetic 10% source + type rows (about 100,000 chunks) now take that exact scan instead of the pool. The visibility-scope rows, and sources past the cap, still reach the pool and get the budget.
+
+On a freshly imported 1M to 2M chunk brain, scoped searches took 0.5 to 8 s, and up to half of the broad ones fell back to keyword only. After the import's own refresh they plan on the HNSW index at 8 to 75 ms p50 with no incomplete results.
 
 ### What to watch for
 
-- `retrieval.crag.top_rerank_score` is now present whenever the reranker ran, whatever the grade's reason.
-- A query whose wording suggests images ("show me photos of ...") routes to the image arm only when `embedding_multimodal_model` (or `embedding_model`) can embed images. Otherwise it runs as a text query. An explicit `cross_modal: image` still routes as asked.
-- A run of 32 or more dash negations in a keyword query collapses to its parity, which is the query a deeper parser stack would build. Every query that parsed before is unchanged.
+- Searches that reach the pool visit more index entries: about 15 to 35 ms more p50 on 1M to 2M chunks. A source of 4% to 30% of pages that is too large for the exact scan still answers from the share-scaled walk, at recall@50 about 0.82 for a 10% source of 1M chunks; this release does not change that path.
+- An embed drain or import now ends with an ANALYZE of a few columns, bounded by a 30 s statement timeout and a 2 s lock timeout. When the lock is held (for example by an index build), the refresh is skipped with a warning that names the command to run.
 
 ### Itemized changes
 
-- **Rerank score on every grade (`src/core/search/crag.ts`).** `gradeRetrievalConfidence` attaches the rank-1 cross-encoder score to identity-tier grades too (`exact_lookup`, `alias_hit`, `exact_title_match`, `high_vector_match`, `decide_evidence`).
-- **Dash runs (`src/core/search/sql-ranking.ts`).** `collapseWebsearchDashRuns` runs before both engines' keyword statements and inside `boundWebsearchQuery`, which covers the title arm.
-- **Image routing (`src/core/ai/gateway.ts`, `src/core/search/hybrid/request.ts`).** `multimodalEmbeddingModel()` returns the model `embedMultimodal` would use when it can embed images. An inferred image intent and the LLM modality tie-break need it.
+- **Pooled scan budget (`src/core/search/vector-pool.ts`).** `POOL_MAX_SCAN_TUPLES` (20,000) for every pooled and exact-fallback attempt. The index walk and the scope scan keep their window-sized budget.
+- **Planner statistics (`src/core/search/projection-statistics.ts`, `src/commands/embed.ts`).** On Postgres, `refreshProjectionStatistics` analyzes `pages(text_projection_revision, knowledge_revision, deleted_at, source_id, type, slug)`, then `content_chunks(model, modality, page_id)` behind a savepoint. `refreshChunkStatistics` runs the chunk step once at the end of an embed drain that embedded something.
+- **Bench (`scripts/bench/hnsw-iterative-scan.ts`).** Synthetic-latent corpora (`--corpus latent`), prepared real-text corpora embedded with voyage-4 (`--corpus dir`, `scripts/bench/hnsw-real-corpus-prep.py`), `ef_search` and `max_scan_tuples` sweeps, share buckets (`--source-shares`), statistics states with EXPLAIN capture, and an index build grid. The method and every table are in `docs/eval/hnsw-scale-bench.md`.
+- **Docs.** `docs/ENGINES.md` sizes `maintenance_work_mem` for the deferred ANN build. It records `halfvec` (a third of the index size, same recall) and `ef_construction` 128 (+0.02 to 0.03 unscoped recall@10) as measured candidates, not shipped.
+- **CI.** Nightly shard-weight refresh (`scripts/{test,serial,e2e}-weights.json`).
 
 ## [0.60.134.0] - 2026-10-09
 
