@@ -108,9 +108,7 @@ Every backend's assertions remain in the shared suites; engine-specific cases ru
 in their owning lane.
 
 Ordinary PostgreSQL `setupDB()` clears fixture data, operator configuration,
-source sync identity and managed-persistence state (requests, and the
-`persistence_brain` row back to disabled, protocol floor 1, shared skill bundles
-off, as a fresh-database CLI `gbrain init` leaves them raised) while retaining
+source sync identity and managed-persistence state while retaining
 `config.version` and the stored embedding identity, avoiding historical migration
 replay against an already-current schema. Migration-focused fixtures use
 `setupDB({ replayMigrations: true })`; an absent ledger also runs the cold chain.
