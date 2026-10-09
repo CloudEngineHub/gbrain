@@ -138,14 +138,8 @@ const SYNTHESIS_OUTPUT_TYPES = new Set<string>(['atom', 'concept']);
 
 const PAGE_DISCOVERY_BUDGET = 50;
 const MIN_PAGE_CHARS_FOR_EXTRACTION = 500;
-/**
- * `compiled_truth` holds at least `param` characters (NULL counts as empty),
- * without detoasting most bodies: octet_length reads a TOASTed value's raw
- * size from its header, and a character takes 1-4 bytes in every server
- * encoding, so only a body between param and 4x param bytes is decompressed
- * to count its characters. At 50k pages a plain length() decompressed every
- * body (1.3 s per count).
- */
+/** `compiled_truth` has >= `param` characters: octet_length reads a TOASTed size from its header and a character is
+ *  1-4 bytes, so only bodies of param..4x param bytes are decompressed (length() decompressed all: 1.3 s at 50k). */
 const minCompiledTruthChars = (param: string) =>
   `(octet_length(p.compiled_truth) >= 4 * ${param} OR (octet_length(p.compiled_truth) >= ${param} AND length(p.compiled_truth) >= ${param}))`;
 // Source pages whose frontmatter declares a `raw` payload pointer hold raw
