@@ -10,7 +10,7 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
-## [0.60.126.0] - 2026-10-09
+## [0.60.127.0] - 2026-10-09
 
 **Postgres search, list, page and backlink reads stop taking the slow plan: vector search walks the vector index first, remote reads stop compiling every statement before running it, and `get_page` looks up the exact page before trying aliases.**
 
