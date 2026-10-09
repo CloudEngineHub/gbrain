@@ -107,9 +107,11 @@ captured at registration so hooks retain it after the import environment restore
 Every backend's assertions remain in the shared suites; engine-specific cases run
 in their owning lane.
 
-Ordinary PostgreSQL `setupDB()` clears fixture data, operator configuration and
-source sync identity while retaining `config.version` and the stored embedding
-identity, avoiding historical migration
+Ordinary PostgreSQL `setupDB()` clears fixture data, operator configuration,
+source sync identity and managed-persistence state (requests, and the
+`persistence_brain` row back to disabled, protocol floor 1, shared skill bundles
+off, as a fresh-database CLI `gbrain init` leaves them raised) while retaining
+`config.version` and the stored embedding identity, avoiding historical migration
 replay against an already-current schema. Migration-focused fixtures use
 `setupDB({ replayMigrations: true })`; an absent ledger also runs the cold chain.
 `test/e2e/fixture-reset-postgres.test.ts` checks both paths, cleanup and vector-shape
