@@ -55,7 +55,7 @@ const commit = (root: string, message = 'content') => { git(root, 'add', '-A'); 
 const quiet = { info() {}, warn() {}, error() {} };
 
 // Body text that must never leave a file through a hold, a receipt, a result field or a commit message.
-const SECRET = 'Sentinelbodyzr9 moved to Lisbon';
+const SENTINEL_BODY = 'Sentinelbodyzr9 moved to Lisbon';
 const WHY = 'Both describe the same synthetic founder.';
 const page = (title: string, type: string, body: string, extra = '') => `---\ntitle: ${title}\ntype: ${type}\n${extra}---\n${body}\n`;
 const answer = (text: string, stop: ChatResult['stopReason'] = 'end'): ChatResult => ({ text, blocks: [], stopReason: stop,
@@ -130,7 +130,7 @@ test('deterministic tier: a stray slug (no page, no file) and a slug naming a pa
   const s = await managed({
     'companies/acme-example.md': page('Acme Widgets', 'company', 'A synthetic company.'),
     'people/carol-example.md': page('Carol Example', 'person', 'A synthetic person.'),
-    'notes/stray.md': page('Stray Note', 'note', `A note from a template. ${SECRET}`, 'slug: notes/nowhere-at-all\n'),
+    'notes/stray.md': page('Stray Note', 'note', `A note from a template. ${SENTINEL_BODY}`, 'slug: notes/nowhere-at-all\n'),
     'people/bob-example.md': page('Bob Example', 'person', 'A synthetic person who works at the company.', 'slug: companies/acme-example\n'),
   });
   expect((await s.sync()).held_count).toBe(2);
@@ -155,7 +155,7 @@ test('deterministic tier: a stray slug (no page, no file) and a slug naming a pa
   const applied = await s.run({ apply: true, expect: hashOf(preview) });
   expect(applied).toMatchObject({ mode: 'apply', applied: 2, repaired: 2, outcomes: { repaired: 2 } });
   expect(calls).toHaveLength(0);
-  expect(s.read('notes/stray.md')).toBe(page('Stray Note', 'note', `A note from a template. ${SECRET}`));
+  expect(s.read('notes/stray.md')).toBe(page('Stray Note', 'note', `A note from a template. ${SENTINEL_BODY}`));
   expect(s.read('people/bob-example.md')).not.toContain('slug:');
   expect((await engine.getPage('people/bob-example', { sourceId: s.id }))?.compiled_truth).toContain('works at the company');
   const holds = await s.holds();
@@ -178,7 +178,7 @@ test('deterministic tier: a stray slug (no page, no file) and a slug naming a pa
 test('model tier: a duplicate pair is judged at apply time; merge_into writes nothing and names the canonical for a person; the memo spends nothing twice; remove_slug applies through the coordinated path', () => each(async () => {
   const s = await managed({
     'people/alice-example.md': page('Alice Example', 'person', 'A synthetic founder, first met in 2024.'),
-    'people/alice-example-2.md': page('Alice Example', 'person', `A synthetic founder. Possible duplicate of people/alice-example. ${SECRET}`, 'slug: people/alice-example\n'),
+    'people/alice-example-2.md': page('Alice Example', 'person', `A synthetic founder. Possible duplicate of people/alice-example. ${SENTINEL_BODY}`, 'slug: people/alice-example\n'),
     'people/dan-example.md': page('Dan Example', 'person', 'A synthetic engineer.'),
     'people/dan-other.md': page('Dan Other Example', 'person', 'A different synthetic person.', 'slug: people/dan-example\n'),
   });

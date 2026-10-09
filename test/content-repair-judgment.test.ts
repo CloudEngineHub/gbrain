@@ -18,7 +18,7 @@ import type { ChatResult } from '../src/core/ai/gateway.ts';
 import { buildJudgmentPrompt, JUDGMENT_HEAD_LINES, JUDGMENT_MAX_MENTIONS, JUDGMENT_PROMPT_VERSION, judgmentParticipant, parseJudgmentAnswer, parseJudgmentText,
   type JudgmentInput } from '../src/core/content-repair/judgment.ts';
 
-const SECRET = 'Sentinelbodyqx9 lives elsewhere';
+const SENTINEL_BODY = 'Sentinelbodyqx9 lives elsewhere';
 const result = (text: string, stopReason: ChatResult['stopReason'] = 'end'): ChatResult => ({ text, blocks: [], stopReason, usage: { input_tokens: 10, output_tokens: 5, cache_read_tokens: 0, cache_creation_tokens: 0 },
   model: 'anthropic:claude-opus-5-5', providerId: 'anthropic' });
 
@@ -69,7 +69,7 @@ describe('buildJudgmentPrompt', () => {
     expect(user).toContain('later lines mentioning the other slug:');
     expect(user).toContain('The newer file people/alice-example-2 repeats this page.');
     expect(user).not.toContain('Line 65 of filler.');
-    expect(user).not.toContain(SECRET);
+    expect(user).not.toContain(SENTINEL_BODY);
     expect(JUDGMENT_PROMPT_VERSION).toBe(1);
   });
 
