@@ -179,6 +179,7 @@ export function getPostgresSchema(
 
 export class PostgresEngine implements BrainEngine {
   private vectorIterativeScan?: Promise<boolean>;
+  private readonly vectorScopeShare = vectorScopeShareLoader(() => this.executeRaw<PageSourceStats>(PAGE_SOURCE_STATS_SQL));
   /** Transaction clones keep chunk invalidation and replacement atomic. */
   private _chunkWritesInTransaction = false;
   readonly kind = 'postgres' as const;
@@ -1360,8 +1361,6 @@ export class PostgresEngine implements BrainEngine {
     const plan = row?.['QUERY PLAN'];
     return (Array.isArray(plan) ? plan[0] : plan) as Record<string, unknown>;
   }
-
-  private readonly vectorScopeShare = vectorScopeShareLoader(() => this.executeRaw<PageSourceStats>(PAGE_SOURCE_STATS_SQL));
 
   private async vectorIterativeScanSupported(): Promise<boolean> {
     this.vectorIterativeScan ??= this.executeRaw<{ extversion: string }>(VECTOR_EXTENSION_VERSION_SQL)
