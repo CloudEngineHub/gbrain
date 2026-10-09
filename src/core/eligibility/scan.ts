@@ -70,7 +70,7 @@ async function saveCursor(engine: Pick<BrainEngine, 'executeRaw'>, cursor: Curso
 }
 
 /**
- * Each table's max id when the write gate went live (migration v224, under
+ * Each table's max id when the write gate went live (migration v226, under
  * the detector version it records): rows above it were assessed by their writers. Only a baseline taken
  * under the current detector bounds the scan; a detector bump rescans all.
  */

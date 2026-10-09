@@ -20,6 +20,7 @@ export const WRITE_ERROR_CODES = [
   'core_budget_exceeded', 'core_mark_owner_only', 'core_remote_edit_refused', 'core_delete_owner_only',
   'timeline_rows_would_be_removed', 'purged_content', 'preparation_stalled',
   'fence_unrenderable',
+  'write_outcome_unknown',
 ] as const;
 
 export type WriteErrorCode = typeof WRITE_ERROR_CODES[number];

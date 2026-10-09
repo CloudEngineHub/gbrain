@@ -423,7 +423,7 @@ function planHashOf(input: Record<string, unknown>): string {
 function probeTargetEmpty(probe: TargetProbe): boolean { return probe.empty; }
 
 /** initSchema writes these config keys (plus the copier's deferred-index marker); any other key is user data. */
-// The trust migrations seed two bookkeeping keys on an empty brain (v223 backfill completion, v224 scan baseline).
+// The trust migrations seed two bookkeeping keys on an empty brain (v225 backfill completion, v226 scan baseline).
 const SEED_CONFIG_KEYS = new Set(['chunk_strategy', 'embedding_dimensions', 'embedding_model', 'engine', 'version', 'graduation.deferred_indexes',
   TRUST_BACKFILL_COMPLETED_KEY, WRITE_GATE_SCAN_BASELINE_KEY]);
 async function userConfigKeys(main: BrainEngine): Promise<string[]> {

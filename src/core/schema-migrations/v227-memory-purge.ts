@@ -9,8 +9,8 @@ import { MEMORY_PURGE_GUARD_SQL, MEMORY_PURGE_SCHEMA_SQL } from '../facts/purge-
 // walks to hide derived rows (derivation_inputs, needs_rederive), and the
 // guards that raise typed purged_content when purged content is written
 // again. New empty tables, so their indexes build inline on both engines.
-export const v225: Migration = {
-  version: 225,
+export const v227: Migration = {
+  version: 227,
   name: 'memory_purge',
   idempotent: true,
   sql: MEMORY_PURGE_SCHEMA_SQL + MEMORY_PURGE_GUARD_SQL,

@@ -253,6 +253,7 @@ test/postgres-driver-vendor.test.ts	vendored Postgres driver packaging	3	readFil
 test/postgres-engine.test.ts	postgres-engine / search date filtering	2	source-surface-helper
 test/postgres-engine.test.ts	postgres-engine / search path timeout isolation	7	source-surface-helper
 test/private-visibility.test.ts	shared private predicate lives once (#4352 remediation)	1	readFileSync
+test/q2-typing-package.test.ts	(file-level)	3	readFileSync
 test/redos-hardening.test.ts	#1569 --no-schema-pack + heartbeat wiring (structural)	2	readFileSync,source-surface-helper
 test/redos-hardening.test.ts	megawave vm-watchdog removal (bootstrap-verify freeze)	5	readFileSync
 test/register-client-source-normalize.test.ts	register-client route wiring (structural)	1	readFileSync
@@ -268,7 +269,7 @@ test/runtime-version.test.ts	stated Bun floor	1	readFileSync
 test/schema-bootstrap-coverage.test.ts	(file-level)	14	source-surface-helper
 test/schema-pack-unify-types-handler.test.ts	#1575 unify-types worker dry-run default	1	source-surface-helper
 test/schema-pack/suggest.test.ts	runSuggest — source-text contract (structural)	1	readFileSync
-test/scripts/build-schema-migrations.test.ts	generator diagnostics (FAIL/Why/Fix/See)	8	exec-scan
+test/scripts/build-schema-migrations.test.ts	generator diagnostics (FAIL/Why/Fix/See)	9	exec-scan
 test/scripts/build-schema-migrations.test.ts	out-of-order landing check	2	exec-scan
 test/scripts/check-function-size.test.ts	check-function-size.ts rules	11	readFileSync
 test/scripts/ci-executed-counts.test.ts	CLI	2	readFileSync

@@ -130,14 +130,19 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   files through `put_page`/`capture` or a YAML serializer and check generated
   content with `gbrain frontmatter validate --stdin --path <p>`. Walkthrough:
   [held files](docs/guides/repair.md#held-files). A hold with code
-  `invalid_fence` is a facts or takes table, not frontmatter, and clears
-  automatically on the next maintenance run. `gbrain repair fences --source <id>`
-  previews the repair and its printed apply command runs it now, with no
-  extra consent; a `manual` reason needs the edit the hold names (read the
-  page with `gbrain get --source <id> -- <slug>`, edit only that fence,
-  commit, `gbrain sync --source <id> --no-pull`). Raising spend
+  `invalid_fence` or `frontmatter_slug_conflict` is about the file's content,
+  not its YAML, and the content-repair lane clears it by itself: the next
+  maintenance run repairs what it can, `gbrain sync unblock --source <id>
+  --apply` does it now with a receipt per file, and
+  `gbrain repair content --source <id>` previews every lane kind (its printed
+  apply command runs with no extra consent). A hold the lane marks
+  `needs_human` (a manual fence edit, a recommended page merge, an exposed
+  tail on a world page) is listed in `gbrain sync status --source <id> --json`
+  with its paragraph: relay it, make or approve the edit it names, commit,
+  `gbrain sync --source <id> --no-pull`. Raising spend
   (`fences.repair.max_usd_per_day`, `fences.repair.llm true`) is the user's
-  call ([fence holds](docs/guides/write-refusals.md#invalid_fence)). A hold
+  call ([the lane](docs/guides/repair.md#content-lane),
+  [fence holds](docs/guides/write-refusals.md#invalid_fence)). A hold
   with code `preparation_stalled` (or a managed catch-up that stops
   `preparation_abandoned` / `preparation_systemic`, or a write receipt with that
   code) means the write owner stalled, not the file: no repair applies. Run
@@ -146,6 +151,17 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   `gbrain sources retry-held <id>` and the sync it prints with the same options
   (`--no-embed` stays). Runbook:
   [catch-up stuck](docs/guides/troubleshooting.md#catch-up-stuck).
+- **Keep a managed catch-up moving without a human** (a live checkout where
+  other agents commit while `gbrain sync` drains thousands of pages): a page
+  that moves under the run is held (`concurrent_write`, `worktree_dirty`), a
+  dropped connection is retried, and a relaunch resumes the frozen manifest.
+  The operator loop is `gbrain sync status --source <id> --json` (cursor,
+  `committed_last_10m`, each hold and the last error with `class` /
+  `safe_actions` / `needs_human`), then, when nothing moved and
+  `needs_human` is false, `gbrain sync unblock --source <id> --apply` and
+  the sync it prints; when `needs_human` is true, relay `next.user_message`
+  with the slug. Decision table:
+  [`docs/guides/sync-unblock-runbook.md`](./docs/guides/sync-unblock-runbook.md).
 - **Migrate / upgrade:** `gbrain upgrade` (binary self-update + schema migrations + post-upgrade prompts),
   [`docs/UPGRADING_DOWNSTREAM_AGENTS.md`](./docs/UPGRADING_DOWNSTREAM_AGENTS.md),
   [`skills/migrations/`](./skills/migrations/), `gbrain apply-migrations --yes --no-autopilot-install` (manual migration orchestration without service installation).

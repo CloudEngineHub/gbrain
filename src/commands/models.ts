@@ -44,6 +44,8 @@ import {
 } from '../core/model-config.ts';
 import { resolveExtractAtomsModelWithSource } from '../core/cycle/extract-atoms.ts';
 import { resolveFenceRepairModelWithSource } from '../core/fence-repair/model.ts';
+import { resolveContentRepairModelWithSource } from '../core/content-repair/llm.ts';
+import { resolveFactsExtractionModel } from '../core/facts/extract.ts';
 import {
   NIGHTLY_PROBE_EXTRACTOR_ROUTE,
   NIGHTLY_PROBE_READER_ROUTE,
@@ -81,7 +83,7 @@ interface PerTaskModelRoute {
    * chain visible rather than implying full resolveModel() coverage — can
    * never disagree with the resolved value.
    */
-  narrowResolver?: (engine: BrainEngine) => Promise<{ model: string; source: 'config' | 'tier_default' | 'measured' }>;
+  narrowResolver?: (engine: BrainEngine) => Promise<{ model: string; source: 'config' | 'tier_default' | 'measured'; label?: string }>;
 }
 
 const PER_TASK_KEYS: PerTaskModelRoute[] = [
@@ -109,8 +111,23 @@ const PER_TASK_KEYS: PerTaskModelRoute[] = [
     description: 'Model repair (Tier 3) of malformed facts/takes fence rows; unset: the first measured model with a key, else none (off)',
     narrowResolver: async engine => { const r = await resolveFenceRepairModelWithSource(engine); return { model: r.model ?? 'none', source: r.source }; },
   },
+  {
+    key: 'models.content_repair',
+    tier: 'deep',
+    description: 'Slug-conflict judgment of the content-repair lane (#6377); unset: models.fence_repair, else the first measured model with a key, else none (off)',
+    narrowResolver: async engine => { const r = await resolveContentRepairModelWithSource(engine); return { model: r.model ?? 'none', source: r.source === 'measured' ? 'measured' : 'config' }; },
+  },
   { key: 'models.subagent',                 tier: 'subagent',  description: '`gbrain agent run` subagent loop' },
-  { key: 'facts.extraction_model',          tier: 'reasoning', description: 'Real-time facts extraction during sync' },
+  {
+    key: 'facts.extraction_model',
+    tier: 'reasoning',
+    description: 'Real-time facts extraction during sync; unset: claude-haiku-5-5 when the reasoning tier resolves through Anthropic',
+    narrowResolver: async engine => {
+      const r = await resolveFactsExtractionModel(engine);
+      if (r.source === 'measured_default') return { model: r.model, source: 'measured' };
+      return { model: r.model, source: r.source === 'config_key' ? 'config' : 'tier_default', label: sourceLabel(r.source, { configKey: 'facts.extraction_model', tier: 'reasoning' }, 'tier.reasoning') };
+    },
+  },
   { key: 'models.eval.longmemeval',         tier: 'reasoning', description: 'LongMemEval benchmark answer-gen' },
   { key: 'models.eval.contradictions_judge', tier: 'utility',  description: 'Contradiction probe judge (v0.34 temporal-aware)' },
   { key: 'models.expansion',                tier: 'utility',   description: 'Query expansion for hybrid search' },
@@ -229,8 +246,8 @@ async function buildReport(engine: BrainEngine): Promise<ModelsReport> {
       // ONE resolver call feeds both the resolved model and the attribution,
       // so the label can never disagree with what `resolved` actually
       // reflects (previously a separate getConfig truthiness re-check).
-      const { model: resolved, source: narrowSource } = await narrowResolver(engine);
-      const source = narrowSource === 'config' ? `config: ${key}` : narrowSource === 'measured' ? 'measured default' : `tier.${tier} (caller-specific)`;
+      const { model: resolved, source: narrowSource, label } = await narrowResolver(engine);
+      const source = label ?? (narrowSource === 'config' ? `config: ${key}` : narrowSource === 'measured' ? 'measured default' : `tier.${tier} (caller-specific)`);
       const newer = narrowSource === 'config' ? newerAvailable(resolved, key) : undefined;
       per_task.push({ key, tier, resolved, source, description, ...(newer ? { newer_available: newer } : {}) });
       continue;

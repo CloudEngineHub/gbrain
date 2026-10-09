@@ -16,7 +16,7 @@ import { claimWorktree } from '../src/core/persistence/ownership.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { performManagedSync } from '../src/core/persistence/sync-run.ts';
 import { sha256 } from '../src/core/persistence/digest.ts';
-import { GIT_HOLD_OP, SYNC_IMPORT_PROVENANCE_OP, readGitSourceHolds, requestGitHoldRetry } from '../src/core/persistence/sync-holds.ts';
+import { GIT_HOLD_OP, SYNC_IMPORT_PROVENANCE_OP, gitHoldItem, readGitSourceHolds, recordContentHoldRepair, requestGitHoldRetry } from '../src/core/persistence/sync-holds.ts';
 import { printSyncResult, type SyncOpts, type SyncResult } from '../src/commands/sync.ts';
 import { gitHoldStatusLines, readGitHoldStatuses } from '../src/core/persistence/connector-status.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
@@ -156,11 +156,14 @@ test('a sliced run that has not reached a held file leaves its hold untouched; a
   const partial = await performManagedSync(engine, { sourceId: s.id, noPull: true, noEmbed: true, noExtract: true }, { maxPages: 1, maxMs: 60_000 });
   expect(partial).toMatchObject({ status: 'partial', reason: 'writer_yield', holds_pending_screen: true });
   expect(await s.holdRows()).toEqual(before);
-  // The committed fix is admitted, but newer uncommitted working-tree bytes make its publication refuse: the hold stays.
+  // The committed fix is admitted, but newer uncommitted working-tree bytes make its publication refuse. #6340: the refusal
+  // becomes a `worktree_dirty` hold of the same path (the run finishes; the frontmatter hold is replaced, never cleared).
   s.write('notes/z.md', note('Z newer uncommitted edit'));
-  const blocked = await s.sync();
-  expect(blocked.status).toBe('blocked_by_failures');
-  expect(await s.holdRows()).toEqual(before);
+  const held = await s.sync();
+  expect(held).toMatchObject({ status: 'synced', held: [{ path: 'notes/z.md', code: 'worktree_dirty' }] });
+  const code = (rows: Array<{ completed_keys: unknown }>) => rows.map(row => (row.completed_keys as Array<{ code?: string }>)[0]?.code).filter(Boolean);
+  expect(code(before)).toEqual(['invalid_frontmatter']);
+  expect(code(await s.holdRows())).toEqual(['worktree_dirty']);
 }), 180_000);
 
 test('renamed to a broken file keeps the old page, a later fix moves it with its id, and a full walk never deletes it meanwhile', () => each(async engine => {
@@ -300,7 +303,9 @@ test('a flagless sync converts a --no-embed cursor with its stored options, and 
   await t.sync();
   t.write('notes/z.md', note('Z committed')); commit(t.root, 'change z');
   t.write('notes/z.md', note('Z newer uncommitted edit'));
-  expect((await t.sync()).status).toBe('blocked_by_failures');
+  // #6340 holds this refusal when holds are on; `sync.holds=fail` leaves the blocked cursor the loop guard is about.
+  await engine.setConfig('sync.holds', 'fail');
+  try { expect((await t.sync()).status).toBe('blocked_by_failures'); } finally { await engine.executeRaw("DELETE FROM config WHERE key='sync.holds'"); }
   await engine.executeRaw("UPDATE persistence_requests SET error_code='invalid_params',error_message='Invalid YAML frontmatter: bad indentation of a mapping entry (3:1)' WHERE source_id=$1 AND state IN ('failed','conflict')", [t.id]);
   await engine.executeRaw(`UPDATE op_checkpoints SET completed_keys=jsonb_set(completed_keys,'{0,pending,converted}','true'::jsonb)
     WHERE op='managed-sync' AND completed_keys->0->>'sourceId'=$1`, [t.id]);
@@ -377,4 +382,40 @@ test('a hold an older reader wrote is re-screened by the next sync even though G
   const [hold] = await s.holds();
   expect(hold!.meta.recovery_version).toBeGreaterThan(0);
   expect(hold!.run_id).not.toBe(first.runId);
+}), 180_000);
+
+test('#6377: a slug-conflict hold carries the content-repair verdict only for the bytes it judged, keeps it across a re-screen of the same bytes, and drops it when the file changes', () => each(async engine => {
+  const s = await source(engine, { 'notes/slug.md': '---\ntitle: Slug\nslug: notes/elsewhere\n---\nBody.\n', 'notes/ok.md': note('Ok') });
+  await s.sync();
+  const [hold] = await s.holds();
+  expect(hold).toMatchObject({ code: 'frontmatter_slug_conflict' });
+  expect(gitHoldItem(hold!).fix.argv).toEqual(['gbrain', 'repair', 'content', '--source', s.id, '--only', 'notes/slug.md']);
+  expect(gitHoldItem(hold!).fix.why).toContain('The content-repair lane clears this itself on the next maintenance run');
+  const state = { action: 'merge_into' as const, reason: 'merge_recommended', canonical: 'notes/elsewhere', named: 'notes/elsewhere', model: 'anthropic:claude-opus-5-5', at: new Date().toISOString(), next_attempt_after: null };
+  // Conditional on the judged bytes and the code: other bytes or another path record nothing.
+  expect(await recordContentHoldRepair(engine, { sourceId: s.id, incarnation: hold!.incarnation, path: 'notes/slug.md', upstreamVersion: sha256('other bytes'), state })).toBe(false);
+  expect(await recordContentHoldRepair(engine, { sourceId: s.id, incarnation: hold!.incarnation, path: 'notes/ok.md', upstreamVersion: null, state })).toBe(false);
+  expect(await recordContentHoldRepair(engine, { sourceId: s.id, incarnation: hold!.incarnation, path: 'notes/slug.md', upstreamVersion: hold!.upstream_version, state })).toBe(true);
+  const judged = (await s.holds())[0]!;
+  expect(judged.meta.content_repair).toEqual(state);
+  expect(judged.observed_at).toBe(hold!.observed_at);
+  const item = gitHoldItem(judged);
+  expect(item).toMatchObject({ content_repair: state, docs: 'docs/guides/write-refusals.md#merge_recommended' });
+  expect(item.fix).toMatchObject({ actor: 'user', argv: ['gbrain', 'repair', 'content', '--source', s.id, '--only', 'notes/slug.md'] });
+  expect(item.fix.user_message).toContain('`notes/elsewhere`');
+  expect(item.fix.user_message).toContain('gbrain does not merge pages by itself yet');
+  // A re-screen of the same bytes (slug conflicts always re-screen) keeps the verdict, with or without a retry request.
+  s.write('notes/ok.md', note('Ok 2')); commit(s.root, 'touch ok');
+  await s.sync();
+  expect((await s.holds())[0]!.meta.content_repair).toEqual(state);
+  await requestGitHoldRetry(engine, s.id, hold!.incarnation, ['notes/slug.md']);
+  await s.sync();
+  expect((await s.holds())[0]!.meta).toMatchObject({ content_repair: state, attempts: 3 });
+  // Changed bytes under the same code drop it: the verdict was about other content.
+  s.write('notes/slug.md', '---\ntitle: Slug\nslug: notes/elsewhere\n---\nBody, edited.\n'); commit(s.root, 'edit slug file');
+  await s.sync();
+  const changed = (await s.holds())[0]!;
+  expect(changed.code).toBe('frontmatter_slug_conflict');
+  expect(changed.meta.content_repair).toBeUndefined();
+  expect(gitHoldItem(changed).docs).toBe('docs/guides/write-refusals.md#frontmatter_slug_conflict');
 }), 180_000);

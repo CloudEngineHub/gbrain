@@ -19,12 +19,12 @@
 
 /**
  * Bumped whenever the pattern table changes meaning; stored on every receipt
- * and hold, and in the legacy-scan baseline v224 records (a brain created
+ * and hold, and in the legacy-scan baseline v226 records (a brain created
  * under this detector owes no scan of rows its writers already gated).
  */
 export const WRITE_GATE_DETECTOR_VERSION = 2;
 
-/** Config key v224 seeds: the detector version and per-table max ids when the gate went live (eligibility/scan.ts). */
+/** Config key v226 seeds: the detector version and per-table max ids when the gate went live (eligibility/scan.ts). */
 export const WRITE_GATE_SCAN_BASELINE_KEY = 'write_gate.scan_baseline';
 
 export const WRITE_GATE_SCHEMA_SQL = `

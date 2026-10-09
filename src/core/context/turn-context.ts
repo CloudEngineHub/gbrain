@@ -40,6 +40,7 @@ import { getBrainHotMemoryMeta } from '../facts/meta-hook.ts';
 import { collapseHotFacts } from '../facts/capture-dedup.ts';
 import type { ArmStatus, RawFactRef } from './delta-cursor.ts';
 import { buildEntityCard, type EntityCard, type EntityOpenThread } from '../verbs/entity-card.ts';
+import { isNewerMentionsEnabled, readNewerMentions, renderNewerMentionRow, NEWER_MENTIONS_HEADER, NEWER_MENTIONS_PACK_CHARS, type NewerMentions } from '../mentions/newer-mentions.ts';
 import { estimateTokens } from '../search/token-budget.ts';
 import type { DecideSlotMeta } from '../search/decide-stage.ts';
 import { admitsTrust, type TrustTier } from '../trust/tier.ts';
@@ -568,7 +569,7 @@ async function assemblePack(
     .filter((e) => typeof e === 'string' && e.trim())
     .slice(0, maxEntities);
 
-  const acc: { cards: EntityCard[]; facts: TurnContextFact[]; withheld: number } = { cards: [], facts: [], withheld: 0 };
+  const acc: { cards: EntityCard[]; facts: TurnContextFact[]; withheld: number; mentions: Map<string, NewerMentions> } = { cards: [], facts: [], withheld: 0, mentions: new Map() };
   // #5575 (CEO-20): context_pack is a proactive surface.
   const policy: ReadEligibility = opts.eligibility ?? await proactiveEligibility({ engine }, 'context_pack').catch(() => ({ suppressFlagged: true }));
   // Cooperative deadline (perf review): raceDeadline abandons but cannot stop
@@ -597,6 +598,19 @@ async function assemblePack(
     const hot = await fetchHotFacts(engine, opts, remote, policy.floor);
     acc.facts = hot.facts;
     acc.withheld += hot.withheld;
+    // Newer mentions read last: a deadline drops them before a card or a fact.
+    if (!acc.cards.length || !(await isNewerMentionsEnabled(engine))) return;
+    const { resolveExcludePrivatePages } = await import('../search/private-visibility.ts');
+    const excludePrivate = await resolveExcludePrivatePages(engine, remote ? undefined : false);
+    let left = NEWER_MENTIONS_PACK_CHARS;
+    for (const card of acc.cards) {
+      if (left <= 0 || (deadlineAt !== null && Date.now() >= deadlineAt)) return;
+      const m = await readNewerMentions(engine, opts.sourceId, card.entity.slug,
+        { excludePrivate, keepVisibility: remote ? ['world'] : ['private', 'world'], charBudget: left });
+      if (!m) continue;
+      acc.mentions.set(card.entity.slug, m);
+      left -= renderNewerMentionLines({ ...card, newer_mentions: m }).join('\n').length + 1;
+    }
   })();
 
   const degradedReason = await raceDeadline(build, opts.deadlineMs);
@@ -604,7 +618,8 @@ async function assemblePack(
   // still running and keeps MUTATING acc — a live array reference in the
   // response could diverge from the rendered text after the first await
   // downstream. Copies freeze the delivered view.
-  const cards = [...acc.cards];
+  const mentions = new Map(acc.mentions);
+  const cards = acc.cards.map((c) => (mentions.has(c.entity.slug) ? { ...c, newer_mentions: mentions.get(c.entity.slug) } : c));
   const facts = [...acc.facts];
   // `since` filter (adversarial review: was documented but dead) — open-thread
   // events are cut to those after the cursor, matching the verb contract.
@@ -852,6 +867,17 @@ export const renderFactLine = (f: TurnContextFact): string =>
   `- ${f.attributed_to === 'assistant' ? '(assistant said) ' : ''}${labeled(f, f.fact)}${f.entity_slug ? ` [${f.entity_slug}]` : ''} (${f.confidence.toFixed(2)})`;
 export const renderPageLine = (p: DeltaPage): string => `- **${labeled(p, p.title)}** → \`${p.slug}\` (${p.updated_at})`;
 
+/** One card's newer-mentions block: a line naming the entity and its page date, then one line per page. [] when there are none. */
+export const renderNewerMentionLines = (c: EntityCard): string[] => {
+  const m = c.newer_mentions;
+  if (!m?.rows.length) return [];
+  return [
+    `- **${c.entity.title}** (\`${c.entity.slug}\`, page dated ${m.since.slice(0, 10)}):`,
+    ...m.rows.map(renderNewerMentionRow),
+    ...(m.more ? [`  - more pages dated after ${m.since.slice(0, 10)} mention it: entity("${c.entity.slug}") lists them all`] : []),
+  ];
+};
+
 const PACK_HEADERS = ['## Standing entities', '## Open threads', '## Hot memory (recent facts)'] as const;
 const deltaHeaders = (since?: string): readonly [string, string, string] => {
   const s = since ? ` since ${since}` : '';
@@ -888,6 +914,8 @@ export function renderPack(
   if (cards.length) lines.push('', PACK_HEADERS[0], ...cards.map(renderCardLine));
   if (openThreads.length) lines.push('', PACK_HEADERS[1], ...openThreads.map(renderThreadLine));
   if (facts.length) lines.push('', PACK_HEADERS[2], ...facts.map(renderFactLine));
+  const mentionLines = cards.flatMap(renderNewerMentionLines);
+  if (mentionLines.length) lines.push('', NEWER_MENTIONS_HEADER, ...mentionLines);
   return lines.join('\n');
 }
 

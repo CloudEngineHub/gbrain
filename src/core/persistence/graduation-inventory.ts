@@ -108,6 +108,7 @@ export const GRADUATION_INVENTORY: Inventory = {
     carry('page_mention_state', 'operational', 'Entity mention index: per-page mention watermark; without it every page is due for a rescan.'),
     carry('page_projection_jobs', 'operational', 'Pending page projection work (derived side table, verified equal).'),
     carry('page_purges', 'user_data', 'Text-free page purge tombstones (#5575); dropping them would let purged pages re-import.'),
+    carry('page_retrievals', 'operational', 'Retrieval telemetry: when a user-facing read last surfaced each page (stale-page bias, volunteer usage stats).'),
     carry('page_versions', 'user_data', 'Page revision history with attribution.'),
     carry('page_write_guards', 'user_data', 'Page write guards per source incarnation and slug.'),
     carry('pages', 'user_data', 'Pages with ids, knowledge_revision, revision attribution and timestamps.'),
