@@ -10,6 +10,21 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.136.0] - 2026-10-09
+
+**CI headroom: the PostgreSQL unit arms run as three balanced shards, the graduation custody suites run 30–42% faster, and the Tier 2 agent-journey file is split so no serial file sits near its 300-second cap.**
+
+Nothing changes for users. This release keeps the CI gate from failing on slow runners. The PostgreSQL unit-arm shard 2 overran its 20-minute step twice in one day, and the Tier 2 journey file took up to 235 of its 300 seconds.
+
+### Itemized changes
+
+### For contributors
+
+- **Faster graduation custody tests.** Every `test/graduation-rollback.test.ts` and `test/graduation-state.test.ts` case built its source brain from scratch: a PGLite initdb plus the full schema replay, about 2 s per harness and dozens of harnesses per file. `test/helpers/graduation-harness.ts` now builds one seeded source datastore per test process and copies it for each harness. It opens the copy once at its own path, so the owner sidecars are written there, and draws the per-brain identity values (brain id, shared-skill secret) fresh. Same machine, Postgres arm included, N=3 medians: rollback 141 s → 98 s, state 227 s → 131 s. No assertion changed.
+- **Three PostgreSQL arm shards.** `unit-postgres-arms` runs three shards instead of two, balanced on weights re-mined from 76 recent job logs. Before, 35 of the 106 listed files had no weight. Replayed over 36 historical CI runs, each shard's p95 test time is at most 10.0 minutes, inside the 20-minute step even on a runner twice as slow.
+- **Planner-stats E2E flake.** `test/e2e/planner-stats-postgres.test.ts` waited for `n_mod_since_analyze` to reach 2,000 after a 2,000-row insert. An autoanalyze landing first reset the counter to 0, and the test then timed out. The test now holds autovacuum off `facts` while it runs and resets it afterwards. Forced probe with aggressive autovacuum (1 s naptime): 5 failures in 56 runs before, 0 in 40 after.
+- **Tier 2 split.** The read-op `--json` sweep (row 1) moved to `test/agent-journey-tier2-json.serial.test.ts`. Its shared fixtures now live in `test/helpers/agent-journey-tier2.ts`. Locally the original file took 77 s; the two files now take 43 s and 34 s.
+
 ## [0.60.135.0] - 2026-10-09
 
 **Scoped vector search that reaches the candidate pool finds its true nearest pages, and a freshly imported brain keeps its vector index plan. Unscoped search returns the same results.**
