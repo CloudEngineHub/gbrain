@@ -35,7 +35,7 @@ import { embedMultimodal, currentEmbeddingSignature } from './embedding.ts';
 import { embedBatchKeepingUsable, embedBatchWithBackoff } from './embed-retry.ts';
 import { isEmbeddingZeroNormError, type EmbeddingZeroNormError } from './ai/embedding-guard.ts';
 import { slugifyPath, slugifyCodePath, isCodeFilePath, hasMalformedPathSegment } from './sync.ts';
-import type { ChunkInput, Page, PageInput, PageType } from './types.ts';
+import type { Chunk, ChunkInput, Page, PageInput, PageType } from './types.ts';
 import type { PageSnapshot } from './page-state/types.ts';
 import { pipelined } from './page-state/transactions.ts';
 import { addPageTags } from './page-state/tags.ts';
@@ -759,26 +759,45 @@ export async function importFromContent(
   // recorded before provenance existed, when the input is the raw chunk text
   // under the same model. The old index must be sealed and neither body may
   // hold protected fences, so no reused vector can carry a private sibling.
-  const reused = new Set<number>();
-  if (existing && !existing.deleted_at && !opts.noEmbed && !opts.forceRechunk && !opts.prepare && !opts.onPostCommitEmbedding && chunks.length > 0
-    && !hasProtectedBody(`${existing.compiled_truth}\n${existing.timeline ?? ''}`) && !hasProtectedBody(`${parsed.compiled_truth}\n${parsed.timeline ?? ''}`)) {
-    const target = await embeddingWriteTarget(engine);
-    const provenance = embeddingInputContext(target, parsed.title, corpusGeneration, chunks);
+  // A prepared (persistence) import defers embedding to its effect worker, so
+  // it reuses inside its publication transaction, under the page guard, from
+  // the chunks it is about to replace; only the chunks left without a vector
+  // reach the provider.
+  const reusable = !!existing && !existing.deleted_at && !opts.forceRechunk && !opts.onPostCommitEmbedding && chunks.length > 0
+    && !(opts.prepare && modeRequiresSynopsis(effectiveCRMode)) && !hasProtectedBody(`${existing.compiled_truth}\n${existing.timeline ?? ''}`) && !hasProtectedBody(`${parsed.compiled_truth}\n${parsed.timeline ?? ''}`);
+  const reuseStoredVectors = async (exec: BrainEngine, into: ChunkInput[]): Promise<Map<number, number | null>> => {
+    const reused = new Map<number, number | null>();
+    const target = await embeddingWriteTarget(exec);
+    const provenance = embeddingInputContext(target, parsed.title, corpusGeneration, into);
     const tier = effectiveCRMode === 'title' ? 'title' : 'none';
-    const recorded = new Map((await engine.executeRaw<{ chunk_index: number; embedding_input_hash: string | null }>(
-      `SELECT c.chunk_index, c.embedding_input_hash FROM content_chunks c JOIN pages p ON p.id = c.page_id
-        WHERE p.source_id = $1 AND p.slug = $2`, [sourceId ?? 'default', slug])).map(row => [Number(row.chunk_index), row.embedding_input_hash]));
+    const rows = await exec.executeRaw<{ chunk_index: number; embedding_input_hash: string | null; contextual_retrieval_mode: string | null; text_only: boolean }>(
+      `SELECT c.chunk_index, c.embedding_input_hash, p.contextual_retrieval_mode,
+          c.embedding_image IS NULL AND c.embedding_multimodal IS NULL AND c.embedded_text_hash = md5(c.chunk_text) AS text_only
+        FROM content_chunks c JOIN pages p ON p.id = c.page_id
+        WHERE p.source_id = $1 AND p.slug = $2`, [sourceId ?? 'default', slug]);
+    if (rows.length === 0) return reused;
+    const recorded = new Map(rows.map(row => [Number(row.chunk_index), row.embedding_input_hash]));
+    const textOnly = new Set(rows.filter(row => row.text_only).map(row => Number(row.chunk_index)));
     // Reuse is keyed on chunk source + text, so a stored chunk's current-input
     // hash is the hash its matching new chunk would record.
-    const stored = (await engine.getChunks(slug, { sourceId: sourceId ?? 'default', includeEmbedding: true, requireSafeChunks: true }))
-      .filter(chunk => canReuseMarkdownVector(recorded.get(chunk.chunk_index), existing.contextual_retrieval_mode, tier, provenance, chunk));
-    for (const [i, matched] of planEmbeddingReuse(stored, chunks, c => `${c.chunk_source}\0${c.chunk_text}`).reuse) {
-      chunks[i].embedding = matched.embedding as Float32Array;
-      chunks[i].token_count = matched.token_count ?? undefined;
-      if (matched.model) chunks[i].model = matched.model;
-      reused.add(i);
+    const stored = (await exec.getChunks(slug, { sourceId: sourceId ?? 'default', includeEmbedding: true, requireSafeChunks: true }))
+      .filter(chunk => canReuseMarkdownVector(recorded.get(chunk.chunk_index), rows[0]!.contextual_retrieval_mode, tier, provenance, chunk));
+    const identity = (chunk: ChunkInput | Chunk) => JSON.stringify([chunk.chunk_index, chunk.chunk_text, chunk.chunk_source,
+      chunk.language ?? null, chunk.symbol_name ?? null, chunk.symbol_type ?? null, chunk.start_line ?? null, chunk.end_line ?? null,
+      chunk.parent_symbol_path ?? null, chunk.doc_comment ?? null, chunk.symbol_name_qualified ?? null, chunk.modality ?? 'text']);
+    for (const [i, matched] of planEmbeddingReuse(stored, into, c => `${c.chunk_source}\0${c.chunk_text}`).reuse) {
+      into[i].embedding = matched.embedding as Float32Array;
+      into[i].token_count = matched.token_count ?? undefined;
+      if (matched.model) into[i].model = matched.model;
+      // The stored row already holds exactly what this chunk would insert (same
+      // index, identity, vector, recorded input and text hash, no image or
+      // multimodal vector the insert would drop), so it can stay in place.
+      const row = matched as Chunk;
+      reused.set(i, recorded.get(row.chunk_index) != null && textOnly.has(row.chunk_index) && identity(row) === identity(into[i]) ? row.id : null);
     }
-  }
+    return reused;
+  };
+  const reused = reusable && !opts.noEmbed && !opts.prepare ? await reuseStoredVectors(engine, chunks) : new Map<number, number | null>();
 
   let embeddingPartial: EmbeddingZeroNormError | undefined;
   const embedChunks = async () => {
@@ -852,6 +871,11 @@ export async function importFromContent(
     });
 
     if (existing && !preimage) await tx.createVersion(slug, txOpts); // reads the page itself, so before the page write
+    // A prepared import keeps each stored row that is identical to its new chunk
+    // and writes only the rest, so an edit rewrites only the chunks it changed.
+    const fresh = reusable && opts.prepare ? chunks.map(chunk => ({ ...chunk })) : chunks;
+    const kept = new Map([...(fresh !== chunks ? await reuseStoredVectors(tx, fresh) : [])].filter(([, id]) => id !== null));
+    const keptIds = [...kept.values()];
     let written: Page | undefined;
     await pipelined(tx, [
       () => assertPreparedFactWithdrawals(tx, txOpts.sourceId, parsed.compiled_truth, parsed.timeline || '', slug),
@@ -888,7 +912,8 @@ export async function importFromContent(
       },
       // Replace every derived row atomically. Only vectors the A13 reuse gate above admitted carry over; a new
       // seal otherwise inherits nothing from an older index, whose contextual vector may have included a private sibling.
-      () => tx.deleteChunks(slug, txOpts),
+      () => keptIds.length ? tx.executeRaw(`DELETE FROM content_chunks WHERE page_id = (SELECT id FROM pages WHERE slug = $1 AND source_id = $2)
+        AND NOT (id = ANY($3::int[]))`, [slug, txOpts.sourceId, keptIds]) : tx.deleteChunks(slug, txOpts),
       // Alias projection and readback share the page commit. A later writer can
       // no longer turn a successful import into a postcommit verification error.
       () => writePageAliases(tx, slug, sourceId ?? 'default', parsed, opts.activePack, mentionPolicy),
@@ -909,9 +934,9 @@ export async function importFromContent(
       },
       async () => {
         if (chunks.length > 0) {
-          const embeddingColumn = await stampEmbeddingInputs(tx, chunks, null,
+          const embeddingColumn = await stampEmbeddingInputs(tx, fresh, null,
             { title: parsed.title, tier: effectiveCRMode === 'title' ? 'title' : 'none', corpusGeneration });
-          await tx.upsertChunks(slug, chunks, { ...txOpts, ...(embeddingColumn ? { embeddingColumn } : {}), sealChunkerVersion: MARKDOWN_CHUNKER_VERSION,
+          await tx.upsertChunks(slug, kept.size ? fresh.filter((_, i) => !kept.has(i)) : fresh, { ...txOpts, ...(embeddingColumn ? { embeddingColumn } : {}), sealChunkerVersion: MARKDOWN_CHUNKER_VERSION,
             ...(pageId !== undefined ? { pageId: Number(pageId) } : {}) });
           // v0.41.31: stamp embedding provenance when this import actually
           // embedded (not --no-embed), so a later model/dims swap is detectable
