@@ -1,5 +1,5 @@
 import type { BrainEngine } from '../engine.ts';
-import { beginFullAnalyze, plannerAutoAnalyzeEnabled } from '../planner-stats.ts';
+import { beginFullAnalyze, maybeRefreshPlannerStats, plannerAutoAnalyzeEnabled } from '../planner-stats.ts';
 
 export const PROJECTION_STATISTICS_NAME = 'pages_text_projection_current_stats';
 
@@ -107,8 +107,41 @@ export async function withChunkStatisticsRefresh<T>(engine: BrainEngine, changed
   return out;
 }
 
-export async function refreshProjectionStatistics(engine: BrainEngine): Promise<boolean> {
+/**
+ * Whether a write pass that changed `changedPages` pages can leave the planner statistics alone: pages were sampled
+ * with rows, the statistics this refresh collects exist, and the pass changed fewer than 50 + 10% of the sampled
+ * pages (autovacuum's analyze threshold, as the projection-recovery debt in page-state/projections.ts). Such a pass
+ * barely moves them, and the refresh cost ~650 ms per one-page sync at 50k pages on Postgres and a full ANALYZE of
+ * every table on PGLite.
+ */
+async function statisticsStillCurrent(engine: BrainEngine, changedPages: number): Promise<boolean> {
+  if (!Number.isFinite(changedPages)) return false;
+  // PGLite has no autovacuum, and its full ANALYZE is what covers the tables outside the planner-stats deltas: a brain
+  // under 500 pages (where it is cheap), or a table holding rows it never sampled or grown more than 10% (+8 pages)
+  // past the size it last sampled, refreshes.
+  const [state] = await engine.executeRaw<{ reltuples: number; columns: boolean }>(
+    `SELECT c.reltuples::float8 AS reltuples,
+            CASE WHEN $1::text = 'postgres' THEN (SELECT count(*) FROM pg_stats s WHERE s.schemaname = current_schema()
+              AND ((s.tablename = 'pages' AND s.attname = 'deleted_at') OR (s.tablename = 'content_chunks' AND s.attname = 'model'))) = 2
+            ELSE NOT EXISTS (SELECT 1 FROM pg_class t WHERE t.relnamespace = c.relnamespace AND t.relkind = 'r' AND pg_relation_size(t.oid) > 0
+              AND (t.reltuples < 0 OR pg_relation_size(t.oid) / current_setting('block_size')::int > t.relpages * 1.1 + 8)) END AS columns
+       FROM pg_class c WHERE c.oid = 'pages'::regclass`, [engine.kind]);
+  const rows = Number(state?.reltuples ?? -1);
+  if (!state?.columns || rows <= (engine.kind === 'pglite' ? 500 : 0) || changedPages >= 50 + 0.1 * rows) return false;
+  return verifyProjectionStatistics(engine).then(() => true, () => false);
+}
+
+/**
+ * Refreshes the planner statistics after a write pass that changed `changedPages` pages (omitted: always). A pass
+ * `statisticsStillCurrent` vouches for skips the ANALYZE; PGLite then analyzes only the hot tables its row deltas
+ * mark stale.
+ */
+export async function refreshProjectionStatistics(engine: BrainEngine, changedPages = Infinity): Promise<boolean> {
   try {
+    if (await statisticsStillCurrent(engine, changedPages)) {
+      await maybeRefreshPlannerStats(engine, 'import', { throttle: false });
+      return true;
+    }
     const [role] = await engine.executeRaw<{ can_analyze: boolean }>(
       `SELECT pg_has_role(current_user, p.relowner, 'USAGE') OR r.rolsuper AS can_analyze
        FROM pg_class p CROSS JOIN pg_roles r
