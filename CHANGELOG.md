@@ -10,6 +10,41 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.132.0] - 2026-10-09
+
+**Scoped vector search that reaches the candidate pool finds its true nearest pages, and a freshly imported brain keeps its vector index plan. Unscoped search returns the same results.**
+
+A vector search under a visibility scope, a type or date filter, or a source too large for the exact scope scan ends in the bounded candidate pool. Its first attempt visited at most 2,000 index entries and was accepted as soon as the eligible chunks it found covered the requested pages. Under a 10% scope that was about 200 chunks, which was enough to be accepted but too few to hold the true neighbours. Every pooled attempt now visits up to 20,000, pgvector's own default. Separately, import, sync, reindex and embed drains refreshed only two page columns' planner statistics, so on a freshly loaded large brain the vector statement sorted every eligible chunk instead of walking the HNSW index until autovacuum ran. They now analyze `content_chunks(model, modality, page_id)` and the page columns search filters read.
+
+### What you'd see
+
+16 vCPU host, Postgres 16 + pgvector 0.8.7, 1,024-dim vectors, 100 queries, `limit 50`, recall of result pages against the exact statement, measured on top of 0.60.131.0's exact scope scan:
+
+| corpus and scope | recall@50 before | after | p50 cost |
+|---|---|---|---|
+| 1M voyage-4 Wikipedia chunks, random 10% visibility scope | 0.767 | 0.969 | +25 ms |
+| same, topic-coherent 50% source | 0.870 | 0.954 | none |
+| same, topic-coherent 10% source (104,000 chunks) | 0.655 | 0.758 | +36 ms |
+| 1M synthetic chunks, random 10% visibility scope | 0.615 | 0.984 | +18 ms |
+| 1M synthetic chunks, 10% source + type filter | 0.601 | 0.979 | +18 ms |
+| 352k synthetic chunks, 30% source | 0.860 | 0.985 | +14 ms |
+| unscoped, and sources the exact scope scan covers | unchanged | unchanged | none |
+
+On a freshly imported 1M to 2M chunk brain, scoped searches took 0.5 to 8 s, and up to half of the broad ones fell back to keyword only. After the import's own refresh they plan on the HNSW index at 8 to 75 ms p50 with no incomplete results.
+
+### What to watch for
+
+- Searches that reach the pool visit more index entries: about 15 to 35 ms more p50 on 1M to 2M chunks. A source of 4% to 30% of pages that is too large for the exact scan still answers from the share-scaled walk, at recall@50 about 0.82 for a 10% source of 1M chunks; this release does not change that path.
+- An embed drain or import now ends with an ANALYZE of a few columns, bounded by a 30 s statement timeout and a 2 s lock timeout. When the lock is held (for example by an index build), the refresh is skipped with a warning that names the command to run.
+
+### Itemized changes
+
+- **Pooled scan budget (`src/core/search/vector-pool.ts`).** `POOL_MAX_SCAN_TUPLES` (20,000) for every pooled and exact-fallback attempt. The index walk and the scope scan keep their window-sized budget.
+- **Planner statistics (`src/core/search/projection-statistics.ts`, `src/commands/embed.ts`).** On Postgres, `refreshProjectionStatistics` analyzes `pages(text_projection_revision, knowledge_revision, deleted_at, source_id, type, slug)`, then `content_chunks(model, modality, page_id)` behind a savepoint. `refreshChunkStatistics` runs the chunk step once at the end of an embed drain that embedded something.
+- **Bench (`scripts/bench/hnsw-iterative-scan.ts`).** Synthetic-latent corpora (`--corpus latent`), prepared real-text corpora embedded with voyage-4 (`--corpus dir`, `scripts/bench/hnsw-real-corpus-prep.py`), `ef_search` and `max_scan_tuples` sweeps, share buckets (`--source-shares`), statistics states with EXPLAIN capture, and an index build grid. The method and every table are in `docs/eval/hnsw-scale-bench.md`.
+- **Docs.** `docs/ENGINES.md` sizes `maintenance_work_mem` for the deferred ANN build. It records `halfvec` (a third of the index size, same recall) and `ef_construction` 128 (+0.02 to 0.03 unscoped recall@10) as measured candidates, not shipped.
+- **CI.** Nightly shard-weight refresh (`scripts/{test,serial,e2e}-weights.json`).
+
 ## [0.60.131.0] - 2026-10-09
 
 **Vector search scoped to one source now finds that source's true nearest chunks, and a remote reader's scoped search no longer runs for seconds. Unscoped search runs the same statement as before. Rescoring fetches embeddings about twice as fast.**

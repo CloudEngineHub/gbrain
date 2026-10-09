@@ -20,12 +20,12 @@ statistics, the pooled statement sorted every eligible chunk instead of walking 
 chunks that ran past the 8 s budget on 44% to 100% of 50%-scoped searches. In the post-import statistics
 state, 1M and 2M chunks now plan on HNSW with no incomplete results.
 
-**One gap remains: topic-coherent selective scopes.** Real vectors with a scope that is both selective
-and topically coherent (a 10% source made of whole topic clusters) still miss. Fix 1 lifts recall@10
-from 0.63 to 0.84 and recall@50 from 0.64 to 0.78, but most queries come from other topics. For those,
-the nearest in-scope chunks sit outside the region an HNSW scan reaches, and 50,000 or 100,000 tuples
-change nothing. An exact pass gets 0.96 but costs 1.0 to 1.6 s per search, so it is proposed below,
-not shipped.
+**One gap remains: large topic-coherent scopes.** Take a source that is a tenth of the brain and made
+of whole topic clusters, here 104,000 real chunks. Most queries come from other topics, so the nearest
+in-scope chunks sit outside the region an HNSW scan reaches. On top of v0.60.131.0's exact scope scan,
+which covers sources up to 60,000 chunks, this PR lifts that source's recall@50 from 0.66 to 0.76. Raising
+the scan cap to 150,000 chunks makes it exact (0.985) at about 770 ms p50; that is proposed below, not
+shipped.
 
 Index build options don't change any of this, so the defaults stay (m 16, ef_construction 64, `vector`).
 `ef_construction` 128 adds about 0.02 to 0.03 unfiltered recall@10 for about 25% more build time.
@@ -36,6 +36,72 @@ The numbers come from three sources:
   from 250k to 2M chunks;
 - a 1M-chunk English Wikipedia corpus embedded with voyage-4, which cost $13.07 by the API's own token counts;
 - 100 queries per cell, on Ubicloud standard-16 VMs.
+
+## On top of the exact scope scan (v0.60.131.0)
+
+v0.60.131.0 scans a source scope exactly when it holds under 30% of pages and at most about 60,000 chunks.
+For a larger source it widens the index walk to the scope's share. So the pooled budget matters only where
+search still reaches the pool:
+- visibility-only scopes;
+- type or date filters, which skip the walk;
+- sources too large for the exact scan whose walk comes back short;
+- scopes with no chunk statistics.
+
+Both arms were measured with v0.60.131.0, with and without the 20,000-tuple pooled budget, at shipped
+`ef_search` and VACUUM ANALYZEd:
+- **Synthetic sweep:** each arm loads the corpus itself, so rows carry about ±0.02 build variance (unscoped
+  recall@10 moved 0.04 at 1M between the two loads with identical code paths).
+- **Real corpus:** both arms run on one database, so they share a build.
+
+| corpus | scope | #6378 recall@10 / @50 | + pooled budget recall@10 / @50 | #6378 p50 @50 ms | + budget p50 @50 ms |
+|---|---|---|---|---|---|
+| 50k pages (352k chunks) | visibility 10% (random) | 0.877 / 0.736 | 0.991 / 0.993 | 45.8 | 51.9 |
+| 50k pages (352k chunks) | visibility 50% (random) | 0.978 / 0.917 | 0.993 / 0.962 | 40.5 | 41.1 |
+| 50k pages (352k chunks) | source 10% | 0.987 / 0.974 | 0.991 / 0.991 | 100.9 | 88.5 |
+| 50k pages (352k chunks) | source 30% | 0.987 / 0.860 | 0.992 / 0.985 | 31.2 | 44.9 |
+| 50k pages (352k chunks) | source 55% | 0.987 / 0.950 | 0.991 / 0.994 | 21 | 34.1 |
+| 1M chunks | visibility 10% (random) | 0.888 / 0.615 | 0.988 / 0.984 | 33.6 | 51.6 |
+| 1M chunks | visibility 50% (random) | 0.939 / 0.956 | 0.989 / 0.974 | 32.1 | 35.7 |
+| 1M chunks | source 1.1% | 1.000 / 1.000 | 1.000 / 1.000 | 67.6 | 68.9 |
+| 1M chunks | source 4% | 0.912 / 0.969 | 0.910 / 0.968 | 159.8 | 136.1 |
+| 1M chunks | source 4% + type | 1.000 / 1.000 | 1.000 / 1.000 | 226.2 | 224.3 |
+| 1M chunks | source 10% | 0.974 / 0.834 | 0.972 / 0.818 | 69.6 | 70.7 |
+| 1M chunks | source 10% + type | 0.878 / 0.601 | 0.979 / 0.979 | 21.8 | 40.2 |
+| 1M chunks | source 30% | 0.981 / 0.845 | 0.983 / 0.942 | 29.3 | 37.6 |
+| 1M chunks | source 55% | 0.971 / 0.978 | 0.973 / 0.988 | 30.7 | 31.3 |
+| 1M chunks | unscoped | 0.938 / 0.990 | 0.977 / 0.991 | 16.3 | 15.8 |
+
+The budget adds recall wherever the pool runs: random visibility scopes (recall@50 0.62–0.74 to 0.98–0.99),
+a source scope plus a type filter above the exact scan's cap (0.60 to 0.98), and 30% to 55% sources
+(0.85–0.95 to 0.94–0.99). It costs 1 to 18 ms p50. Where the exact scan or a full walk answers, the pool
+never runs and the two arms agree within build variance, as with small sources and the 10% source of 1M
+without a type filter.
+
+That last row is a finding for the walk, not for this change. A 10% source of 1M chunks (100,000 chunks)
+is above the scan cap, so it gets the share-scaled walk. The walk fills its window, but with a relaxed
+scan of moderate quality, and recall@50 stays at 0.82–0.83 on both arms. The lever is the walk's own
+budget or `ef_search`, or the scan cap below.
+
+1M voyage-4 Wikipedia chunks, one database:
+
+| scope (1M voyage-4 chunks) | #6378 recall@10 / @50 (p50 @50) | + pooled budget | + budget, scope-scan cap 150,000 |
+|---|---|---|---|
+| unscoped | 0.970 / 0.982 (29.1 ms) | 0.970 / 0.982 (32.5 ms) | 0.970 / 0.982 (35.3 ms) |
+| topic-coherent 10% source (104k chunks) | 0.658 / 0.655 (152.9 ms) | 0.836 / 0.758 (188.6 ms) | 0.993 / 0.985 (767.8 ms) |
+| same + type filter | 0.633 / 0.614 (39.7 ms) | 0.832 / 0.764 (79.5 ms) | 1.000 / 1.000 (832.3 ms) |
+| topic-coherent 50% source | 0.874 / 0.870 (52.8 ms) | 0.961 / 0.954 (48.7 ms) | 0.961 / 0.954 (56.8 ms) |
+| random 10% visibility | 0.910 / 0.767 (64 ms) | 0.989 / 0.969 (88.7 ms) | 0.989 / 0.969 (93.7 ms) |
+| random 50% visibility | 0.956 / 0.945 (47.7 ms) | 0.965 / 0.972 (47 ms) | 0.965 / 0.972 (47.6 ms) |
+
+On real vectors the budget lifts every scoped bucket the pool reaches. The topic-coherent 10% source has
+104,000 chunks, past the 60,000-chunk scan cap. Raising `SCOPE_SCAN_MAX_CHUNKS` to 150,000 makes that
+source exact (recall@50 0.985) at about 770 ms p50 on this 16-vCPU host. That is the remaining gap's price;
+it is proposed in "Recommendations", not shipped.
+
+In the post-import statistics state, v0.60.131.0 without this PR's statistics refresh sorts every
+eligible chunk. At 1M chunks those searches take 0.5 to 8 s, and 42% to 50% of 50% to 55% scopes come
+back incomplete. Their recall is near 1.0 because the sort is exact. With the refresh they plan on HNSW at
+8 to 70 ms p50, with the recall of the tables above.
 
 ## Decision rule
 
@@ -151,14 +217,12 @@ unfiltered, k=50; "Statistics states and EXPLAIN" below). In the fully stats-les
 
 ## Recommendations (proposed, not shipped)
 
-1. **Topic-coherent selective scopes need an exact pass.** When a source scope is small and topically
-   coherent, the HNSW scan returns a full but wrong window, and no scan budget fixes that. The measured
-   way past it is the exact statement the escalate-when-short variant reached: recall@50 0.955 at about
-   1.0 to 1.6 s per search on 1M real chunks. One option is to route scopes under a share threshold to
-   that exact statement first (master already skips the index walk for a small source share,
-   `INDEX_WALK_MIN_SCOPE_SHARE`). The other is a per-source partial HNSW index for large sources. Both
-   trade latency or storage for recall, so both are product decisions and need a preregistered confirmation on
-   real vectors.
+1. **Raise the exact scope scan's cap for large topic-coherent sources, after measuring it.** v0.60.131.0
+   scans a source exactly up to `SCOPE_SCAN_MAX_CHUNKS` (60,000). On 1M real chunks, a 104,000-chunk
+   topic-coherent source gets recall@50 0.76 through the walk and the pool. At a 150,000 cap the exact scan
+   gets 0.985, at about 770 ms p50 on 16 vCPU. That trades latency for recall on large sources, and that
+   module is changing under a planned exact per-scope chunk count. So it is a decision for that work, made
+   with this bench (`--corpus dir`, `--source-shares`).
 2. **Keep the index defaults (m 16, ef_construction 64, `vector`).** Measured candidates for a later
    migration: `halfvec` for size (a third of the index, about 1.4x faster build, same recall), and
    `ef_construction` 128 for about +0.02 to 0.03 unfiltered recall@10 at 1M and 2M.
@@ -587,6 +651,10 @@ corpus (chunks, vectors, queries and ledger) is kept outside the repository on t
 
 ## Changelog
 
+- 2026-10-09: measured again on top of v0.60.131.0's exact scope scan: share buckets from 0.1% to 55%,
+  visibility and type-filtered scopes, at 50k pages and 1M chunks, synthetic and real. The pooled budget
+  stays because it adds recall wherever the pool runs. The scan cap for large topic-coherent sources is
+  proposed.
 - 2026-10-09: fix 1 (pooled attempts scan 20,000 tuples) and fix 2 (import, sync, reindex and embed
   drains refresh the content_chunks and search-filter page statistics) ship with the same-database
   comparisons above. The real-vector confirmation used 1M voyage-4 Wikipedia chunks ($13.07), and found
