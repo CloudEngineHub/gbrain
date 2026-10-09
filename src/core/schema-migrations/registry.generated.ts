@@ -223,7 +223,7 @@ import { v219 } from './v219-pages-reconcile-name-indexes.ts';
 import { v220 } from './v220-persistence-request-preparation-attempts.ts';
 import { v221 } from './v221-chunk-embedding-pending-since.ts';
 import { v222 } from './v222-persistence-consumers.ts';
-import { v223 } from './v223-persistence-sync-watermark-index.ts';
+import { v223 } from './v223-persistence-serve-loop-indexes.ts';
 import { v224 } from './v224-page-retrievals.ts';
 
 // Array order is historical (see HISTORICAL_ARRAY_ORDER in the generator); the

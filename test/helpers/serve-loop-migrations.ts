@@ -9,11 +9,11 @@ import { LATEST_VERSION, runMigrations } from '../../src/core/migrate.ts';
 import { MIGRATIONS } from '../../src/core/schema-migrations/registry.generated.ts';
 
 const INDEXES_SQL = `SELECT indexname AS name FROM pg_indexes WHERE indexname IN
-  ('persistence_requests_committed_watermark','persistence_requests_sync_watermark','pages_last_retrieved_at_idx') ORDER BY indexname`;
+  ('persistence_requests_committed_watermark','persistence_requests_sync_watermark','persistence_requests_compactable','pages_last_retrieved_at_idx') ORDER BY indexname`;
 
-/** A fresh install at head has the sync watermark index and page_retrievals, and neither superseded index. */
+/** A fresh install at head has the sync watermark and compactable indexes and page_retrievals, and neither superseded index. */
 export async function assertFreshServeLoopSchema(engine: BrainEngine): Promise<void> {
-  expect((await engine.executeRaw<{ name: string }>(INDEXES_SQL)).map(r => r.name)).toEqual(['persistence_requests_sync_watermark']);
+  expect((await engine.executeRaw<{ name: string }>(INDEXES_SQL)).map(r => r.name)).toEqual(['persistence_requests_compactable', 'persistence_requests_sync_watermark']);
   const [table] = await engine.executeRaw<{ present: boolean }>("SELECT to_regclass('page_retrievals') IS NOT NULL AS present");
   expect(table?.present).toBe(true);
   const triggers = await engine.executeRaw<{ name: string }>("SELECT tgname AS name FROM pg_trigger WHERE tgrelid='pages'::regclass AND tgname='pages_forget_retrievals'");
@@ -27,7 +27,7 @@ export async function assertFreshServeLoopSchema(engine: BrainEngine): Promise<v
  * column's values alone; a second run changes nothing.
  */
 export async function assertUpgradedServeLoopSchema(engine: BrainEngine): Promise<void> {
-  const v223 = MIGRATIONS.find(m => m.name === 'persistence_sync_watermark_index')!;
+  const v223 = MIGRATIONS.find(m => m.name === 'persistence_serve_loop_indexes')!;
   expect(MIGRATIONS.find(m => m.name === 'page_retrievals')!.version).toBe(v223.version + 1);
   await engine.executeRaw('DELETE FROM pages');
   const ids = (await engine.executeRaw<{ id: number }>(`INSERT INTO pages (slug, source_id, type, title, compiled_truth, timeline, last_retrieved_at)
@@ -37,6 +37,7 @@ export async function assertUpgradedServeLoopSchema(engine: BrainEngine): Promis
   await engine.executeRaw('DROP FUNCTION IF EXISTS gbrain_forget_page_retrievals()');
   await engine.executeRaw('DROP TABLE IF EXISTS page_retrievals');
   await engine.executeRaw('DROP INDEX IF EXISTS persistence_requests_sync_watermark');
+  await engine.executeRaw('DROP INDEX IF EXISTS persistence_requests_compactable');
   await engine.executeRaw(`CREATE INDEX persistence_requests_committed_watermark ON persistence_requests(worktree_id,completed_at DESC) WHERE state='committed'`);
   await engine.executeRaw('CREATE INDEX pages_last_retrieved_at_idx ON pages (last_retrieved_at)');
   expect((await engine.executeRaw<{ name: string }>(INDEXES_SQL)).map(r => r.name)).toEqual(['pages_last_retrieved_at_idx', 'persistence_requests_committed_watermark']);
