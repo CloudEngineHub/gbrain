@@ -27,8 +27,13 @@ export interface ManagedImportFile { filePath: string; sourcePath: string }
 /** A managed import admits at most this many files in one transaction; their publication groups hold PAGE_BATCH_GROUP_MAX pages each. */
 export const IMPORT_BATCH_MAX_PAGES = 32;
 export const IMPORT_BATCH_MAX_BYTES = 8 * 1024 * 1024;
-/** The files of `queue` from `start` that one batch takes: at least one, at most the page and byte caps. */
-export function nextImportBatch(queue: readonly string[], start: number): string[] {
+/**
+ * The files of `queue` from `start` that one `runImport` batch takes: at least one, at most the page and byte caps;
+ * exactly one when the import is not a managed one (`batched` false). `runImport` accounts each file of a batch, in
+ * order, through its per-file bookkeeping.
+ */
+export function nextImportBatch(queue: readonly string[], start: number, batched = true): string[] {
+  if (!batched) return [queue[start]!];
   const batch: string[] = [];
   let bytes = 0;
   for (let i = start; i < queue.length && batch.length < IMPORT_BATCH_MAX_PAGES; i++) {
@@ -38,6 +43,19 @@ export function nextImportBatch(queue: readonly string[], start: number): string
     bytes += size;
   }
   return batch;
+}
+/**
+ * One `runImport` batch: the result of every file of `batch` in its order, undefined for a held path (the caller
+ * accounts it as held). A batch that fails as a whole settles each of its files with that failure.
+ */
+export async function settleManagedImportBatch(engine: BrainEngine, batch: readonly string[], sourcePathOf: (file: string) => string,
+  held: (sourcePath: string) => boolean, opts: Parameters<typeof importManagedFiles>[2]): Promise<Array<PromiseSettledResult<ImportResult> | undefined>> {
+  const open = batch.filter(file => !held(sourcePathOf(file)));
+  const t0 = Date.now();
+  const settled: PromiseSettledResult<ImportResult>[] = !open.length ? [] : await importManagedFiles(engine, open.map(filePath => ({ filePath, sourcePath: sourcePathOf(filePath) })), opts)
+    .catch(reason => open.map(() => ({ status: 'rejected' as const, reason })));
+  if (Date.now() - t0 > 5000 * open.length) console.error(`[gbrain phase] import.process_batch slow ${Date.now() - t0}ms files=${open.length} first=${sourcePathOf(open[0]!)}`);
+  return batch.map(file => settled[open.indexOf(file)]);
 }
 const IMPORT_OP = 'managed-file-import';
 /** How long an import waits for one file's publication, as a single import always has. */

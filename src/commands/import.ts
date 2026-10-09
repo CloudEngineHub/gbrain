@@ -39,7 +39,7 @@ import { realpathOrResolve } from '../core/path-confine.ts';
 import { slog } from '../core/console-prefix.ts';
 import { refreshProjectionStatistics } from '../core/search/projection-statistics.ts';
 import { importAnalyzeEveryPages, maybeRefreshPlannerStats, PLANNER_STATS_REPAIR_COMMAND } from '../core/planner-stats.ts';
-import { importManagedFile, importManagedFiles, nextImportBatch } from '../core/persistence/import-mutations.ts';
+import { importManagedFile, nextImportBatch, settleManagedImportBatch } from '../core/persistence/import-mutations.ts';
 import { acceptedPendingReceipt } from '../core/persistence/accepted-pending.ts';
 import { estimateCostFromChars, lookupEmbeddingPrice } from '../core/embedding-pricing.ts';
 import { getEmbeddingModel } from '../core/ai/gateway.ts';
@@ -832,22 +832,11 @@ export async function runImport(
     }
   }
 
-  // A managed import admits and publishes its files in batches (import-mutations.ts importManagedFiles);
-  // each file is still accounted, in order, exactly as processFile accounts one file.
-  const batched = managedImport && !company;
-  const take = (start: number) => batched ? nextImportBatch(files, start) : [files[start]!];
   async function processBatch(eng: BrainEngine, batch: string[]) {
-    if (batch.length === 1) return processFile(eng, batch[0]!);
-    if (signal?.aborted) return;
-    const open = batch.filter(file => !opts.heldPaths?.has(opts.slugRoot ? relative(opts.slugRoot, file) : relative(importRoot, file)));
-    const t0 = Date.now();
-    const settled: PromiseSettledResult<ImportResult>[] = !open.length ? [] : await importManagedFiles(eng, open.map(filePath => ({
-      filePath, sourcePath: opts.slugRoot ? relative(opts.slugRoot, filePath) : relative(importRoot, filePath) })),
-    { noEmbed, sourceId, activePack: importActivePack, signal, slugRoot: opts.slugRoot }).catch(reason => open.map(() => ({ status: 'rejected' as const, reason })));
-    if (Date.now() - t0 > 5000 * open.length) console.error(`[gbrain phase] import.process_batch slow ${Date.now() - t0}ms files=${open.length} first=${relative(dir, open[0]!)}`);
-    for (const file of batch) await processFile(eng, file, settled[open.indexOf(file)]);
+    const settled = batch.length > 1 && !signal?.aborted ? await settleManagedImportBatch(eng, batch, file => opts.slugRoot ? relative(opts.slugRoot, file)
+      : relative(importRoot, file), rel => !!opts.heldPaths?.has(rel), { noEmbed, sourceId, activePack: importActivePack, signal, slugRoot: opts.slugRoot }) : undefined;
+    for (const [i, file] of batch.entries()) await processFile(eng, file, settled?.[i]);
   }
-
   let workerError: unknown;
   let workerFailed = false;
   try {
@@ -857,7 +846,7 @@ export async function runImport(
       // checks belt-and-suspenders so we never crash on a null assertion.
       const config = loadConfig();
       if (engine.kind === 'pglite' || !config?.database_url) {
-        for (let i = 0, batch: string[]; i < files.length && !signal?.aborted; i += batch.length) await processBatch(engine, batch = take(i));
+        for (let i = 0, batch: string[]; i < files.length && !signal?.aborted; i += batch.length) await processBatch(engine, batch = nextImportBatch(files, i, managedImport && !company));
       } else {
         const { PostgresEngine } = await import('../core/postgres-engine.ts');
         const { connectWithRetry, resolvePoolSize } = await import('../core/db.ts');
@@ -888,8 +877,7 @@ export async function runImport(
             try {
               while (!stopWorkers && !signal?.aborted) {
                 if (queueIndex >= files.length) break;
-                const batch = take(queueIndex);
-                queueIndex += batch.length;
+                const batch = nextImportBatch(files, queueIndex, managedImport && !company); queueIndex += batch.length;
                 await processBatch(eng, batch);
               }
             } catch (error) {
@@ -916,7 +904,7 @@ export async function runImport(
       } // end else (postgres parallel)
     } else {
       // Sequential: use the provided engine
-      for (let i = 0, batch: string[]; i < files.length && !signal?.aborted; i += batch.length) await processBatch(engine, batch = take(i));
+      for (let i = 0, batch: string[]; i < files.length && !signal?.aborted; i += batch.length) await processBatch(engine, batch = nextImportBatch(files, i, managedImport && !company));
     }
   } catch (error) {
     workerFailed = true;

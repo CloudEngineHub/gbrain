@@ -25,18 +25,20 @@ const env = { GBRAIN_HOME: home, OPENAI_API_KEY: undefined, VOYAGE_API_KEY: unde
 type Brain = { label: string; engine: BrainEngine; close: () => Promise<void> };
 const pairs: Array<[Brain, Brain]> = [];
 
-async function pglite(label: string): Promise<Brain> {
-  const engine = new PGLiteEngine(); await engine.connect({}); await engine.initSchema();
-  return { label, engine, close: () => engine.disconnect() };
-}
-async function postgres(label: string): Promise<Brain> {
-  const pg = await isolatedPersistencePostgres(process.env.DATABASE_URL!);
-  return { label, engine: pg.engine, close: pg.close };
-}
-
 beforeAll(async () => {
-  pairs.push([await pglite('pglite-one-by-one'), await pglite('pglite-batched')]);
-  if (process.env.DATABASE_URL) pairs.push([await postgres('postgres-one-by-one'), await postgres('postgres-batched')]);
+  const lite: Brain[] = [];
+  for (const label of ['pglite-one-by-one', 'pglite-batched']) {
+    const engine = new PGLiteEngine(); await engine.connect({}); await engine.initSchema();
+    lite.push({ label, engine, close: () => engine.disconnect() });
+  }
+  pairs.push([lite[0]!, lite[1]!]);
+  if (!process.env.DATABASE_URL) return;
+  const pg: Brain[] = [];
+  for (const label of ['postgres-one-by-one', 'postgres-batched']) {
+    const db = await isolatedPersistencePostgres(process.env.DATABASE_URL);
+    pg.push({ label, engine: db.engine, close: db.close });
+  }
+  pairs.push([pg[0]!, pg[1]!]);
 }, 180_000);
 afterAll(async () => {
   await withEnv(env, async () => {
