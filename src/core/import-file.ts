@@ -842,9 +842,11 @@ export async function importFromContent(
     });
 
     if (existing && !preimage) await tx.createVersion(slug, txOpts); // reads the page itself, so before the page write
-    // A prepared import keeps each stored row that is identical to its new chunk
-    // and writes only the rest, so an edit rewrites only the chunks it changed.
-    const fresh = reusable && opts.prepare ? chunks.map(chunk => ({ ...chunk })) : chunks;
+    // Every import keeps each stored row that is identical to its new chunk and
+    // writes only the rest, so an edit rewrites only the chunks it changed. The
+    // reuse is re-read here, under the page lock, so a kept row is one this
+    // transaction sees; --no-embed and deferred-embed imports keep vectors too.
+    const fresh = reusable ? chunks.map(chunk => ({ ...chunk })) : chunks;
     const kept = new Map([...(fresh !== chunks ? await reuseStoredVectors(tx, fresh) : [])].filter(([, id]) => id !== null));
     const keptIds = [...kept.values()];
     let written: Page | undefined;

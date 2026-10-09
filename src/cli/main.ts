@@ -402,6 +402,16 @@ async function main() {
   const strictRefusal = helpRequested ? null : strictArgsRefusal(command, subArgs);
   if (strictRefusal) exitCliError(strictRefusal, command);
 
+  // A command that opens the local PGLite brain starts compiling its WASM now,
+  // off the main thread, while the command's own modules load; connect awaits
+  // the same cached promise (and sees any failure there).
+  if (cliOps.has(command) || cliAliases.has(command) || findCliCommand(command)?.phase === 'post-connect') {
+    const cfg = loadConfig();
+    if (cfg?.engine === 'pglite' && cfg.database_path) {
+      void import('../core/pglite-embedded-assets.ts').then(m => m.getEmbeddedPgliteOptions()).catch(() => {});
+    }
+  }
+
   // T5 — `gbrain search modes|stats|tune` is the read-only config dashboard,
   // NOT a free-text search for the literal word "modes". Free-text
   // `gbrain search "<query>"` falls through to the cheap-hybrid `search` op
