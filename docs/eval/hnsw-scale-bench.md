@@ -27,6 +27,9 @@ which covers sources up to 60,000 chunks, this PR lifts that source's recall@50 
 the scan cap to 150,000 chunks makes it exact (0.985) at about 770 ms p50; that is proposed below, not
 shipped.
 
+Since v0.60.134.0 the scan cap is 120,000 counted chunks (`SCOPE_CHUNKS_SQL`), so a 104,000-chunk
+source like this one takes the exact scan. The measurements below predate that change.
+
 Index build options don't change any of this, so the defaults stay (m 16, ef_construction 64, `vector`).
 `ef_construction` 128 adds about 0.02 to 0.03 unfiltered recall@10 for about 25% more build time.
 `halfvec` gives the same recall with an index a third the size (5.1 GiB against 15.3 GiB at 2M chunks).
@@ -651,6 +654,8 @@ corpus (chunks, vectors, queries and ledger) is kept outside the repository on t
 
 ## Changelog
 
+- 2026-10-09: noted that v0.60.134.0 counts scope chunks and raises the scan cap to 120,000, which moves
+  the 104,000-chunk source onto the exact scan. The pooled budget still serves visibility scopes and larger sources.
 - 2026-10-09: measured again on top of v0.60.131.0's exact scope scan: share buckets from 0.1% to 55%,
   visibility and type-filtered scopes, at 50k pages and 1M chunks, synthetic and real. The pooled budget
   stays because it adds recall wherever the pool runs. The scan cap for large topic-coherent sources is
