@@ -22,6 +22,7 @@ export type GateLetter = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g';
 
 /** The class each applied fix carries in receipts, holds and previews. */
 export type FixClass =
+  | 'merge_fences'
   | 'close_fence'
   | 'marker_form'
   | 'stray_empty_cell'

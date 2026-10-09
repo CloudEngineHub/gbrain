@@ -55,8 +55,9 @@ import { readGitSourceHolds, recordFenceHoldRepair } from '../persistence/sync-h
 import { attemptStore } from '../fence-repair/attempts.ts';
 import { listFenceCandidates, runFenceCensus, type FenceCandidate } from '../fence-repair/census.ts';
 import { fenceRepairLlmEnabled, readFenceRepairCaps } from '../fence-repair/config.ts';
+import { mergedReceipt } from '../fence-repair/merge.ts';
 import { FENCE_REASONS } from '../fence-repair/reasons.ts';
-import { FENCE_REPAIR_ACTOR } from '../fence-repair/receipt.ts';
+import { FENCE_REPAIR_ACTOR, type MergedFenceReceipt } from '../fence-repair/receipt.ts';
 import { checkoutFileExists, loadFenceSource, pageSha, readFenceTarget, spliceFileSections, writeFenceRepair, type FenceRepairMode, type FenceSource, type FenceTarget } from '../fence-repair/repair-io.ts';
 import type { OwnerRefusal } from '../persistence/owner-refusal.ts';
 import { repairBusy, repairBusyMessage } from '../persistence/repair-busy.ts';
@@ -447,7 +448,7 @@ async function applyFence(ctx: OperationContext, entry: ApprovedFence, opts: App
   if (analysis.status === 'proposal') {
     const bytes = afterBytes(target, analysis.after);
     if (opts.expect && bytes?.sha !== entry.after) return skipped('changed_since_preview', `The repair of ${entry.path ?? entry.slug} differs from the preview; preview again.`);
-    return write(ctx, src, target, analysis.after, { tier: analysis.tier, classes: classesOf(analysis.fixes), ...fixLocation(analysis.fixes, []), model: null, cost: 0 }, opts, heldOutcome);
+    return write(ctx, src, target, analysis.after, { tier: analysis.tier, classes: classesOf(analysis.fixes), ...fixLocation(analysis.fixes, []), model: null, cost: 0, merged: mergedReceipt(target.page, analysis.fixes) }, opts, heldOutcome);
   }
   return tier3(ctx, src, target, analysis, entry, opts, heldOutcome);
 }
@@ -455,9 +456,9 @@ async function applyFence(ctx: OperationContext, entry: ApprovedFence, opts: App
 type HeldFn = (reason: string, message: string, extra?: { gate?: GateLetter; rows?: number[]; next?: string | null; tier?: FenceTier }) => Promise<RepairItemOutcome>;
 
 async function write(ctx: OperationContext, src: FenceSource, target: FenceTarget, after: FencePage,
-  r: { tier: RepairTier; classes: string[]; rows: number[]; columns: string[]; model: string | null; cost: number | null }, opts: ApplyOptions, held: HeldFn): Promise<RepairItemOutcome> {
-  const outcome = await writeFenceRepair(ctx, src, target, after, { actor: FENCE_REPAIR_ACTOR, tier: r.tier, classes: r.classes, rows: r.rows, columns: r.columns, model: r.model, cost_usd: r.cost },
-    { embed: opts.embed });
+  r: { tier: RepairTier; classes: string[]; rows: number[]; columns: string[]; model: string | null; cost: number | null; merged?: MergedFenceReceipt[] | undefined }, opts: ApplyOptions, held: HeldFn): Promise<RepairItemOutcome> {
+  const outcome = await writeFenceRepair(ctx, src, target, after, { actor: FENCE_REPAIR_ACTOR, tier: r.tier, classes: r.classes, rows: r.rows, columns: r.columns, model: r.model, cost_usd: r.cost,
+    ...(r.merged ? { merged: r.merged } : {}) }, { embed: opts.embed });
   if (!outcome.ok) {
     if (outcome.reason === 'changed_since_read') return { applied: false, outcome: 'skipped', reason: 'changed_since_read', detail: { path: target.path, slug: target.slug, mode: target.mode, message: outcome.message } };
     if (outcome.reason === 'sync_in_progress') {
@@ -499,8 +500,8 @@ async function tier3(ctx: OperationContext, src: FenceSource, target: FenceTarge
       inputs: [{ name: 'usd', how: 'The new daily cap in USD the user agrees to; it must exceed what is already spent today.' }],
       verify: { argv: ['gbrain', 'doctor', '--only', 'fence_integrity', '--json'] } } } };
   }
-  const written = await write(ctx, src, target, result.after, { tier: 'llm', classes: classesOf(analysis.fixes, result.cleared), ...fixLocation(analysis.fixes, analysis.residual), model, cost: result.spentUsd },
-    opts, held);
+  const written = await write(ctx, src, target, result.after, { tier: 'llm', classes: classesOf(analysis.fixes, result.cleared), ...fixLocation(analysis.fixes, analysis.residual), model, cost: result.spentUsd,
+    merged: mergedReceipt(target.page, analysis.fixes) }, opts, held);
   const store = attemptStore(engine);
   if (written.applied) await store.publish(result.claim);
   else if (written.reason === 'changed_since_read' || written.reason === 'sync_in_progress') await store.transient(result.claim, written.reason);

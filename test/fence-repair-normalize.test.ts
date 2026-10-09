@@ -166,8 +166,8 @@ describe('close_fence and the protection boundary', () => {
     expect(r.page.compiled_truth).toBe(body);
   });
 
-  test('a repeated marker is manual and nothing changes', () => {
-    const body = [facts(factsRow(1, 'Alpha two', { kind: 'signal' })), facts(factsRow(2, 'Beta two'))].join('\n');
+  test('a repeated marker that merge_fences cannot merge (text inside the repeat) is manual and nothing changes', () => {
+    const body = [facts(factsRow(1, 'Alpha two', { kind: 'signal' })), facts(factsRow(2, 'Beta two'), 'A note inside the fence.')].join('\n');
     const r = run(body);
     expect(reasons(r)).toContain('repeated_marker');
     expect(r.page.compiled_truth).toBe(body);

@@ -1,6 +1,7 @@
 /**
- * Structural Tier 1 rules for one section (#6188): `marker_form` (takes
- * two-dash markers) and `close_fence` (a missing end marker).
+ * Structural Tier 1 rules for one section (#6188): `merge_fences` (several
+ * balanced fences of a kind, #6377, merge.ts), `marker_form` (takes two-dash
+ * markers) and `close_fence` (a missing end marker).
  *
  * `close_fence` inserts the end marker after the last table row only when
  * every row of the before-region is one contiguous block and nothing but
@@ -10,6 +11,7 @@
  * is also checked against `exposedLines` before it is kept.
  */
 import { TAKES_FENCE_BEGIN, TAKES_FENCE_END } from '../takes-fence.ts';
+import { mergeEdits, mergeOrigins, mergePlan, type MergeOrigins, type MergePlan } from './merge.ts';
 import { exposedLines } from './page-checks.ts';
 import { extractRawRows, MARKERS, parseRowSpans, primaryFence, type RawFence, type RawSection } from './raw-rows.ts';
 import type { FenceFix, FenceIssue, FenceReason, FenceSection, FixClass } from './types.ts';
@@ -24,12 +26,16 @@ export interface PassResult {
   text: string;
   fixes: FenceFix[];
   residual: FenceIssue[];
+  /** Row origins of every fence `merge_fences` built, for the content pass. */
+  merges: MergeOrigins[];
 }
 
 interface Step {
   edits: Edit[];
   fixes: FenceFix[];
   residual: FenceIssue[];
+  /** Merge plans whose edits were kept; their origins are read once the edits are applied. */
+  merged: MergePlan[];
 }
 
 /** Apply non-overlapping edits (any order) to `text`. */
@@ -43,11 +49,13 @@ export function applyEdits(text: string, edits: readonly Edit[]): string {
 export function structuralPass(text: string, section: FenceSection): PassResult {
   let current = text;
   const fixes: FenceFix[] = [];
+  const merges: MergeOrigins[] = [];
   for (let round = 0; round < 3; round++) {
     const step = structuralStep(current, section);
-    if (!step.edits.length) return { text: current, fixes, residual: step.residual };
+    if (!step.edits.length) return { text: current, fixes, residual: step.residual, merges };
     current = applyEdits(current, step.edits);
     fixes.push(...step.fixes);
+    merges.push(...step.merged.map(plan => mergeOrigins(plan, current)));
   }
   throw new Error('fence structure rules did not settle');
 }
@@ -60,10 +68,21 @@ export function fenceBlocked(raw: RawSection, fence: RawFence): boolean {
 
 function structuralStep(text: string, section: FenceSection): Step {
   const raw = extractRawRows(text, section);
-  const step: Step = { edits: [], fixes: [], residual: [] };
+  const step: Step = { edits: [], fixes: [], residual: [], merged: [] };
   for (const kind of ['facts', 'takes'] as const) {
     const fence = primaryFence(raw, kind);
-    if (!fence || fenceBlocked(raw, fence)) continue;
+    if (!fence) continue;
+    const plan = mergePlan(raw, kind);
+    if (plan) {
+      // A merge that would show hidden text stays `repeated_marker`, which the content pass reports from the fence's issues.
+      const edits = mergeEdits(text, plan);
+      if (exposedLines(text, applyEdits(text, edits)).length) continue;
+      step.edits.push(...edits);
+      step.fixes.push({ fence: kind, section, row: null, column: null, line: fence.begin.line, class: 'merge_fences' });
+      step.merged.push(plan);
+      continue;
+    }
+    if (fenceBlocked(raw, fence)) continue;
     const edits = markerEdits(text, fence);
     if (edits === null) {
       step.residual.push(fenceIssue(fence, 'marker_near_miss', fence.begin.line));

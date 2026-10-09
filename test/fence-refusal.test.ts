@@ -48,8 +48,8 @@ const cases: Array<[name: string, body: string, timeline: string, expected: Reco
   ['duplicate row across sections', facts(fact(6)), facts(fact(6)), { reason: 'row_collision', fence: 'facts', section: 'timeline', rows: [6] }],
 ];
 
-/** The cases Tier 1 fixes losslessly (#6188): a missing end marker with nothing after the table, two-dash takes markers, an invented facts kind, duplicate row numbers. */
-const TIER1_FIXABLE = new Set(['missing end marker', 'two-dash takes markers', 'unknown facts kind', 'duplicate row in one fence', 'duplicate row across sections']);
+/** The cases Tier 1 fixes losslessly (#6188, #6377): a missing end marker with nothing after the table, two-dash takes markers, two balanced fences of a kind, an invented facts kind, duplicate row numbers. */
+const TIER1_FIXABLE = new Set(['missing end marker', 'two-dash takes markers', 'repeated marker', 'unknown facts kind', 'duplicate row in one fence', 'duplicate row across sections']);
 
 describe('the shared fence check', () => {
   test('a clean page, a page without fences, a fence quoted in code and a lone end marker (the projection reads none) pass the check', () => {

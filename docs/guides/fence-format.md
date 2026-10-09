@@ -168,6 +168,7 @@ These rules run on every write path for free. They edit or move cell text and ne
 
 | Class | What it rewrites |
 | --- | --- |
+| `merge_fences` | A section with more than one fence of a kind becomes one fence when every fence has both markers, the same canonical header and nothing but table lines inside: the later fences' rows are appended to the first in document order, a later row whose cells (every column but `#`) equal a kept row's as written is dropped, a number that now collides is renumbered (see [row numbers](#row-numbers)) and a `superseded by #N` reference follows its own fence's row N, and the later markers, tables and a repeated section heading above them are removed. Anything else stays `repeated_marker` and a person merges the fences. |
 | `close_fence` | A fence with no end marker gets one directly after its table, when nothing but blank lines follows the last row up to the end of the section. |
 | `marker_form` | Two-dash takes markers (`<!-- gbrain:takes:begin -->`) directly above a takes table become the three-dash markers. Two-dash facts markers are not a fence and are left alone. |
 | `stray_empty_cell` | A row with more cells than its header (with no header: than the narrow layout, or 14 facts cells) loses empty cells, only when exactly one choice of empty cells to remove leaves every checked column (`#`, kind, confidence, visibility, notability, `claim_value`; takes kind, holder, weight) valid. Otherwise the row is `extra_cells` and a person fixes it. |
@@ -232,7 +233,7 @@ No tier writes a fence until all of these hold, and the result is one the rules 
 | (b) | [`claim_changed`](write-refusals.md#fence-claim_changed) | Every claim cell is unchanged (struck claims included). |
 | (c) | [`row_number_changed`](write-refusals.md#fence-row_number_changed) | Every row number that was valid and unique still names the same claim. |
 | (d) | [`visibility_loosened`](write-refusals.md#fence-visibility_loosened) | No row becomes more visible: `private` never turns `world`. |
-| (e) | [`row_count_changed`](write-refusals.md#fence-row_count_changed) | No row is added or dropped, and every row of the fence stays inside it. |
+| (e) | [`row_count_changed`](write-refusals.md#fence-row_count_changed) | No row is added or dropped, and every row of the fence stays inside it; under `merge_fences` the only rows dropped are the exact duplicates its mapping names. |
 | (f) | [`cell_changed`](write-refusals.md#fence-cell_changed) | A cell valid in its column keeps its text; a misaligned cell may only move, and text changes only through a named rule. |
 | (g) | [`protection_loosened`](write-refusals.md#fence-protection_loosened) | Text the privacy boundary hid before the repair stays hidden after it. |
 <!-- END GENERATED fence-format -->
