@@ -2536,6 +2536,16 @@ Reasons: `content_directory`.
 |---|---|---|---|---|---|---|
 | Sync stopped because gbrain would hold a file whose exact bytes imported before; this is a gbrain bug. | The upgrade invariant says a newer reader never refuses bytes an older one imported, so the run stops without advancing rather than hide a regression. | Report it with the gbrain version, the file and the code; upgrade or pin the last good version, then run gbrain sync --source <id> --no-pull --retry-failed. | host_admin | `gbrain doctor --json` | 1 | no |
 
+### tail_exposure_approval
+
+<a id="tail_exposure_approval"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A fence on a world-visible page has no end marker and prose follows its table; closing it after the last row is safe for the table but makes those lines visible to remote readers, so the content-repair lane previews the close and waits for a hash-bound approval instead of applying it unattended. | Everything after an unpaired begin marker is hidden by the privacy boundary. The repair model read the tail as prose (not rows), so the only judgment left is whether those exact lines may become visible, and that is the user's: the preview prints them and the hash binds them. On a private page nothing new is disclosed and the lane closes the fence by itself. | Show the user the preview's exposed lines (gbrain repair content --source <id> --only <path>, read-only), then run the printed gbrain repair content --source <id> --only <path> --apply --expect <hash> only after they agree; a changed tail invalidates the hash. By hand: add the end marker directly after the last table row and move the trailing text where it belongs, commit, then gbrain sync --source <id> --no-pull. | user | `repeat the read that failed` | 1 | no |
+
+More: [docs/guides/write-refusals.md#tail_exposure_approval](../../docs/guides/write-refusals.md#tail_exposure_approval)
+
 ### take_row_collision
 
 <a id="take_row_collision"></a>
@@ -2631,6 +2641,16 @@ More: [docs/guides/troubleshooting.md#two-consumers-on-host](../../docs/guides/t
 | Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
 |---|---|---|---|---|---|---|
 | A required dependency or capability cannot serve this request. | A capability this request needs is not configured or not reachable on this brain. | A required capability is not available on this brain. Run `gbrain doctor --json` to see what is missing. | agent | `gbrain doctor --json` | 1 | no |
+
+### unclosed_ambiguous_tail
+
+<a id="unclosed_ambiguous_tail"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A fence has no end marker and text follows its table, and the repair model read that tail as table rows written without pipes or could not tell, so gbrain will not choose where the fence ends; nothing was written. | Closing after the wrong row would hide rows behind the privacy boundary or expose text; a deterministic rule cannot place the end marker and the model declined to, so a person decides. The attempt memo keeps the same bytes from costing a second model call. | Read the page (gbrain get --source <id> -- <slug>), add the end marker after the last real row of the named fence (moving any rows the tail holds into the table), commit, then gbrain sync --source <id> --no-pull. The preview (gbrain repair fences --source <id> --only <path>, read-only) names the fence, section and last row. Run: gbrain repair fences --source '{source_id}' | user | `gbrain sources status '{source_id}' --json` | 1 | no |
+
+More: [docs/guides/write-refusals.md#unclosed_ambiguous_tail](../../docs/guides/write-refusals.md#unclosed_ambiguous_tail)
 
 ### unexpected_file_bytes
 

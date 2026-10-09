@@ -21,9 +21,10 @@
  * frontmatter value. #6188 `invalid_fence` holds carry the fence, section,
  * reason, parsed row numbers and the file line, never a cell value; the
  * summary also counts them (`fences`) so every surface can route a source to
- * the right repair (`holdRepairSteps`, D6): `gbrain repair fences` for fence
- * holds, `gbrain repair frontmatter` for the rest. A fence hold's own fix
- * depends on its state (`fence-repair/hold-fix.ts`, D17).
+ * the right repair (`holdRepairSteps`, D6): the content-repair lane
+ * (`gbrain repair content`, #6377) for fence and slug-conflict holds,
+ * `gbrain repair frontmatter` for the rest. A fence hold's own fix depends on
+ * its state (`fence-repair/hold-fix.ts`, D17).
  */
 import type { BrainEngine } from '../engine.ts';
 import type { Action } from '../agent-output.ts';
@@ -32,7 +33,7 @@ import { RECOVERY_VERSION, type InvalidFrontmatterReason } from '../markdown.ts'
 import { FENCE_REASONS, type FenceMessageLocation } from '../fence-repair/reasons.ts';
 import type { FenceReason, FenceTier, GateLetter } from '../fence-repair/types.ts';
 import { FENCE_VERSION } from '../fence-repair/refusal.ts';
-import { fenceHoldFix, fenceHoldLocation, fencePreviewArgv, readFenceAutoRepair, type FenceAutoRepair, type FenceHoldLocation } from '../fence-repair/hold-fix.ts';
+import { fenceHoldFix, fenceHoldLocation, readFenceAutoRepair, type FenceAutoRepair, type FenceHoldLocation } from '../fence-repair/hold-fix.ts';
 import { STRUCTURED_WRITE_ADVICE, type FencesNormalized } from '../fence-repair/report.ts';
 import type { SyncRename } from './sync-discovery.ts';
 import { VERSION } from '../../version.ts';
@@ -348,13 +349,20 @@ export function holdRescreenDue(record: Pick<GitHoldRecord, 'code' | 'meta'>, re
 }
 
 /**
- * D6: which repairs a source's holds need. Fence holds route to the fence
- * repair preview, #6194 concurrent-write holds to the reconcile preview and a
- * re-screen, #6278 preparation-stalled holds to writer status and a re-screen
- * (never a file repair), every other hold to the frontmatter repair preview;
- * a source with several kinds names each.
+ * D6: which repairs a source's holds need. Fence and slug-conflict holds route
+ * to the content-repair lane's preview (#6377), #6194 concurrent-write holds
+ * to the reconcile preview and a re-screen, #6278 preparation-stalled holds to
+ * writer status and a re-screen (never a file repair), every other hold to the
+ * frontmatter repair preview; a source with several kinds names each.
  */
-export interface HoldRepairRoute { fences: number; others: number; concurrent?: number; stalled?: number; dirty?: number }
+export interface HoldRepairRoute { fences: number; others: number; concurrent?: number; stalled?: number; dirty?: number;
+  /** #6377 `frontmatter_slug_conflict` holds, counted apart from `others` by callers that read codes (summary counts leave them in `others`). */
+  slug_conflicts?: number }
+
+/** `gbrain repair content --source <id> [--only <path>]`: the content-repair lane's read-only preview (#6377; no model call). */
+export function contentRepairArgv(sourceId: string, path?: string): string[] {
+  return ['gbrain', 'repair', 'content', '--source', sourceId, ...(path ? ['--only', path] : [])];
+}
 
 /** #6278: the three commands that clear a source's `preparation_stalled` holds, in order (no file repair applies). */
 export function stalledHoldSteps(sourceId: string, syncArgv?: string[]): { status: string[]; retry: string[]; sync: string[] } {
@@ -365,15 +373,17 @@ export function stalledHoldSteps(sourceId: string, syncArgv?: string[]): { statu
 /**
  * The source-level next step every surface prints for `route` (sync results,
  * doctor, read notices, the banner, retry-held). `auto`, when the caller read
- * it, says whether the maintenance run repairs fence holds by itself.
+ * it, says whether the maintenance run repairs the content holds (fence and
+ * slug-conflict) by itself; their preview is the content-repair lane's.
  */
 export function holdRepairSteps(sourceId: string, route: HoldRepairRoute, auto?: FenceAutoRepair): { argv: string[]; commands: string[]; text: string } {
-  const fences = fencePreviewArgv(sourceId);
+  const content = (route.fences ?? 0) + (route.slug_conflicts ?? 0);
+  const fences = contentRepairArgv(sourceId);
   const frontmatter = ['gbrain', 'repair', 'frontmatter', '--source', sourceId];
-  const automatic = !auto ? '' : auto.active ? 'the next maintenance run repairs the fence holds it can by itself; '
-    : `nothing repairs the fence holds by itself (${auto.enabled ? 'no maintenance run is active' : 'fences.repair.enabled is false'}), so `;
-  const fenceText = `${automatic}preview the fence repairs with ${fences.join(' ')} `
-    + '(read-only, no model call: it lists each held file with its planned repair or the exact edit, and prints the apply command with --expect <hash>)'
+  const automatic = !auto ? '' : auto.active ? 'the next maintenance run repairs the fence and slug-conflict holds it can by itself; '
+    : `nothing repairs the fence and slug-conflict holds by itself (${auto.enabled ? 'no maintenance run is active' : 'fences.repair.enabled is false'}), so `;
+  const fenceText = `${automatic}preview the content repairs with ${fences.join(' ')} `
+    + '(read-only, no model call: it lists each held file with its planned repair or the exact edit, kind by kind, and prints the apply command with --expect <hash>[,<hash>])'
     + (auto?.active ? '' : ', then run the apply command it prints');
   const frontmatterText = `preview the frontmatter and other fixes with ${frontmatter.join(' ')} (writes nothing until a hash-bound apply)`;
   const concurrentText = `for each concurrent-write hold, preview the reconciliation with gbrain sources reconcile ${sourceId} <slug> --preview `
@@ -384,20 +394,20 @@ export function holdRepairSteps(sourceId: string, route: HoldRepairRoute, auto?:
   const unblock = ['gbrain', 'sync', 'unblock', '--source', sourceId, '--apply'];
   const dirtyText = `the ${route.dirty ?? 0} worktree-dirty hold(s) are uncommitted edits in the checkout that sync would not overwrite: commit them (gbrain sources status ${sourceId} names each file), `
     + `then run ${unblock.join(' ')}, which re-screens every held file that is now committed, and the same sync`;
-  if (route.stalled && !route.others && !route.fences && !route.concurrent && !route.dirty) {
+  if (route.stalled && !route.others && !content && !route.concurrent && !route.dirty) {
     return { argv: stalled.status, commands: [stalled.status.join(' '), stalled.retry.join(' '), stalled.sync.join(' ')], text: stalledText };
   }
-  if (route.dirty && !route.others && !route.fences && !route.concurrent && !route.stalled) {
+  if (route.dirty && !route.others && !content && !route.concurrent && !route.stalled) {
     return { argv: unblock, commands: [`gbrain sources status ${sourceId} --json`, unblock.join(' '), `gbrain sync --source ${sourceId} --no-pull`], text: dirtyText };
   }
   if (route.concurrent || route.stalled || route.dirty) {
-    const parts = [...(route.others ? [frontmatterText] : []), ...(route.fences ? [fenceText] : []), ...(route.concurrent ? [concurrentText] : []), ...(route.stalled ? [stalledText] : []), ...(route.dirty ? [dirtyText] : [])];
-    const commands = [...(route.others ? [frontmatter.join(' ')] : []), ...(route.fences ? [fences.join(' ')] : []),
+    const parts = [...(route.others ? [frontmatterText] : []), ...(content ? [fenceText] : []), ...(route.concurrent ? [concurrentText] : []), ...(route.stalled ? [stalledText] : []), ...(route.dirty ? [dirtyText] : [])];
+    const commands = [...(route.others ? [frontmatter.join(' ')] : []), ...(content ? [fences.join(' ')] : []),
       ...(route.stalled ? [stalled.status.join(' ')] : []), `gbrain sources status ${sourceId} --json`, ...(route.dirty ? [unblock.join(' ')] : []), `gbrain sources retry-held ${sourceId}`, `gbrain sync --source ${sourceId} --no-pull`];
-    return { argv: route.others ? frontmatter : route.fences ? fences : route.concurrent ? ['gbrain', 'sources', 'status', sourceId, '--json'] : route.stalled ? stalled.status : unblock, commands, text: parts.join('; ') };
+    return { argv: route.others ? frontmatter : content ? fences : route.concurrent ? ['gbrain', 'sources', 'status', sourceId, '--json'] : route.stalled ? stalled.status : unblock, commands, text: parts.join('; ') };
   }
-  if (route.fences && !route.others) return { argv: fences, commands: [fences.join(' ')], text: fenceText };
-  if (route.fences) return { argv: frontmatter, commands: [frontmatter.join(' '), fences.join(' ')], text: `${frontmatterText}; ${fenceText}` };
+  if (content && !route.others) return { argv: fences, commands: [fences.join(' ')], text: fenceText };
+  if (content) return { argv: frontmatter, commands: [frontmatter.join(' '), fences.join(' ')], text: `${frontmatterText}; ${fenceText}` };
   return { argv: frontmatter, commands: [frontmatter.join(' ')], text: frontmatterText };
 }
 
@@ -709,9 +719,11 @@ export async function buildHoldReport(engine: Exec, input: { sourceId: string; i
   const stalled = Math.max(Number(summary?.stalled ?? 0), runHolds.filter(hold => stalledWeight(hold)).length);
   const concurrent = Math.max(Number(summary?.concurrent ?? 0), runHolds.filter(hold => concurrentWeight(hold)).length);
   const dirty = Math.max(Number(summary?.dirty ?? 0), runHolds.filter(hold => dirtyWeight(hold)).length);
+  // #6377: this run's slug-conflict holds route to the content lane; earlier runs' stay in `others` (the summary does not count them).
+  const slugConflicts = runHolds.filter(hold => hold.code === 'frontmatter_slug_conflict').length;
   const auto = fences ? await readFenceAutoRepair(engine) : undefined;
-  const steps = holdRepairSteps(input.sourceId, { fences, others: Math.max(0, outstanding - fences - stalled - concurrent - dirty), ...(stalled ? { stalled } : {}),
-    ...(concurrent ? { concurrent } : {}), ...(dirty ? { dirty } : {}) }, auto);
+  const steps = holdRepairSteps(input.sourceId, { fences, others: Math.max(0, outstanding - fences - stalled - concurrent - dirty - slugConflicts), ...(stalled ? { stalled } : {}),
+    ...(concurrent ? { concurrent } : {}), ...(dirty ? { dirty } : {}), ...(slugConflicts ? { slug_conflicts: slugConflicts } : {}) }, auto);
   // #6278: the escalation text is routed by code: stalled holds point at the writer, not at a generator.
   const runStalled = runHolds.filter(hold => stalledWeight(hold)).length;
   const escalation = runStalled * 2 > runHolds.length
@@ -723,7 +735,7 @@ export async function buildHoldReport(engine: Exec, input: { sourceId: string; i
     user_message: `Some files in source ${input.sourceId} could not be imported. Please run 'gbrain sources status ${input.sourceId}' on the brain host, then: ${steps.text}.` } };
   const fix: Action = { argv: steps.argv, consent: [], actor: 'agent', requires_exclusive: false, verify,
     why: `${runHolds.length} file(s) held this run, ${outstanding} held in source ${input.sourceId}; they do not block sync. Inspect them with 'gbrain sources status ${input.sourceId}'; `
-      + (fences || stalled || concurrent || dirty ? `then ${steps.text}.` : 'the repair preview proposes each fix and writes nothing.')
+      + (fences || stalled || concurrent || dirty || slugConflicts ? `then ${steps.text}.` : 'the repair preview proposes each fix and writes nothing.')
       + (escalated ? escalation : '') };
   return { held: runHolds.slice(0, input.policy.cap).map(hold => gitHoldItem(hold, auto)), held_count: runHolds.length, holds_outstanding: outstanding,
     ...(escalated ? { holds_escalated: true } : {}), ...(runHolds.length > input.policy.cap ? { holds_truncated: true } : {}),
