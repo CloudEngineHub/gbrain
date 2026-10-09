@@ -1091,7 +1091,7 @@ export async function hybridSearch(
   const postFusionOpts = buildPostFusionOpts(req);
   const relationalList = await buildRelationalList(req);
 
-  const { isAvailable, multimodalEmbeddingModel } = await import('../ai/gateway.ts');
+  const { isAvailable } = await import('../ai/gateway.ts');
   const providerProbe = resolvedCol.embeddingModel || undefined;
   // Image/both/unified routing embeds via the MULTIMODAL provider, not the
   // text provider — so a multimodal-only install (text provider absent) must
@@ -1099,8 +1099,8 @@ export async function hybridSearch(
   // explicitly and only short-circuit when neither the text provider nor (for
   // multimodal-routed queries) the multimodal provider is reachable. Without
   // this guard a multimodal-only install would fall to keyword-only here and
-  // never run the image/unified vector path.
-  const multimodalProviderProbe = multimodalEmbeddingModel();
+  // never run the image/unified vector path. Null when no configured model can embed images.
+  const multimodalProviderProbe = (await import('../ai/multimodal-model.ts')).multimodalEmbeddingModel();
   // The LLM intent tie-break (below) can escalate a regex-'text' query to
   // 'image'/'both'; account for that possibility so an ambiguous query on a
   // multimodal-only install still reaches the multimodal branch.
@@ -1125,8 +1125,7 @@ export async function hybridSearch(
 
   const { effectiveModality, unifiedRouting, queries } = await resolveModalityAndQueries(req);
   const { vectorArms, queryEmbedding, imageQueryEmbedding, unifiedDone } =
-    await runVectorArms(req, { effectiveModality, unifiedRouting, queries,
-      multimodalProviderProbe: multimodalProviderProbe ?? cfgForColumn?.embedding_multimodal_model ?? 'voyage:voyage-multimodal-3' });
+    await runVectorArms(req, { effectiveModality, unifiedRouting, queries, multimodalProviderProbe: multimodalProviderProbe ?? cfgForColumn?.embedding_multimodal_model ?? 'voyage:voyage-multimodal-3' });
   if (vectorArms.length === 0) {
     return searchVectorFallback(req, lexical, relationalList, postFusionOpts);
   }

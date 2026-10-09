@@ -180,7 +180,7 @@ export async function resolveHybridRequest(
   // An inferred image intent needs a multimodal embedding model; without one
   // the image arm cannot run, so the query stays a text query (keyword arm and
   // expansion included). An explicit `crossModal` still routes as asked.
-  const suggestions = intended.suggestedModality !== 'text' && (await import('../../ai/gateway.ts')).multimodalEmbeddingModel() === null
+  const suggestions = intended.suggestedModality !== 'text' && (await import('../../ai/multimodal-model.ts')).multimodalEmbeddingModel() === null
     ? { ...intended, suggestedModality: 'text' as const } : intended;
   const intentWeightingOn = resolvedMode.intentWeighting;
   const intentWeights = intentWeightingOn
