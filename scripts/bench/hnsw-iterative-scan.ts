@@ -35,8 +35,11 @@
  * Measurement grid (each cell: recall@k, p50/p95/p99 ms, short results,
  * `vector_candidates_incomplete`, which statement served, exact fallbacks):
  *   --filters  none,source10,source50,vis50,vis10 (repo default: source10,source50).
- *              sourceN: sourceIds covering N% of pages; visN: excludePrivate
- *              with (100-N)% of pages `visibility: private` (latent only).
+ *              sourceN: sourceIds covering N% of pages (latent and dir: bench-a,
+ *              then bench-a + bench-b, sized by --source-shares a,b, default
+ *              0.1,0.4); visN: excludePrivate with (100-N)% of pages
+ *              `visibility: private` (latent and dir only); a `type` suffix
+ *              (source10type) adds `type: 'note'`, which skips the walk.
  *   --k        10,50
  *   --modes    strict_order,relaxed_order (latent default: relaxed_order)
  *   --ef       shipped,40,100,200,400 (repo default: shipped). `shipped` is the
@@ -112,6 +115,7 @@ const MODES = list('modes', LATENT ? 'relaxed_order' : 'strict_order,relaxed_ord
 const MSTS = list('max-scan-tuples', 'shipped').map(v => (v === 'shipped' ? 'shipped' : Number(v))) as Array<'shipped' | number>;
 const EFS = list('ef', LATENT ? 'shipped,40,100,200,400' : 'shipped').map(v => (v === 'shipped' ? 'shipped' : Number(v))) as Array<'shipped' | number>;
 const FILTERS = list('filters', LATENT ? 'none,source10,source50,vis50,vis10' : 'source10,source50') as Group[];
+// A filter may also be `source10type` / `source50type`: the same scope plus `type: 'note'`, which skips the index walk.
 const KS = list('k', '10,50').map(Number);
 const STATES = list('states', LATENT ? 'fresh,analyze' : '');
 const BUILDS = list('builds', '');
@@ -128,6 +132,7 @@ const LATENT_PARAMS: LatentParams = {
   rank: Number(flag('latent-rank', String(LATENT_DEFAULTS.rank))),
   noise: Number(flag('latent-noise', String(LATENT_DEFAULTS.noise))),
   queryNoise: Number(flag('latent-query-noise', String(LATENT_DEFAULTS.queryNoise))),
+  sourceShares: list('source-shares', LATENT_DEFAULTS.sourceShares.join(',')).map(Number) as [number, number],
 };
 const ROOT = join(import.meta.dir, '../..');
 const adminUrl = process.env.DATABASE_URL;
@@ -269,8 +274,13 @@ let truth: Record<string, number[][]> = {};
 let queryVectors: Float32Array[] = [];
 let visState: Group | null = null;
 
-const filterOpts = (g: Group): SearchOpts =>
-  g === 'source10' ? { sourceIds: ['bench-a'] } : g === 'source50' ? { sourceIds: ['bench-a', 'bench-b'] } : g === 'vis50' || g === 'vis10' ? { excludePrivate: true } : {};
+/** `<group>type` adds `type: 'note'` (every bench page's type) to a group: the same truth, but the walk is skipped. */
+const truthGroup = (g: string): Group => g.replace(/type$/, '') as Group;
+const filterOpts = (g: string): SearchOpts => {
+  const base = truthGroup(g);
+  const opts: SearchOpts = base === 'source10' ? { sourceIds: ['bench-a'] } : base === 'source50' ? { sourceIds: ['bench-a', 'bench-b'] } : base === 'vis50' || base === 'vis10' ? { excludePrivate: true } : {};
+  return g.endsWith('type') ? { ...opts, type: 'note' } : opts;
+};
 
 async function exactPages(q: Float32Array, g: Group): Promise<number[]> {
   const exact = buildVectorSearchStatement({ dialect: 'postgres', embedding: q, limit: TRUTH_K, offset: 0, opts: { ...filterOpts(g), embeddingColumn: column } });
@@ -341,7 +351,7 @@ async function seedRepo(): Promise<void> {
 
 async function seedLatent(): Promise<void> {
   const params = LATENT_PARAMS;
-  const plan = planPages(CHUNKS, SEED);
+  const plan = planPages(CHUNKS, SEED, LATENT_PARAMS.sourceShares);
   const basis = buildBasis(params);
   const q = buildQueries(params, plan, basis, QUERIES);
   queryVectors = q.vectors;
@@ -545,7 +555,8 @@ async function seedDir(): Promise<void> {
   const order = Array.from({ length: K }, (_, k) => k).sort((a, b) => hashPage(SEED, a) - hashPage(SEED, b));
   const sourceOf = new Uint8Array(K);
   let filled = 0;
-  for (const k of order) { sourceOf[k] = filled < 0.1 * total ? 0 : filled < 0.5 * total ? 1 : 2; filled += clusterChunks[k]!; }
+  const [shareA, shareB] = LATENT_PARAMS.sourceShares;
+  for (const k of order) { sourceOf[k] = filled < shareA * total ? 0 : filled < (shareA + shareB) * total ? 1 : 2; filled += clusterChunks[k]!; }
   for (let p = 0; p < counts.length; p++) plan.source[p] = sourceOf[plan.topic[p]!]!;
   const share = (s: number) => Number((Array.from(plan.source).reduce((acc, src, p) => acc + (src <= s ? counts[p]! : 0), 0) / total).toFixed(3));
   results.corpusStats = { pages: counts.length, chunks: total, meanChunksPerPage: Number((total / counts.length).toFixed(2)), topics: K, source10Share: share(0), source50Share: share(1) };
@@ -680,10 +691,11 @@ async function grid(state: string, build: string, filters: Group[], efs: Array<'
   const cells: Cell[] = [];
   const variants = MODES.flatMap(mode => efs.flatMap(ef => (efs === EFS ? MSTS : ['shipped' as const]).map(mst => ({ mode, ef, mst }))));
   for (const g of filters) {
-    if (g.startsWith('vis')) await setVisibility(g, state === 'vacuum');
-    if (!truth[g]) {
-      truth[g] = [];
-      for (const q of queryVectors) truth[g]!.push(await exactPages(q, g));
+    if (g.startsWith('vis')) await setVisibility(truthGroup(g), state === 'vacuum');
+    const tg = truthGroup(g);
+    if (!truth[tg]) {
+      truth[tg] = [];
+      for (const q of queryVectors) truth[tg]!.push(await exactPages(q, tg));
     }
     for (const k of KS) {
       const search = async (i: number, mode: HnswIterativeScanMode, ef: 'shipped' | number, mst: 'shipped' | number = 'shipped') => {
@@ -701,8 +713,8 @@ async function grid(state: string, build: string, filters: Group[], efs: Array<'
       for (let i = 0; i < Math.min(5, nq); i++) for (const v of variants) await search(i, v.mode, v.ef, v.mst);
       const acc = variants.map(() => ({ ms: [] as number[], recall: [] as number[], recall10: [] as number[], short: 0, incomplete: 0, walk: 0, pool: 0, exactFallback: 0, attempts: 0 }));
       for (let i = 0; i < nq; i++) {
-        const t = new Set(truth[g]![i]!.slice(0, k));
-        const t10 = new Set(truth[g]![i]!.slice(0, 10));
+        const t = new Set(truth[tg]![i]!.slice(0, k));
+        const t10 = new Set(truth[tg]![i]!.slice(0, 10));
         const order = variants.map((_, j) => (j + i) % variants.length);
         for (const j of order) {
           const r = await search(i, variants[j]!.mode, variants[j]!.ef, variants[j]!.mst);
@@ -769,7 +781,7 @@ try {
   if (REUSE_DB) {
     const saved = JSON.parse(readFileSync(join(OUT, 'truth.json'), 'utf8')) as { truth: Record<string, number[][]>; corpusStats: Record<string, unknown> };
     truth = saved.truth; results.corpusStats = saved.corpusStats;
-    queryVectors = CORPUS === 'dir' ? readQueryCache(QUERIES)! : buildQueries(LATENT_PARAMS, planPages(CHUNKS, SEED), buildBasis(LATENT_PARAMS), QUERIES).vectors;
+    queryVectors = CORPUS === 'dir' ? readQueryCache(QUERIES)! : buildQueries(LATENT_PARAMS, planPages(CHUNKS, SEED, LATENT_PARAMS.sourceShares), buildBasis(LATENT_PARAMS), QUERIES).vectors;
     const [fm] = await engine.executeRaw<{ n: number }>(`SELECT count(*) FILTER (WHERE frontmatter->>'visibility' = 'private')::int AS n FROM pages`);
     visState = fm!.n > Number(results.corpusStats.pages) * 0.7 ? 'vis10' : 'vis50';
     const [t] = await engine.executeRaw<{ t: string }>(`SELECT format_type(atttypid, atttypmod) AS t FROM pg_attribute WHERE attrelid = 'content_chunks'::regclass AND attname = 'embedding'`);

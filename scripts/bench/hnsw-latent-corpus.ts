@@ -42,10 +42,13 @@ export interface LatentParams {
   /** Variance shares before normalization. */
   mean: number; superTopic: number; topic: number; page: number; chunk: number; noise: number;
   queryShift: number; queryNoise: number;
+  /** Page shares of bench-a and bench-b (bench-c holds the rest): the `source10` filter is bench-a, `source50` is bench-a plus bench-b. */
+  sourceShares: [number, number];
 }
 
 export const LATENT_DEFAULTS: Omit<LatentParams, 'chunks' | 'dims' | 'seed'> = {
   rank: 16, mean: 0.25, superTopic: 0.2, topic: 0.25, page: 0.35, chunk: 0.25, noise: 0.15, queryShift: 0.25, queryNoise: 0.3,
+  sourceShares: [0.1, 0.4],
 };
 
 export const SUPER_TOPICS = 64;
@@ -90,22 +93,22 @@ export function topicCount(chunks: number): number {
 }
 
 /** Per-page attributes, drawn first from the page's own stream (pageStream replays them). */
-function pageHeader(seed: number, p: number, topics: number) {
+function pageHeader(seed: number, p: number, topics: number, shares: [number, number] = LATENT_DEFAULTS.sourceShares) {
   const rng = new Rng(hash32(seed, p, 0x9a6e));
   const chunkCount = Math.min(MAX_CHUNKS_PER_PAGE, 1 + Math.floor(-Math.log(1 - rng.next()) * 6.5));
   const topic = Math.floor(rng.next() * topics);
   const s = rng.next();
-  const source = s < 0.1 ? 0 : s < 0.5 ? 1 : 2;
+  const source = s < shares[0] ? 0 : s < shares[0] + shares[1] ? 1 : 2;
   const vis = rng.next();
   return { rng, chunkCount, topic, source, vis };
 }
 
-export function planPages(chunks: number, seed: number): PagePlan {
+export function planPages(chunks: number, seed: number, shares: [number, number] = LATENT_DEFAULTS.sourceShares): PagePlan {
   const topics = topicCount(chunks);
   const starts: number[] = [], counts: number[] = [], topicOf: number[] = [], sources: number[] = [], vis: number[] = [];
   let total = 0;
   for (let p = 0; total < chunks; p++) {
-    const h = pageHeader(seed, p, topics);
+    const h = pageHeader(seed, p, topics, shares);
     const n = Math.min(h.chunkCount, chunks - total);
     starts.push(total); counts.push(n); topicOf.push(h.topic); sources.push(h.source); vis.push(h.vis);
     total += n;
