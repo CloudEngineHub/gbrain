@@ -49,6 +49,7 @@ Warm reads on a 4 vCPU box, Postgres 16 + pgvector 0.8.7, synthetic brains (5,00
 - `test/e2e/private-visibility-plan-postgres.test.ts` proves both spellings of the private-page rule hide exactly the same pages, and that the planner's cost per page now stays under `jit_above_cost / 500`. A precondition fails if the old spelling would also pass.
 - `test/e2e/vector-plan-real-column-postgres.test.ts` checks the walk uses `idx_chunks_embedding` for remote readers and 50- and 200-result windows. `test/held-read-signals.test.ts` checks the held-page read probes `pages_pkey` (it fails on the text-cast join). `test/page-snapshot-exact-first.test.ts` covers exact hits, alias fallback, an exact page in another source, deleted and private exact pages, the ambiguity check and a miss.
 - `test/bounded-child-exec.test.ts`: the SIGTERM test installs the child's trap before it writes the lockfile and waits for the lockfile instead of sleeping 200 ms; on a loaded runner the child had not started yet (forced probe: delaying the child 0.5 s fails the old test and passes the new one).
+- `test/no-allow-protected-flag.test.ts` skips a file or directory that another test deletes while the guard walks `test/` (ENOENT), instead of failing the run (forced probe: a dangling `test/.probe-vanished.md` fails the old guard and passes the new one).
 
 ## [0.60.123.0] - 2026-10-09
 
